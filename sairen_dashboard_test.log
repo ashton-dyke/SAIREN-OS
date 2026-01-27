@@ -1,0 +1,130 @@
+[2m2026-01-25T22:27:50.457832Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T22:27:50.457864Z[0m [32m INFO[0m   SAIREN-OS - Strategic AI Rig ENgine
+[2m2026-01-25T22:27:50.457865Z[0m [32m INFO[0m   Drilling Operational Intelligence System
+[2m2026-01-25T22:27:50.457866Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T22:27:50.457867Z[0m [32m INFO[0m 
+[2m2026-01-25T22:27:50.457874Z[0m [32m INFO[0m 🚀 Starting SAIREN-OS Drilling Intelligence Pipeline
+[2m2026-01-25T22:27:50.457875Z[0m [32m INFO[0m 
+[2m2026-01-25T22:27:50.457876Z[0m [32m INFO[0m    Phase 1: WITS Ingestion (continuous)
+[2m2026-01-25T22:27:50.457876Z[0m [32m INFO[0m    Phase 2: Basic Physics (MSE, d-exponent, etc.)
+[2m2026-01-25T22:27:50.457877Z[0m [32m INFO[0m    Phase 3: Tactical Agent → AdvisoryTicket
+[2m2026-01-25T22:27:50.457878Z[0m [32m INFO[0m    Phase 4: History Buffer (60 packets)
+[2m2026-01-25T22:27:50.457878Z[0m [32m INFO[0m    Phase 5: Strategic Agent → verify_ticket()
+[2m2026-01-25T22:27:50.457879Z[0m [32m INFO[0m    Phase 6: Context Lookup
+[2m2026-01-25T22:27:50.457880Z[0m [32m INFO[0m    Phase 7: LLM Explainer
+[2m2026-01-25T22:27:50.457880Z[0m [32m INFO[0m    Phase 8: Orchestrator Voting (4 Specialists)
+[2m2026-01-25T22:27:50.457881Z[0m [32m INFO[0m    Phase 9: Storage
+[2m2026-01-25T22:27:50.457882Z[0m [32m INFO[0m    Phase 10: Dashboard API
+[2m2026-01-25T22:27:50.457882Z[0m [32m INFO[0m 
+[2m2026-01-25T22:27:50.457884Z[0m [32m INFO[0m 📥 Input: stdin (JSON WITS packets from simulation)
+[2m2026-01-25T22:27:50.457888Z[0m [32m INFO[0m ⏱️  Stdin mode: processing packets as they arrive
+[2m2026-01-25T22:27:50.457889Z[0m [32m INFO[0m 
+[2m2026-01-25T22:27:50.457890Z[0m [32m INFO[0m ✓ Application state initialized
+[2m2026-01-25T22:27:50.457890Z[0m [32m INFO[0m 💾 Initializing analysis storage...
+[2m2026-01-25T22:27:50.461560Z[0m [32m INFO[0m Analysis storage opened at "./data/sairen.db"
+[2m2026-01-25T22:27:50.461580Z[0m [32m INFO[0m ✓ Analysis storage initialized
+[2m2026-01-25T22:27:50.461582Z[0m [32m INFO[0m 📊 Initializing dynamic threshold system for: WITS
+[2m2026-01-25T22:27:50.461585Z[0m [32m INFO[0m 📝 No existing thresholds found, starting fresh baseline learning
+[2m2026-01-25T22:27:50.461588Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:mse
+[2m2026-01-25T22:27:50.461592Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:d_exponent
+[2m2026-01-25T22:27:50.461593Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:dxc
+[2m2026-01-25T22:27:50.461594Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:flow_balance
+[2m2026-01-25T22:27:50.461595Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:spp
+[2m2026-01-25T22:27:50.461596Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:torque
+[2m2026-01-25T22:27:50.461597Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:rop
+[2m2026-01-25T22:27:50.461598Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:wob
+[2m2026-01-25T22:27:50.461599Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:rpm
+[2m2026-01-25T22:27:50.461600Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:ecd
+[2m2026-01-25T22:27:50.461601Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:pit_volume
+[2m2026-01-25T22:27:50.461602Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:gas_units
+[2m2026-01-25T22:27:50.461603Z[0m [32m INFO[0m    Started learning for WITS drilling metrics
+[2m2026-01-25T22:27:50.461608Z[0m [32m INFO[0m 📚 Mode: BaselineLearning (accumulating samples)
+[2m2026-01-25T22:27:50.461609Z[0m [32m INFO[0m 🧠 Initializing LLM-enabled pipeline with dynamic thresholds...
+[2m2026-01-25T22:27:50.461610Z[0m [32m INFO[0m Initializing Pipeline Coordinator with LLM and dynamic thresholds (learning: true, equipment: WITS)
+[2m2026-01-25T22:27:50.461611Z[0m [32m INFO[0m Loading Strategic LLM...
+[2m2026-01-25T22:27:50.461613Z[0m [32m INFO[0m Initializing Strategic LLM for drilling intelligence [3mmodel_path[0m[2m=[0m/home/ashton/sairen-multiagent/models/qwen2.5-7b-instruct-q4_k_m.gguf
+[2m2026-01-25T22:27:50.461614Z[0m [32m INFO[0m Loading GGUF model with mistral.rs backend [3mmodel_path[0m[2m=[0m/home/ashton/sairen-multiagent/models/qwen2.5-7b-instruct-q4_k_m.gguf
+[2m2026-01-25T22:27:50.461620Z[0m [32m INFO[0m CUDA detected, will attempt GPU inference
+[2m2026-01-25T22:27:50.630502Z[0m [32m INFO[0m Loading model with explicit sequence cleanup enabled (VRAM leak prevention)
+[2m2026-01-25T22:27:50.630639Z[0m [32m INFO[0m Could not load token at "/home/ashton/.cache/huggingface/token", using no HF token.
+[2m2026-01-25T22:27:50.630716Z[0m [32m INFO[0m Could not load token at "/home/ashton/.cache/huggingface/token", using no HF token.
+[2m2026-01-25T22:27:50.630727Z[0m [32m INFO[0m Loading `qwen2.5-7b-instruct-q4_k_m.gguf` locally at `/home/ashton/sairen-multiagent/models/qwen2.5-7b-instruct-q4_k_m.gguf`
+[2m2026-01-25T22:27:50.630734Z[0m [32m INFO[0m GGUF file(s) ["/home/ashton/sairen-multiagent/models/qwen2.5-7b-instruct-q4_k_m.gguf"]
+[2m2026-01-25T22:27:50.630745Z[0m [32m INFO[0m Prompt chunk size is 1024.
+[2m2026-01-25T22:27:50.777840Z[0m [32m INFO[0m Model config:
+general.architecture: qwen2
+general.base_model.0.name: Qwen2.5 7B
+general.base_model.0.organization: Qwen
+general.base_model.0.repo_url: https://huggingface.co/Qwen/Qwen2.5-7B
+general.base_model.count: 1
+general.basename: Qwen2.5
+general.file_type: 15
+general.finetune: Instruct
+general.languages: en
+general.license: apache-2.0
+general.license.link: https://huggingface.co/Qwen/Qwen2.5-7B-Instruct/blob/main/LICENSE
+general.name: Qwen2.5 7B Instruct
+general.quantization_version: 2
+general.size_label: 7B
+general.tags: chat, text-generation
+general.type: model
+quantize.imatrix.chunks_count: 128
+quantize.imatrix.dataset: /training_dir/calibration_datav3.txt
+quantize.imatrix.entries_count: 196
+quantize.imatrix.file: /models_out/Qwen2.5-7B-Instruct-GGUF/Qwen2.5-7B-Instruct.imatrix
+qwen2.attention.head_count: 28
+qwen2.attention.head_count_kv: 4
+qwen2.attention.layer_norm_rms_epsilon: 0.000001
+qwen2.block_count: 28
+qwen2.context_length: 32768
+qwen2.embedding_length: 3584
+qwen2.feed_forward_length: 18944
+qwen2.rope.freq_base: 1000000
+[2m2026-01-25T22:27:50.788927Z[0m [32m INFO[0m Detected minimum CUDA compute capability 12
+[2m2026-01-25T22:27:50.843861Z[0m [32m INFO[0m DType selected is BF16.
+[2m2026-01-25T22:27:50.918456Z[0m [32m INFO[0m Using automatic device mapping parameters: text[max_seq_len: 4096, max_batch_size: 1].
+[2m2026-01-25T22:27:50.918504Z[0m [32m INFO[0m Model has 28 repeating layers.
+[2m2026-01-25T22:27:50.918510Z[0m [32m INFO[0m Loading model according to the following repeating layer mappings:
+[2m2026-01-25T22:27:50.918562Z[0m [32m INFO[0m Layers 0-27: cuda[0] (16 GB)
+[2m2026-01-25T22:27:51.041316Z[0m [32m INFO[0m GGUF tokenizer model is `gpt2`, kind: `Bpe`, num tokens: 152064, num special tokens 421, num added tokens: 0, num merges: 151387, num scores: 0
+[2m2026-01-25T22:27:51.047321Z[0m [32m INFO[0m Discovered and using GGUF chat template: `{%- if tools %}\n    {{- '<|im_start|>system\n' }}\n    {%- if messages[0]['role'] == 'system' %}\n        {{- messages[0]['content'] }}\n    {%- else %}\n        {{- 'You are Qwen, created by Alibaba Cloud. You are a helpful assistant.' }}\n    {%- endif %}\n    {{- "\n\n# Tools\n\nYou may call one or more functions to assist with the user query.\n\nYou are provided with function signatures within <tools></tools> XML tags:\n<tools>" }}\n    {%- for tool in tools %}\n        {{- "\n" }}\n        {{- tool | tojson }}\n    {%- endfor %}\n    {{- "\n</tools>\n\nFor each function call, return a json object with function name and arguments within <tool_call></tool_call> XML tags:\n<tool_call>\n{\"name\": <function-name>, \"arguments\": <args-json-object>}\n</tool_call><|im_end|>\n" }}\n{%- else %}\n    {%- if messages[0]['role'] == 'system' %}\n        {{- '<|im_start|>system\n' + messages[0]['content'] + '<|im_end|>\n' }}\n    {%- else %}\n        {{- '<|im_start|>system\nYou are Qwen, created by Alibaba Cloud. You are a helpful assistant.<|im_end|>\n' }}\n    {%- endif %}\n{%- endif %}\n{%- for message in messages %}\n    {%- if (message.role == "user") or (message.role == "system" and not loop.first) or (message.role == "assistant" and not message.tool_calls) %}\n        {{- '<|im_start|>' + message.role + '\n' + message.content + '<|im_end|>' + '\n' }}\n    {%- elif message.role == "assistant" %}\n        {{- '<|im_start|>' + message.role }}\n        {%- if message.content %}\n            {{- '\n' + message.content }}\n        {%- endif %}\n        {%- for tool_call in message.tool_calls %}\n            {%- if tool_call.function is defined %}\n                {%- set tool_call = tool_call.function %}\n            {%- endif %}\n            {{- '\n<tool_call>\n{"name": "' }}\n            {{- tool_call.name }}\n            {{- '", "arguments": ' }}\n            {{- tool_call.arguments | tojson }}\n            {{- '}\n</tool_call>' }}\n        {%- endfor %}\n        {{- '<|im_end|>\n' }}\n    {%- elif message.role == "tool" %}\n        {%- if (loop.index0 == 0) or (messages[loop.index0 - 1].role != "tool") %}\n            {{- '<|im_start|>user' }}\n        {%- endif %}\n        {{- '\n<tool_response>\n' }}\n        {{- message.content }}\n        {{- '\n</tool_response>' }}\n        {%- if loop.last or (messages[loop.index0 + 1].role != "tool") %}\n            {{- '<|im_end|>\n' }}\n        {%- endif %}\n    {%- endif %}\n{%- endfor %}\n{%- if add_generation_prompt %}\n    {{- '<|im_start|>assistant\n' }}\n{%- endif %}\n`
+[2m2026-01-25T22:27:51.058182Z[0m [32m INFO[0m Detected minimum CUDA compute capability 12
+[2m2026-01-25T22:27:51.058427Z[0m [32m INFO[0m DType selected is BF16.
+[2m2026-01-25T22:27:51.934334Z[0m [32m INFO[0m Using literal chat template.
+[2m2026-01-25T22:27:52.352029Z[0m [32m INFO[0m bos_toks = "<|endoftext|>", eos_toks = "<|im_end|>", unk_tok = `None`
+[2m2026-01-25T22:27:52.362843Z[0m [32m INFO[0m Pipeline input modalities are [📝 Text]
+[2m2026-01-25T22:27:52.362859Z[0m [32m INFO[0m Pipeline output modalities are [📝 Text]
+[2m2026-01-25T22:27:52.362934Z[0m [32m INFO[0m Beginning dummy run.
+[2m2026-01-25T22:27:52.365007Z[0m [32m INFO[0m PrefixCacherV2 is enabled. Expect higher multi-turn throughput for both text and multimodal.
+[2m2026-01-25T22:27:52.422063Z[0m [32m INFO[0m Dummy run completed in 0.059124566s.
+[2m2026-01-25T22:27:52.422086Z[0m [32m INFO[0m ✓ Mistral.rs model loaded successfully with PagedAttention (cache leak prevention enabled) [3mload_time_secs[0m[2m=[0m1.96046781539917 [3muses_gpu[0m[2m=[0mtrue [3mmodel_family[0m[2m=[0mQwen [3mpaged_attention[0m[2m=[0mtrue [3mblock_size[0m[2m=[0m32
+[2m2026-01-25T22:27:52.422090Z[0m [32m INFO[0m Strategic LLM initialized for drilling advisory
+[2m2026-01-25T22:27:52.422092Z[0m [32m INFO[0m Strategic LLM loaded successfully
+[2m2026-01-25T22:27:52.422093Z[0m [32m INFO[0m Created tactical agent [3mequipment_id[0m[2m=[0mWITS [3mmode[0m[2m=[0mBaseline Learning
+[2m2026-01-25T22:27:52.422096Z[0m [32m INFO[0m ✓ LLM and dynamic thresholds loaded successfully
+[2m2026-01-25T22:27:52.422097Z[0m [32m INFO[0m 🌐 Starting HTTP server on 0.0.0.0:8080...
+[2m2026-01-25T22:27:52.422207Z[0m [32m INFO[0m ✓ HTTP server listening on 0.0.0.0:8080
+[2m2026-01-25T22:27:52.422209Z[0m [32m INFO[0m 
+[2m2026-01-25T22:27:52.422214Z[0m [32m INFO[0m 🎯 Dashboard available at: http://0.0.0.0:8080
+[2m2026-01-25T22:27:52.422215Z[0m [32m INFO[0m 
+[2m2026-01-25T22:27:52.422216Z[0m [32m INFO[0m 🔒 Supervisor: Initializing task monitoring
+[2m2026-01-25T22:27:52.422223Z[0m [32m INFO[0m 🔒 Supervisor: All tasks spawned, monitoring...
+[2m2026-01-25T22:27:52.422292Z[0m [32m INFO[0m [HttpServer] Task starting
+[2m2026-01-25T22:27:52.422312Z[0m [32m INFO[0m [PacketProcessor] Task starting
+[2m2026-01-25T22:27:52.422316Z[0m [32m INFO[0m 📊 Processing WITS packets from stdin...
+[2m2026-01-25T22:27:52.422318Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T22:27:52.422306Z[0m [32m INFO[0m [WitsIngestion] Task starting
+[2m2026-01-25T22:27:52.422401Z[0m [32m INFO[0m [WitsIngestion] EOF reached after 0 packets
+[2m2026-01-25T22:27:52.422414Z[0m [32m INFO[0m [PacketProcessor] Packet channel closed
+[2m2026-01-25T22:27:52.422416Z[0m [32m INFO[0m 
+[2m2026-01-25T22:27:52.422418Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T22:27:52.422420Z[0m [32m INFO[0m 📊 FINAL STATISTICS
+[2m2026-01-25T22:27:52.422422Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T22:27:52.422424Z[0m [32m INFO[0m    Packets Processed:    0
+[2m2026-01-25T22:27:52.422425Z[0m [32m INFO[0m    Tickets Created:      0
+[2m2026-01-25T22:27:52.422427Z[0m [32m INFO[0m    Tickets Verified:     0
+[2m2026-01-25T22:27:52.422428Z[0m [32m INFO[0m    Tickets Rejected:     0
+[2m2026-01-25T22:27:52.422430Z[0m [32m INFO[0m    Advisories Generated: 0
+[2m2026-01-25T22:27:52.422431Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T22:27:52.422473Z[0m [32m INFO[0m 🔒 Supervisor: Task WitsIngestion completed normally
+[2m2026-01-25T22:27:52.422478Z[0m [32m INFO[0m 🔒 Supervisor: Task PacketProcessor completed normally

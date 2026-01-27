@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Critical Reports - SAIREN-OS</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --border-color: #30363d;
+            --accent-color: #1f6feb;
+            --accent-red: #f85149;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        .container {
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+            padding: 20px;
+        }
+
+        .header {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 16px 24px;
+            margin-bottom: 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }
+
+        .header-content h1 {
+            font-size: 24px;
+            font-weight: 600;
+            color: var(--text-primary);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+
+        .header-content h1::before {
+            content: '';
+            width: 12px;
+            height: 12px;
+            background: var(--accent-red);
+            border-radius: 50%;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+
+        .header-content p {
+            color: var(--text-secondary);
+            font-size: 13px;
+            margin-top: 4px;
+        }
+
+        .back-btn {
+            padding: 10px 20px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s;
+        }
+
+        .back-btn:hover {
+            background: #1168d8;
+            transform: translateY(-1px);
+        }
+
+        .main-content {
+            display: flex;
+            gap: 20px;
+            flex: 1;
+            min-height: 0;
+        }
+
+        .reports-list {
+            width: 400px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            flex-shrink: 0;
+        }
+
+        .list-header {
+            padding: 16px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .list-header h2 {
+            font-size: 14px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+        }
+
+        .report-count {
+            background: var(--accent-red);
+            color: white;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .reports-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 8px;
+        }
+
+        .report-item {
+            padding: 12px 16px;
+            border-radius: 6px;
+            cursor: pointer;
+            margin-bottom: 4px;
+            border: 1px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .report-item:hover {
+            background: var(--bg-tertiary);
+        }
+
+        .report-item.selected {
+            background: var(--bg-tertiary);
+            border-color: var(--accent-red);
+        }
+
+        .report-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 6px;
+        }
+
+        .report-item-id {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent-red);
+        }
+
+        .report-item-time {
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .report-item-trigger {
+            font-size: 13px;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .report-detail {
+            flex: 1;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+
+        .detail-header {
+            padding: 16px 24px;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .detail-header h2 {
+            font-size: 18px;
+            font-weight: 600;
+        }
+
+        .pdf-btn {
+            padding: 8px 16px;
+            background: var(--accent-green);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            transition: all 0.2s;
+        }
+
+        .pdf-btn:hover {
+            background: #2ea043;
+        }
+
+        .detail-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 24px;
+        }
+
+        .report-section {
+            margin-bottom: 24px;
+        }
+
+        .section-title {
+            font-size: 11px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            padding-bottom: 8px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .info-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 12px;
+        }
+
+        .info-item {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .info-label {
+            font-size: 11px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .info-value {
+            font-size: 16px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .info-value.critical {
+            color: var(--accent-red);
+        }
+
+        .info-value.warning {
+            color: var(--accent-yellow);
+        }
+
+        .trigger-box {
+            background: rgba(248, 81, 73, 0.1);
+            border: 1px solid var(--accent-red);
+            border-radius: 8px;
+            padding: 16px;
+        }
+
+        .trigger-title {
+            font-size: 12px;
+            font-weight: 600;
+            color: var(--accent-red);
+            text-transform: uppercase;
+            margin-bottom: 12px;
+        }
+
+        .trigger-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 16px;
+        }
+
+        .trigger-item {
+            text-align: center;
+        }
+
+        .trigger-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .trigger-value {
+            font-size: 20px;
+            font-weight: 700;
+            color: var(--accent-red);
+        }
+
+        .params-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+
+        .param-item {
+            background: var(--bg-tertiary);
+            padding: 10px;
+            border-radius: 6px;
+            text-align: center;
+        }
+
+        .param-label {
+            font-size: 10px;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            margin-bottom: 4px;
+        }
+
+        .param-value {
+            font-size: 14px;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .analysis-text {
+            background: var(--bg-tertiary);
+            padding: 16px;
+            border-radius: 8px;
+            font-size: 14px;
+            line-height: 1.7;
+            white-space: pre-wrap;
+        }
+
+        .signature-box {
+            background: var(--bg-tertiary);
+            border: 1px dashed var(--border-color);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .signature-row {
+            display: flex;
+            margin-bottom: 8px;
+        }
+
+        .signature-label {
+            width: 120px;
+            color: var(--text-secondary);
+        }
+
+        .signature-value {
+            color: var(--text-primary);
+            word-break: break-all;
+        }
+
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-secondary);
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .votes-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .vote-item {
+            background: var(--bg-tertiary);
+            padding: 10px 12px;
+            border-radius: 6px;
+            font-size: 13px;
+        }
+
+        /* Print styles for PDF */
+        @media print {
+            body {
+                background: white;
+                color: black;
+            }
+            .header, .reports-list, .pdf-btn, .back-btn {
+                display: none !important;
+            }
+            .main-content {
+                display: block;
+            }
+            .report-detail {
+                border: none;
+                background: white;
+            }
+            .detail-content {
+                padding: 0;
+            }
+            .info-item, .param-item, .trigger-box, .analysis-text, .signature-box {
+                background: #f5f5f5;
+                border: 1px solid #ddd;
+            }
+            .section-title {
+                color: #333;
+                border-color: #ddd;
+            }
+            .info-label, .param-label, .trigger-label, .signature-label {
+                color: #666;
+            }
+            .info-value, .param-value, .signature-value {
+                color: #000;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <div class="header-content">
+                <h1>Critical Incident Reports</h1>
+                <p>Historical log of critical severity alerts requiring attention</p>
+            </div>
+            <a href="/" class="back-btn">
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M7.78 12.53a.75.75 0 0 1-1.06 0L2.47 8.28a.75.75 0 0 1 0-1.06l4.25-4.25a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042L4.81 7h7.44a.75.75 0 0 1 0 1.5H4.81l2.97 2.97a.75.75 0 0 1 0 1.06Z"/>
+                </svg>
+                Back to Dashboard
+            </a>
+        </div>
+
+        <div class="main-content">
+            <div class="reports-list">
+                <div class="list-header">
+                    <h2>Reports</h2>
+                    <span class="report-count" id="reportCount">0</span>
+                </div>
+                <div class="reports-scroll" id="reportsList">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                        </svg>
+                        <p>No critical reports</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="report-detail">
+                <div class="detail-header">
+                    <h2 id="detailTitle">Select a Report</h2>
+                    <button class="pdf-btn" id="pdfBtn" style="display: none;" onclick="downloadPDF()">
+                        <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
+                            <path d="M2.75 14A1.75 1.75 0 0 1 1 12.25v-2.5a.75.75 0 0 1 1.5 0v2.5c0 .138.112.25.25.25h10.5a.25.25 0 0 0 .25-.25v-2.5a.75.75 0 0 1 1.5 0v2.5A1.75 1.75 0 0 1 13.25 14Z"/>
+                            <path d="M7.25 7.689V2a.75.75 0 0 1 1.5 0v5.689l1.97-1.969a.749.749 0 1 1 1.06 1.06l-3.25 3.25a.749.749 0 0 1-1.06 0L4.22 6.78a.749.749 0 1 1 1.06-1.06l1.97 1.969Z"/>
+                        </svg>
+                        Download PDF
+                    </button>
+                </div>
+                <div class="detail-content" id="detailContent">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M14 2H6c-1.1 0-2 .9-2 2v16c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm4 18H6V4h7v5h5v11z"/>
+                        </svg>
+                        <p>Select a report from the list to view details</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = '/api/v1';
+        let reports = [];
+        let selectedReport = null;
+
+        async function loadReports() {
+            try {
+                const response = await fetch(`${API_BASE}/reports/critical?limit=100`);
+                reports = await response.json();
+                renderReportsList();
+                document.getElementById('reportCount').textContent = reports.length;
+            } catch (error) {
+                console.error('Failed to load reports:', error);
+            }
+        }
+
+        function renderReportsList() {
+            const container = document.getElementById('reportsList');
+
+            if (reports.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+                        </svg>
+                        <p>No critical reports</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = reports.map((report, index) => `
+                <div class="report-item ${selectedReport === index ? 'selected' : ''}" onclick="selectReport(${index})">
+                    <div class="report-item-header">
+                        <span class="report-item-id">${report.report_id}</span>
+                        <span class="report-item-time">${formatTime(report.timestamp)}</span>
+                    </div>
+                    <div class="report-item-trigger">${report.trigger_parameter}: ${report.trigger_value.toFixed(1)}</div>
+                </div>
+            `).join('');
+        }
+
+        function selectReport(index) {
+            selectedReport = index;
+            renderReportsList();
+            renderReportDetail(reports[index]);
+            document.getElementById('pdfBtn').style.display = 'flex';
+        }
+
+        function renderReportDetail(report) {
+            const container = document.getElementById('detailContent');
+            document.getElementById('detailTitle').textContent = `Report ${report.report_id}`;
+
+            const dp = report.drilling_params;
+
+            container.innerHTML = `
+                <div class="report-section">
+                    <div class="section-title">Report Information</div>
+                    <div class="info-grid">
+                        <div class="info-item">
+                            <div class="info-label">Report ID</div>
+                            <div class="info-value">${report.report_id}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Incident Time</div>
+                            <div class="info-value">${report.timestamp_formatted}</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Severity</div>
+                            <div class="info-value critical">CRITICAL</div>
+                        </div>
+                        <div class="info-item">
+                            <div class="info-label">Risk Level</div>
+                            <div class="info-value warning">${report.risk_level}</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="report-section">
+                    <div class="section-title">Trigger Condition</div>
+                    <div class="trigger-box">
+                        <div class="trigger-title">Alert Triggered By</div>
+                        <div class="trigger-grid">
+                            <div class="trigger-item">
+                                <div class="trigger-label">Parameter</div>
+                                <div class="trigger-value" style="font-size: 14px;">${report.trigger_parameter}</div>
+                            </div>
+                            <div class="trigger-item">
+                                <div class="trigger-label">Value</div>
+                                <div class="trigger-value">${report.trigger_value.toFixed(1)}</div>
+                            </div>
+                            <div class="trigger-item">
+                                <div class="trigger-label">Threshold</div>
+                                <div class="trigger-value" style="color: var(--accent-yellow);">${report.threshold_value > 0 ? '±' : ''}${report.threshold_value.toFixed(1)}</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="report-section">
+                    <div class="section-title">Drilling Parameters at Time of Alert</div>
+                    <div class="params-grid">
+                        <div class="param-item">
+                            <div class="param-label">Bit Depth</div>
+                            <div class="param-value">${dp.bit_depth.toFixed(1)} m</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">ROP</div>
+                            <div class="param-value">${dp.rop.toFixed(2)} m/hr</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">WOB</div>
+                            <div class="param-value">${dp.wob.toFixed(1)} klbs</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">RPM</div>
+                            <div class="param-value">${dp.rpm.toFixed(0)}</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">Torque</div>
+                            <div class="param-value">${dp.torque.toFixed(1)} kN.m</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">Flow In</div>
+                            <div class="param-value">${dp.flow_in.toFixed(0)} gpm</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">Flow Out</div>
+                            <div class="param-value">${dp.flow_out.toFixed(0)} gpm</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">Flow Balance</div>
+                            <div class="param-value" style="color: ${Math.abs(dp.flow_balance) > 10 ? 'var(--accent-red)' : 'inherit'}">${dp.flow_balance.toFixed(1)} gpm</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">SPP</div>
+                            <div class="param-value">${dp.spp.toFixed(0)} psi</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">Mud Weight</div>
+                            <div class="param-value">${dp.mud_weight.toFixed(2)} ppg</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">ECD</div>
+                            <div class="param-value">${dp.ecd.toFixed(2)} ppg</div>
+                        </div>
+                        <div class="param-item">
+                            <div class="param-label">MSE Efficiency</div>
+                            <div class="param-value">${dp.mse_efficiency.toFixed(0)}%</div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="report-section">
+                    <div class="section-title">AI Analysis</div>
+                    <div class="analysis-text">${report.reasoning}</div>
+                </div>
+
+                <div class="report-section">
+                    <div class="section-title">Recommendation</div>
+                    <div class="analysis-text">${report.recommendation}</div>
+                </div>
+
+                <div class="report-section">
+                    <div class="section-title">Specialist Votes</div>
+                    <div class="votes-list">
+                        ${report.votes_summary.map(v => `<div class="vote-item">${v}</div>`).join('')}
+                    </div>
+                </div>
+
+                <div class="report-section">
+                    <div class="section-title">Digital Signature</div>
+                    <div class="signature-box">
+                        <div class="signature-row">
+                            <span class="signature-label">Content Hash:</span>
+                            <span class="signature-value">${report.digital_signature}</span>
+                        </div>
+                        <div class="signature-row">
+                            <span class="signature-label">Signed By:</span>
+                            <span class="signature-value">SAIREN-OS v1.0</span>
+                        </div>
+                        <div class="signature-row">
+                            <span class="signature-label">Signature Time:</span>
+                            <span class="signature-value">${report.signature_timestamp}</span>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function formatTime(timestamp) {
+            const date = new Date(timestamp * 1000);
+            return date.toLocaleString();
+        }
+
+        function downloadPDF() {
+            window.print();
+        }
+
+        // Load reports on page load
+        loadReports();
+
+        // Refresh every 30 seconds
+        setInterval(loadReports, 30000);
+    </script>
+</body>
+</html>

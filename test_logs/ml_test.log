@@ -1,0 +1,194 @@
+[2m2026-01-27T16:39:29.149473Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-27T16:39:29.149502Z[0m [32m INFO[0m   SAIREN-OS - Strategic AI Rig ENgine
+[2m2026-01-27T16:39:29.149508Z[0m [32m INFO[0m   Drilling Operational Intelligence System
+[2m2026-01-27T16:39:29.149514Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-27T16:39:29.149519Z[0m [32m INFO[0m 
+[2m2026-01-27T16:39:29.149544Z[0m [32m INFO[0m 🚀 Starting SAIREN-OS Drilling Intelligence Pipeline
+[2m2026-01-27T16:39:29.149557Z[0m [32m INFO[0m 
+[2m2026-01-27T16:39:29.149561Z[0m [32m INFO[0m    Phase 1: WITS Ingestion (continuous)
+[2m2026-01-27T16:39:29.149564Z[0m [32m INFO[0m    Phase 2: Basic Physics (MSE, d-exponent, etc.)
+[2m2026-01-27T16:39:29.149568Z[0m [32m INFO[0m    Phase 3: Tactical Agent → AdvisoryTicket
+[2m2026-01-27T16:39:29.149571Z[0m [32m INFO[0m    Phase 4: History Buffer (60 packets)
+[2m2026-01-27T16:39:29.149574Z[0m [32m INFO[0m    Phase 5: Strategic Agent → verify_ticket()
+[2m2026-01-27T16:39:29.149577Z[0m [32m INFO[0m    Phase 6: Context Lookup
+[2m2026-01-27T16:39:29.149581Z[0m [32m INFO[0m    Phase 7: LLM Explainer
+[2m2026-01-27T16:39:29.149584Z[0m [32m INFO[0m    Phase 8: Orchestrator Voting (4 Specialists)
+[2m2026-01-27T16:39:29.149588Z[0m [32m INFO[0m    Phase 9: Storage
+[2m2026-01-27T16:39:29.149591Z[0m [32m INFO[0m    Phase 10: Dashboard API
+[2m2026-01-27T16:39:29.149594Z[0m [32m INFO[0m 
+[2m2026-01-27T16:39:29.149601Z[0m [32m INFO[0m 📥 Input: WITS TCP (Level 0 protocol from localhost:5000)
+[2m2026-01-27T16:39:29.149629Z[0m [32m INFO[0m ⏱️  WITS TCP mode: connecting to localhost:5000 for Level 0 data
+[2m2026-01-27T16:39:29.149639Z[0m [32m INFO[0m 
+[2m2026-01-27T16:39:29.149679Z[0m [32m INFO[0m ✓ Application state initialized
+[2m2026-01-27T16:39:29.149687Z[0m [32m INFO[0m 🔒 Acquiring process lock...
+[2m2026-01-27T16:39:29.149815Z[0m [32m INFO[0m ✓ Process lock acquired
+[2m2026-01-27T16:39:29.149824Z[0m [32m INFO[0m 💾 Initializing analysis storage...
+[2m2026-01-27T16:39:29.154284Z[0m [32m INFO[0m Analysis storage opened at "./data/sairen.db"
+[2m2026-01-27T16:39:29.154322Z[0m [32m INFO[0m ✓ Analysis storage initialized
+[2m2026-01-27T16:39:29.159007Z[0m [32m INFO[0m 📊 Initializing dynamic threshold system for: WITS-TCP
+[2m2026-01-27T16:39:29.159036Z[0m [32m INFO[0m 📝 No existing thresholds found, starting fresh baseline learning
+[2m2026-01-27T16:39:29.159043Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:mse
+[2m2026-01-27T16:39:29.159065Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:d_exponent
+[2m2026-01-27T16:39:29.159069Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:dxc
+[2m2026-01-27T16:39:29.159081Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:flow_balance
+[2m2026-01-27T16:39:29.159090Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:spp
+[2m2026-01-27T16:39:29.159093Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:torque
+[2m2026-01-27T16:39:29.159098Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:rop
+[2m2026-01-27T16:39:29.159101Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:wob
+[2m2026-01-27T16:39:29.159106Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:rpm
+[2m2026-01-27T16:39:29.159110Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:ecd
+[2m2026-01-27T16:39:29.159114Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:pit_volume
+[2m2026-01-27T16:39:29.159118Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS-TCP:gas_units
+[2m2026-01-27T16:39:29.159122Z[0m [32m INFO[0m    Started learning for WITS drilling metrics
+[2m2026-01-27T16:39:29.159126Z[0m [32m INFO[0m 📚 Mode: BaselineLearning (accumulating samples)
+[2m2026-01-27T16:39:29.159129Z[0m [32m INFO[0m Initializing Pipeline Coordinator with dynamic thresholds (learning: true, equipment: WITS-TCP)
+[2m2026-01-27T16:39:29.159151Z[0m [32m INFO[0m Created tactical agent [3mequipment_id[0m[2m=[0mWITS-TCP [3mmode[0m[2m=[0mBaseline Learning [3mcampaign[0m[2m=[0mPROD
+[2m2026-01-27T16:39:29.159596Z[0m [32m INFO[0m ✓ HTTP server listening on 0.0.0.0:8080
+[2m2026-01-27T16:39:29.159602Z[0m [32m INFO[0m 
+[2m2026-01-27T16:39:29.159605Z[0m [32m INFO[0m 🎯 Dashboard available at: http://0.0.0.0:8080
+[2m2026-01-27T16:39:29.159608Z[0m [32m INFO[0m 
+[2m2026-01-27T16:39:29.159610Z[0m [32m INFO[0m 🔒 Supervisor: Initializing task monitoring
+[2m2026-01-27T16:39:29.159640Z[0m [32m INFO[0m 🔒 Supervisor: All tasks spawned, monitoring...
+[2m2026-01-27T16:39:29.159662Z[0m [32m INFO[0m [HttpServer] Task starting
+[2m2026-01-27T16:39:29.159681Z[0m [32m INFO[0m [WitsTcpIngestion] Task starting - connecting to localhost:5000
+[2m2026-01-27T16:39:29.159693Z[0m [32m INFO[0m [PacketProcessor] Task starting
+[2m2026-01-27T16:39:29.159695Z[0m [32m INFO[0m [MLScheduler] Task starting with interval 3600s
+[2m2026-01-27T16:39:29.159702Z[0m [32m INFO[0m 📊 Processing WITS packets from TCP...
+[2m2026-01-27T16:39:29.159702Z[0m [32m INFO[0m [WitsTcpIngestion] Connecting to WITS server...
+[2m2026-01-27T16:39:29.159706Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-27T16:39:29.159711Z[0m [32m INFO[0m Connecting to WITS server [3maddress[0m[2m=[0mlocalhost:5000
+[2m2026-01-27T16:39:29.160801Z[0m [32m INFO[0m [MLScheduler] Skipping analysis: insufficient data (0 packets, need 100+)
+[2m2026-01-27T16:39:29.161317Z[0m [32m INFO[0m WITS connection established
+[2m2026-01-27T16:39:29.161332Z[0m [32m INFO[0m [WitsTcpIngestion] Connected successfully
+[2m2026-01-27T16:39:29.454734Z[0m [32m INFO[0m Operation transition detected [3mprevious[0m[2m=[0mSTATIC [3mcurrent[0m[2m=[0mDRILL [3mcampaign[0m[2m=[0mPROD [3mdepth[0m[2m=[0m0.0 [3mrpm[0m[2m=[0m43.2 [3mwob[0m[2m=[0m76.5 [3mtorque[0m[2m=[0m1.3 [3mrop[0m[2m=[0m0.02 [3mflow_in[0m[2m=[0m1094.0
+[2m2026-01-27T16:39:38.456343Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mLOW [3mefficiency[0m[2m=[0m100 [3mrisk[0m[2m=[0mLOW [3mvotes[0m[2m=[0m4
+[2m2026-01-27T16:39:38.456374Z[0m [32m INFO[0m Periodic 10-minute summary generated [3mcycle_ms[0m[2m=[0m0 [3manomaly_rate[0m[2m=[0m30.0 [3mavg_rop[0m[2m=[0m0.03699999999999999 [3mavg_mse[0m[2m=[0m2223.807586853013 [3mrisk_level[0m[2m=[0mLow
+[2m2026-01-27T16:39:38.456515Z[0m [32m INFO[0m 🎯 ADVISORY #1: Low | Efficiency: 100%
+[2m2026-01-27T16:39:38.456522Z[0m [32m INFO[0m    Recommendation: Continue monitoring drilling parameters.
+[2m2026-01-27T16:39:38.456526Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-27T16:39:38.456532Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.50 ppg, SPP st...
+[2m2026-01-27T16:39:38.456537Z[0m [32m INFO[0m    WellControl (30%): LOW - Well control parameters normal - flow balanced
+[2m2026-01-27T16:39:38.456541Z[0m [32m INFO[0m    Formation (20%): MEDIUM - Formation change detected - drilling into harde...
+[2m2026-01-27T16:39:38.456546Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-27T16:39:48.457205Z[0m [32m INFO[0m 📈 Progress: 20 packets | Advisories: 1 | Buffer: 20/60
+[2m2026-01-27T16:39:56.950102Z[0m [33m WARN[0m Strategic storage not available
+[2m2026-01-27T16:39:57.624692Z[0m [33m WARN[0m Strategic storage not available
+[2m2026-01-27T16:39:58.457957Z[0m [32m INFO[0m 📈 Progress: 30 packets | Advisories: 1 | Buffer: 30/60
+[2m2026-01-27T16:40:08.459000Z[0m [32m INFO[0m 📈 Progress: 40 packets | Advisories: 1 | Buffer: 40/60
+[2m2026-01-27T16:40:18.459883Z[0m [32m INFO[0m 📈 Progress: 50 packets | Advisories: 1 | Buffer: 50/60
+[2m2026-01-27T16:40:28.460770Z[0m [32m INFO[0m 📈 Progress: 60 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:40:38.461602Z[0m [32m INFO[0m 📈 Progress: 70 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:40:48.462516Z[0m [32m INFO[0m 📈 Progress: 80 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:40:58.463329Z[0m [32m INFO[0m 📈 Progress: 90 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:41:08.464153Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:mse [3mmean[0m[2m=[0m0.0 [3mstd[0m[2m=[0m0.0 [3mwarning[0m[2m=[0m0.003 [3mcritical[0m[2m=[0m0.005 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464185Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:d_exponent [3mmean[0m[2m=[0m0.0 [3mstd[0m[2m=[0m0.0 [3mwarning[0m[2m=[0m0.003 [3mcritical[0m[2m=[0m0.005 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464194Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:dxc [3mmean[0m[2m=[0m0.0 [3mstd[0m[2m=[0m0.0 [3mwarning[0m[2m=[0m0.003 [3mcritical[0m[2m=[0m0.005 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464202Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:flow_balance [3mmean[0m[2m=[0m-4.059999999999998 [3mstd[0m[2m=[0m48.66932744905598 [3mwarning[0m[2m=[0m141.94798234716794 [3mcritical[0m[2m=[0m239.28663724527988 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464213Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:spp [3mmean[0m[2m=[0m605.91 [3mstd[0m[2m=[0m84.0200907912248 [3mwarning[0m[2m=[0m857.9702723736743 [3mcritical[0m[2m=[0m1026.010453956124 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464222Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:torque [3mmean[0m[2m=[0m2.0127 [3mstd[0m[2m=[0m0.10278795472410009 [3mwarning[0m[2m=[0m2.3210638641723005 [3mcritical[0m[2m=[0m2.5266397736205004 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464231Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:rop [3mmean[0m[2m=[0m0.0486 [3mstd[0m[2m=[0m0.00449915817041635 [3mwarning[0m[2m=[0m0.06209747451124904 [3mcritical[0m[2m=[0m0.07109579085208174 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464239Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:wob [3mmean[0m[2m=[0m147.55099999999996 [3mstd[0m[2m=[0m10.048222064955905 [3mwarning[0m[2m=[0m177.69566619486767 [3mcritical[0m[2m=[0m197.7921103247795 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464248Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:rpm [3mmean[0m[2m=[0m116.16100000000003 [3mstd[0m[2m=[0m12.272626146235057 [3mwarning[0m[2m=[0m152.9788784387052 [3mcritical[0m[2m=[0m177.52413073117532 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464256Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:ecd [3mmean[0m[2m=[0m0.0 [3mstd[0m[2m=[0m0.0 [3mwarning[0m[2m=[0m0.003 [3mcritical[0m[2m=[0m0.005 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464263Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:pit_volume [3mmean[0m[2m=[0m100.0 [3mstd[0m[2m=[0m0.0 [3mwarning[0m[2m=[0m100.3 [3mcritical[0m[2m=[0m100.5 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464272Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS-TCP:gas_units [3mmean[0m[2m=[0m3.0579999999999994 [3mstd[0m[2m=[0m0.28219199710892445 [3mwarning[0m[2m=[0m3.904575991326773 [3mcritical[0m[2m=[0m4.468959985544622 [3msamples[0m[2m=[0m100
+[2m2026-01-27T16:41:08.464281Z[0m [32m INFO[0m Auto-locked baselines, switching to DynamicThresholds mode [3mequipment_id[0m[2m=[0mWITS-TCP [3mlocked_metrics[0m[2m=[0m["WITS-TCP:mse", "WITS-TCP:d_exponent", "WITS-TCP:dxc", "WITS-TCP:flow_balance", "WITS-TCP:spp", "WITS-TCP:torque", "WITS-TCP:rop", "WITS-TCP:wob", "WITS-TCP:rpm", "WITS-TCP:ecd", "WITS-TCP:pit_volume", "WITS-TCP:gas_units"]
+[2m2026-01-27T16:41:08.464297Z[0m [32m INFO[0m 📈 Progress: 100 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:41:18.465070Z[0m [32m INFO[0m 📈 Progress: 110 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:41:28.465998Z[0m [32m INFO[0m 📈 Progress: 120 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:41:38.466815Z[0m [32m INFO[0m 📈 Progress: 130 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:41:48.467739Z[0m [32m INFO[0m 📈 Progress: 140 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:41:58.468511Z[0m [32m INFO[0m 📈 Progress: 150 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:42:08.469217Z[0m [32m INFO[0m 📈 Progress: 160 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:42:18.470111Z[0m [32m INFO[0m 📈 Progress: 170 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:42:28.470990Z[0m [32m INFO[0m 📈 Progress: 180 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:42:38.471801Z[0m [32m INFO[0m 📈 Progress: 190 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:42:48.472642Z[0m [32m INFO[0m 📈 Progress: 200 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:42:58.473472Z[0m [32m INFO[0m 📈 Progress: 210 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:43:08.474380Z[0m [32m INFO[0m 📈 Progress: 220 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:43:18.475143Z[0m [32m INFO[0m 📈 Progress: 230 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:43:28.475998Z[0m [32m INFO[0m 📈 Progress: 240 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:43:38.476728Z[0m [32m INFO[0m 📈 Progress: 250 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:43:48.477400Z[0m [32m INFO[0m 📈 Progress: 260 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:43:58.478475Z[0m [32m INFO[0m 📈 Progress: 270 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:44:08.480216Z[0m [32m INFO[0m 📈 Progress: 280 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:44:18.481001Z[0m [32m INFO[0m 📈 Progress: 290 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:44:28.481883Z[0m [32m INFO[0m 📈 Progress: 300 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:44:38.482625Z[0m [32m INFO[0m 📈 Progress: 310 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:44:48.483569Z[0m [32m INFO[0m 📈 Progress: 320 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:44:58.484345Z[0m [32m INFO[0m 📈 Progress: 330 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:45:08.485161Z[0m [32m INFO[0m 📈 Progress: 340 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:45:18.485899Z[0m [32m INFO[0m 📈 Progress: 350 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:45:28.486715Z[0m [32m INFO[0m 📈 Progress: 360 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:45:38.487786Z[0m [32m INFO[0m 📈 Progress: 370 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:45:45.488808Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m1769532345 [3mdepth[0m[2m=[0m0.0 [3mstate[0m[2m=[0mDrilling [3mcategory[0m[2m=[0mHydraulics
+[2m2026-01-27T16:45:48.489470Z[0m [32m INFO[0m 📈 Progress: 380 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:45:56.490447Z[0m [32m INFO[0m Operation transition detected [3mprevious[0m[2m=[0mDRILL [3mcurrent[0m[2m=[0mCIRC [3mcampaign[0m[2m=[0mPROD [3mdepth[0m[2m=[0m0.0 [3mrpm[0m[2m=[0m8.2 [3mwob[0m[2m=[0m2.1 [3mtorque[0m[2m=[0m0.04 [3mrop[0m[2m=[0m0.0 [3mflow_in[0m[2m=[0m563.0
+[2m2026-01-27T16:45:58.490713Z[0m [32m INFO[0m 📈 Progress: 390 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:46:08.492197Z[0m [32m INFO[0m 📈 Progress: 400 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:46:18.493766Z[0m [32m INFO[0m 📈 Progress: 410 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:46:28.495521Z[0m [32m INFO[0m 📈 Progress: 420 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:46:32.495859Z[0m [32m INFO[0m Operation transition detected [3mprevious[0m[2m=[0mCIRC [3mcurrent[0m[2m=[0mDRILL [3mcampaign[0m[2m=[0mPROD [3mdepth[0m[2m=[0m0.0 [3mrpm[0m[2m=[0m24.0 [3mwob[0m[2m=[0m45.0 [3mtorque[0m[2m=[0m0.87 [3mrop[0m[2m=[0m0.01 [3mflow_in[0m[2m=[0m1000.0
+[2m2026-01-27T16:46:38.496951Z[0m [32m INFO[0m 📈 Progress: 430 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:46:43.497972Z[0m [32m INFO[0m Operation transition detected [3mprevious[0m[2m=[0mDRILL [3mcurrent[0m[2m=[0mCIRC [3mcampaign[0m[2m=[0mPROD [3mdepth[0m[2m=[0m0.0 [3mrpm[0m[2m=[0m7.9 [3mwob[0m[2m=[0m4.0 [3mtorque[0m[2m=[0m0.08 [3mrop[0m[2m=[0m0.0 [3mflow_in[0m[2m=[0m587.0
+[2m2026-01-27T16:46:48.498729Z[0m [32m INFO[0m 📈 Progress: 440 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:46:58.500673Z[0m [32m INFO[0m 📈 Progress: 450 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:47:08.501889Z[0m [32m INFO[0m 📈 Progress: 460 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:47:18.502710Z[0m [32m INFO[0m 📈 Progress: 470 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:47:28.503541Z[0m [32m INFO[0m 📈 Progress: 480 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:47:38.504544Z[0m [32m INFO[0m 📈 Progress: 490 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:47:48.505423Z[0m [32m INFO[0m 📈 Progress: 500 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:47:58.506040Z[0m [32m INFO[0m 📈 Progress: 510 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:48:08.507308Z[0m [32m INFO[0m 📈 Progress: 520 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:48:13.508095Z[0m [32m INFO[0m Operation transition detected [3mprevious[0m[2m=[0mCIRC [3mcurrent[0m[2m=[0mDRILL [3mcampaign[0m[2m=[0mPROD [3mdepth[0m[2m=[0m0.0 [3mrpm[0m[2m=[0m24.0 [3mwob[0m[2m=[0m45.0 [3mtorque[0m[2m=[0m0.89 [3mrop[0m[2m=[0m0.0 [3mflow_in[0m[2m=[0m1000.0
+[2m2026-01-27T16:48:18.509049Z[0m [32m INFO[0m 📈 Progress: 530 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:48:28.511263Z[0m [32m INFO[0m 📈 Progress: 540 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:48:38.512808Z[0m [32m INFO[0m 📈 Progress: 550 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:48:48.513599Z[0m [32m INFO[0m 📈 Progress: 560 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:48:58.514425Z[0m [32m INFO[0m 📈 Progress: 570 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:49:08.515296Z[0m [32m INFO[0m 📈 Progress: 580 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:49:18.516155Z[0m [32m INFO[0m 📈 Progress: 590 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:49:28.517039Z[0m [32m INFO[0m 📈 Progress: 600 packets | Advisories: 1 | Buffer: 60/60
+[2m2026-01-27T16:49:38.517984Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mLOW [3mefficiency[0m[2m=[0m100 [3mrisk[0m[2m=[0mLOW [3mvotes[0m[2m=[0m4
+[2m2026-01-27T16:49:38.518010Z[0m [32m INFO[0m Periodic 10-minute summary generated [3mcycle_ms[0m[2m=[0m0 [3manomaly_rate[0m[2m=[0m0.0 [3mavg_rop[0m[2m=[0m0.0 [3mavg_mse[0m[2m=[0m0.0 [3mrisk_level[0m[2m=[0mLow
+[2m2026-01-27T16:49:38.518111Z[0m [32m INFO[0m 🎯 ADVISORY #2: Low | Efficiency: 100%
+[2m2026-01-27T16:49:38.518116Z[0m [32m INFO[0m    Recommendation: Continue monitoring drilling parameters.
+[2m2026-01-27T16:49:38.518120Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-27T16:49:38.518126Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.50 ppg, SPP st...
+[2m2026-01-27T16:49:38.518129Z[0m [32m INFO[0m    WellControl (30%): LOW - Well control parameters normal - flow balanced
+[2m2026-01-27T16:49:38.518157Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-27T16:49:38.518163Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-27T16:49:48.518585Z[0m [32m INFO[0m 📈 Progress: 620 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:49:58.519570Z[0m [32m INFO[0m 📈 Progress: 630 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:50:08.520448Z[0m [32m INFO[0m 📈 Progress: 640 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:50:18.521367Z[0m [32m INFO[0m 📈 Progress: 650 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:50:28.522193Z[0m [32m INFO[0m 📈 Progress: 660 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:50:38.523030Z[0m [32m INFO[0m 📈 Progress: 670 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:50:48.523875Z[0m [32m INFO[0m 📈 Progress: 680 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:50:58.524880Z[0m [32m INFO[0m 📈 Progress: 690 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:51:08.525794Z[0m [32m INFO[0m 📈 Progress: 700 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:51:18.527536Z[0m [32m INFO[0m 📈 Progress: 710 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:51:28.529294Z[0m [32m INFO[0m 📈 Progress: 720 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:51:38.531272Z[0m [32m INFO[0m 📈 Progress: 730 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:51:48.533016Z[0m [32m INFO[0m 📈 Progress: 740 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:51:58.534895Z[0m [32m INFO[0m 📈 Progress: 750 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:52:08.536209Z[0m [32m INFO[0m 📈 Progress: 760 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:52:18.536930Z[0m [32m INFO[0m 📈 Progress: 770 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:52:28.538277Z[0m [32m INFO[0m 📈 Progress: 780 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:52:38.538985Z[0m [32m INFO[0m 📈 Progress: 790 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:52:48.540388Z[0m [32m INFO[0m 📈 Progress: 800 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:52:58.541377Z[0m [32m INFO[0m 📈 Progress: 810 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:53:08.542417Z[0m [32m INFO[0m 📈 Progress: 820 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:53:18.543422Z[0m [32m INFO[0m 📈 Progress: 830 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:53:28.544812Z[0m [32m INFO[0m 📈 Progress: 840 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:53:38.545977Z[0m [32m INFO[0m 📈 Progress: 850 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:53:48.547277Z[0m [32m INFO[0m 📈 Progress: 860 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:53:58.548548Z[0m [32m INFO[0m 📈 Progress: 870 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:54:08.550539Z[0m [32m INFO[0m 📈 Progress: 880 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:54:18.552633Z[0m [32m INFO[0m 📈 Progress: 890 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:54:28.554667Z[0m [32m INFO[0m 📈 Progress: 900 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:54:38.556353Z[0m [32m INFO[0m 📈 Progress: 910 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:54:48.558008Z[0m [32m INFO[0m 📈 Progress: 920 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:54:58.559157Z[0m [32m INFO[0m 📈 Progress: 930 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:55:08.560025Z[0m [32m INFO[0m 📈 Progress: 940 packets | Advisories: 2 | Buffer: 60/60
+[2m2026-01-27T16:55:18.561405Z[0m [32m INFO[0m 📈 Progress: 950 packets | Advisories: 2 | Buffer: 60/60

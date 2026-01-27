@@ -1,0 +1,1015 @@
+[2m2026-01-25T21:42:58.304213Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:42:58.304240Z[0m [32m INFO[0m   SAIREN-OS - Strategic AI Rig ENgine
+[2m2026-01-25T21:42:58.304242Z[0m [32m INFO[0m   Drilling Operational Intelligence System
+[2m2026-01-25T21:42:58.304243Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:42:58.304244Z[0m [32m INFO[0m 
+[2m2026-01-25T21:42:58.304255Z[0m [32m INFO[0m 🚀 Starting SAIREN-OS Drilling Intelligence Pipeline
+[2m2026-01-25T21:42:58.304256Z[0m [32m INFO[0m 
+[2m2026-01-25T21:42:58.304256Z[0m [32m INFO[0m    Phase 1: WITS Ingestion (continuous)
+[2m2026-01-25T21:42:58.304257Z[0m [32m INFO[0m    Phase 2: Basic Physics (MSE, d-exponent, etc.)
+[2m2026-01-25T21:42:58.304258Z[0m [32m INFO[0m    Phase 3: Tactical Agent → AdvisoryTicket
+[2m2026-01-25T21:42:58.304259Z[0m [32m INFO[0m    Phase 4: History Buffer (60 packets)
+[2m2026-01-25T21:42:58.304260Z[0m [32m INFO[0m    Phase 5: Strategic Agent → verify_ticket()
+[2m2026-01-25T21:42:58.304261Z[0m [32m INFO[0m    Phase 6: Context Lookup
+[2m2026-01-25T21:42:58.304262Z[0m [32m INFO[0m    Phase 7: LLM Explainer
+[2m2026-01-25T21:42:58.304262Z[0m [32m INFO[0m    Phase 8: Orchestrator Voting (4 Specialists)
+[2m2026-01-25T21:42:58.304263Z[0m [32m INFO[0m    Phase 9: Storage
+[2m2026-01-25T21:42:58.304264Z[0m [32m INFO[0m    Phase 10: Dashboard API
+[2m2026-01-25T21:42:58.304265Z[0m [32m INFO[0m 
+[2m2026-01-25T21:42:58.304265Z[0m [32m INFO[0m 📥 Input: stdin (JSON WITS packets from simulation)
+[2m2026-01-25T21:42:58.304273Z[0m [32m INFO[0m ⏱️  Stdin mode: processing packets as they arrive
+[2m2026-01-25T21:42:58.304274Z[0m [32m INFO[0m 
+[2m2026-01-25T21:42:58.304276Z[0m [32m INFO[0m ✓ Application state initialized
+[2m2026-01-25T21:42:58.304277Z[0m [32m INFO[0m 💾 Initializing analysis storage...
+[2m2026-01-25T21:42:58.307079Z[0m [32m INFO[0m Analysis storage opened at "./data/sairen.db"
+[2m2026-01-25T21:42:58.307093Z[0m [32m INFO[0m ✓ Analysis storage initialized
+[2m2026-01-25T21:42:58.307094Z[0m [32m INFO[0m 📊 Initializing dynamic threshold system for: WITS
+[2m2026-01-25T21:42:58.307097Z[0m [32m INFO[0m 📝 No existing thresholds found, starting fresh baseline learning
+[2m2026-01-25T21:42:58.307099Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:mse
+[2m2026-01-25T21:42:58.307104Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:d_exponent
+[2m2026-01-25T21:42:58.307106Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:dxc
+[2m2026-01-25T21:42:58.307107Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:flow_balance
+[2m2026-01-25T21:42:58.307109Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:spp
+[2m2026-01-25T21:42:58.307110Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:torque
+[2m2026-01-25T21:42:58.307112Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:rop
+[2m2026-01-25T21:42:58.307113Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:wob
+[2m2026-01-25T21:42:58.307116Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:rpm
+[2m2026-01-25T21:42:58.307117Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:ecd
+[2m2026-01-25T21:42:58.307118Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:pit_volume
+[2m2026-01-25T21:42:58.307118Z[0m [32m INFO[0m Starting baseline learning [3mmetric[0m[2m=[0mWITS:gas_units
+[2m2026-01-25T21:42:58.307119Z[0m [32m INFO[0m    Started learning for WITS drilling metrics
+[2m2026-01-25T21:42:58.307121Z[0m [32m INFO[0m 📚 Mode: BaselineLearning (accumulating samples)
+[2m2026-01-25T21:42:58.307122Z[0m [32m INFO[0m 🧠 Initializing LLM-enabled pipeline with dynamic thresholds...
+[2m2026-01-25T21:42:58.307124Z[0m [32m INFO[0m Initializing Pipeline Coordinator with LLM and dynamic thresholds (learning: true, equipment: WITS)
+[2m2026-01-25T21:42:58.307125Z[0m [32m INFO[0m Loading Strategic LLM...
+[2m2026-01-25T21:42:58.307127Z[0m [32m INFO[0m Initializing Strategic LLM for drilling intelligence [3mmodel_path[0m[2m=[0mmodels/deepseek-r1-distill-qwen-7b-q4.gguf
+[2m2026-01-25T21:42:58.307129Z[0m [32m INFO[0m Loading GGUF model with mistral.rs backend [3mmodel_path[0m[2m=[0mmodels/deepseek-r1-distill-qwen-7b-q4.gguf
+[2m2026-01-25T21:42:58.307138Z[0m [32m INFO[0m CUDA detected, will attempt GPU inference
+[2m2026-01-25T21:42:58.510239Z[0m [32m INFO[0m Loading model with explicit sequence cleanup enabled (VRAM leak prevention)
+[2m2026-01-25T21:42:58.510377Z[0m [32m INFO[0m Could not load token at "/home/ashton/.cache/huggingface/token", using no HF token.
+[2m2026-01-25T21:42:58.510442Z[0m [32m INFO[0m Could not load token at "/home/ashton/.cache/huggingface/token", using no HF token.
+[2m2026-01-25T21:42:58.510451Z[0m [32m INFO[0m Loading `deepseek-r1-distill-qwen-7b-q4.gguf` locally at `models/deepseek-r1-distill-qwen-7b-q4.gguf`
+[2m2026-01-25T21:42:58.510459Z[0m [32m INFO[0m GGUF file(s) ["models/deepseek-r1-distill-qwen-7b-q4.gguf"]
+[2m2026-01-25T21:42:58.510469Z[0m [32m INFO[0m Prompt chunk size is 1024.
+[2m2026-01-25T21:42:58.658411Z[0m [32m INFO[0m Model config:
+general.architecture: qwen2
+general.basename: DeepSeek-R1-Distill-Qwen
+general.file_type: 15
+general.name: DeepSeek R1 Distill Qwen 7B
+general.quantization_version: 2
+general.size_label: 7B
+general.type: model
+quantize.imatrix.chunks_count: 128
+quantize.imatrix.dataset: /training_dir/calibration_datav3.txt
+quantize.imatrix.entries_count: 196
+quantize.imatrix.file: /models_out/DeepSeek-R1-Distill-Qwen-7B-GGUF/DeepSeek-R1-Distill-Qwen-7B.imatrix
+qwen2.attention.head_count: 28
+qwen2.attention.head_count_kv: 4
+qwen2.attention.layer_norm_rms_epsilon: 0.000001
+qwen2.block_count: 28
+qwen2.context_length: 131072
+qwen2.embedding_length: 3584
+qwen2.feed_forward_length: 18944
+qwen2.rope.freq_base: 10000
+[2m2026-01-25T21:42:58.670887Z[0m [32m INFO[0m Detected minimum CUDA compute capability 12
+[2m2026-01-25T21:42:58.726365Z[0m [32m INFO[0m DType selected is BF16.
+[2m2026-01-25T21:42:58.809112Z[0m [32m INFO[0m Using automatic device mapping parameters: text[max_seq_len: 4096, max_batch_size: 1].
+[2m2026-01-25T21:42:58.809188Z[0m [32m INFO[0m Model has 28 repeating layers.
+[2m2026-01-25T21:42:58.809208Z[0m [32m INFO[0m Loading model according to the following repeating layer mappings:
+[2m2026-01-25T21:42:58.809302Z[0m [32m INFO[0m Layers 0-27: cuda[0] (16 GB)
+[2m2026-01-25T21:42:58.931718Z[0m [32m INFO[0m GGUF tokenizer model is `gpt2`, kind: `Bpe`, num tokens: 152064, num special tokens 421, num added tokens: 0, num merges: 151387, num scores: 0
+[2m2026-01-25T21:42:58.935564Z[0m [32m INFO[0m Discovered and using GGUF chat template: `{% if not add_generation_prompt is defined %}{% set add_generation_prompt = false %}{% endif %}{% set ns = namespace(is_first=false, is_tool=false, is_output_first=true, system_prompt='') %}{%- for message in messages %}{%- if message['role'] == 'system' %}{% set ns.system_prompt = message['content'] %}{%- endif %}{%- endfor %}{{bos_token}}{{ns.system_prompt}}{%- for message in messages %}{%- if message['role'] == 'user' %}{%- set ns.is_tool = false -%}{{'<｜User｜>' + message['content']}}{%- endif %}{%- if message['role'] == 'assistant' and message['content'] is none %}{%- set ns.is_tool = false -%}{%- for tool in message['tool_calls']%}{%- if not ns.is_first %}{{'<｜Assistant｜><｜tool▁calls▁begin｜><｜tool▁call▁begin｜>' + tool['type'] + '<｜tool▁sep｜>' + tool['function']['name'] + '\n' + '```json' + '\n' + tool['function']['arguments'] + '\n' + '```' + '<｜tool▁call▁end｜>'}}{%- set ns.is_first = true -%}{%- else %}{{'\n' + '<｜tool▁call▁begin｜>' + tool['type'] + '<｜tool▁sep｜>' + tool['function']['name'] + '\n' + '```json' + '\n' + tool['function']['arguments'] + '\n' + '```' + '<｜tool▁call▁end｜>'}}{{'<｜tool▁calls▁end｜><｜end▁of▁sentence｜>'}}{%- endif %}{%- endfor %}{%- endif %}{%- if message['role'] == 'assistant' and message['content'] is not none %}{%- if ns.is_tool %}{{'<｜tool▁outputs▁end｜>' + message['content'] + '<｜end▁of▁sentence｜>'}}{%- set ns.is_tool = false -%}{%- else %}{% set content = message['content'] %}{% if '</think>' in content %}{% set content = content.split('</think>')[-1] %}{% endif %}{{'<｜Assistant｜>' + content + '<｜end▁of▁sentence｜>'}}{%- endif %}{%- endif %}{%- if message['role'] == 'tool' %}{%- set ns.is_tool = true -%}{%- if ns.is_output_first %}{{'<｜tool▁outputs▁begin｜><｜tool▁output▁begin｜>' + message['content'] + '<｜tool▁output▁end｜>'}}{%- set ns.is_output_first = false %}{%- else %}{{'\n<｜tool▁output▁begin｜>' + message['content'] + '<｜tool▁output▁end｜>'}}{%- endif %}{%- endif %}{%- endfor -%}{% if ns.is_tool %}{{'<｜tool▁outputs▁end｜>'}}{% endif %}{% if add_generation_prompt and not ns.is_tool %}{{'<｜Assistant｜>'}}{% endif %}`
+[2m2026-01-25T21:42:58.946963Z[0m [32m INFO[0m Detected minimum CUDA compute capability 12
+[2m2026-01-25T21:42:58.947246Z[0m [32m INFO[0m DType selected is BF16.
+[2m2026-01-25T21:43:00.836217Z[0m [32m INFO[0m Using literal chat template.
+[2m2026-01-25T21:43:01.245293Z[0m [32m INFO[0m bos_toks = "<｜begin▁of▁sentence｜>", eos_toks = "<｜end▁of▁sentence｜>", unk_tok = `None`
+[2m2026-01-25T21:43:01.255485Z[0m [32m INFO[0m Pipeline input modalities are [📝 Text]
+[2m2026-01-25T21:43:01.255493Z[0m [32m INFO[0m Pipeline output modalities are [📝 Text]
+[2m2026-01-25T21:43:01.255594Z[0m [32m INFO[0m Beginning dummy run.
+[2m2026-01-25T21:43:01.257565Z[0m [32m INFO[0m PrefixCacherV2 is enabled. Expect higher multi-turn throughput for both text and multimodal.
+[2m2026-01-25T21:43:01.345288Z[0m [32m INFO[0m Dummy run completed in 0.089689709s.
+[2m2026-01-25T21:43:01.345298Z[0m [32m INFO[0m ✓ Mistral.rs model loaded successfully with PagedAttention (cache leak prevention enabled) [3mload_time_secs[0m[2m=[0m3.03816294670105 [3muses_gpu[0m[2m=[0mtrue [3mmodel_family[0m[2m=[0mQwen [3mpaged_attention[0m[2m=[0mtrue [3mblock_size[0m[2m=[0m32
+[2m2026-01-25T21:43:01.345303Z[0m [32m INFO[0m Strategic LLM initialized for drilling advisory
+[2m2026-01-25T21:43:01.345304Z[0m [32m INFO[0m Strategic LLM loaded successfully
+[2m2026-01-25T21:43:01.345305Z[0m [32m INFO[0m Created tactical agent [3mequipment_id[0m[2m=[0mWITS [3mmode[0m[2m=[0mBaseline Learning
+[2m2026-01-25T21:43:01.345310Z[0m [32m INFO[0m ✓ LLM and dynamic thresholds loaded successfully
+[2m2026-01-25T21:43:01.345311Z[0m [32m INFO[0m 🌐 Starting HTTP server on 0.0.0.0:8080...
+[2m2026-01-25T21:43:01.345403Z[0m [32m INFO[0m ✓ HTTP server listening on 0.0.0.0:8080
+[2m2026-01-25T21:43:01.345404Z[0m [32m INFO[0m 
+[2m2026-01-25T21:43:01.345405Z[0m [32m INFO[0m 🎯 Dashboard available at: http://0.0.0.0:8080
+[2m2026-01-25T21:43:01.345405Z[0m [32m INFO[0m 
+[2m2026-01-25T21:43:01.345406Z[0m [32m INFO[0m 🔒 Supervisor: Initializing task monitoring
+[2m2026-01-25T21:43:01.345413Z[0m [32m INFO[0m 🔒 Supervisor: All tasks spawned, monitoring...
+[2m2026-01-25T21:43:01.345510Z[0m [32m INFO[0m [HttpServer] Task starting
+[2m2026-01-25T21:43:01.345524Z[0m [32m INFO[0m [WitsIngestion] Task starting
+[2m2026-01-25T21:43:01.345536Z[0m [32m INFO[0m [PacketProcessor] Task starting
+[2m2026-01-25T21:43:01.345539Z[0m [32m INFO[0m 📊 Processing WITS packets from stdin...
+[2m2026-01-25T21:43:01.345540Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:01.345693Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345702Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345704Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345706Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345708Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345709Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345711Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345712Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345713Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345715Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345716Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345718Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345719Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345720Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345722Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345723Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345725Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345726Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345727Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345729Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345730Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345732Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345733Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345734Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345736Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345737Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345739Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345740Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345741Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345743Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345744Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:01.345915Z[0m [32m INFO[0m 📈 Progress: 10 packets | Advisories: 0 | Buffer: 10/60
+[2m2026-01-25T21:43:01.346080Z[0m [32m INFO[0m 📈 Progress: 20 packets | Advisories: 0 | Buffer: 20/60
+[2m2026-01-25T21:43:01.346288Z[0m [32m INFO[0m 📈 Progress: 30 packets | Advisories: 0 | Buffer: 30/60
+[2m2026-01-25T21:43:01.346554Z[0m [32m INFO[0m 📈 Progress: 40 packets | Advisories: 0 | Buffer: 40/60
+[2m2026-01-25T21:43:01.346712Z[0m [32m INFO[0m 📈 Progress: 50 packets | Advisories: 0 | Buffer: 50/60
+[2m2026-01-25T21:43:01.346747Z[0m [32m INFO[0m 📈 Progress: 60 packets | Advisories: 0 | Buffer: 60/60
+[2m2026-01-25T21:43:01.546817Z[0m [32m INFO[0m 📈 Progress: 70 packets | Advisories: 0 | Buffer: 60/60
+[2m2026-01-25T21:43:01.881835Z[0m [32m INFO[0m 📈 Progress: 80 packets | Advisories: 0 | Buffer: 60/60
+[2m2026-01-25T21:43:02.216601Z[0m [32m INFO[0m 📈 Progress: 90 packets | Advisories: 0 | Buffer: 60/60
+[2m2026-01-25T21:43:02.551328Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS:mse [3mmean[0m[2m=[0m679.0078312563985 [3mstd[0m[2m=[0m10.46737184370995 [3mwarning[0m[2m=[0m710.4099467875284 [3mcritical[0m[2m=[0m731.3446904749483 [3msamples[0m[2m=[0m100
+[2m2026-01-25T21:43:02.551378Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS:d_exponent [3mmean[0m[2m=[0m1.4857794373321584 [3mstd[0m[2m=[0m0.005511739401928249 [3mwarning[0m[2m=[0m1.5023146555379432 [3mcritical[0m[2m=[0m1.5133381343417998 [3msamples[0m[2m=[0m100
+[2m2026-01-25T21:43:02.551391Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS:flow_balance [3mmean[0m[2m=[0m1.9934925224336697 [3mstd[0m[2m=[0m0.09343330142479621 [3mwarning[0m[2m=[0m2.2737924267080585 [3mcritical[0m[2m=[0m2.4606590295576507 [3msamples[0m[2m=[0m100
+[2m2026-01-25T21:43:02.551399Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS:spp [3mmean[0m[2m=[0m2796.355812562854 [3mstd[0m[2m=[0m52.322648797881946 [3mwarning[0m[2m=[0m2953.3237589565 [3mcritical[0m[2m=[0m3057.969056552264 [3msamples[0m[2m=[0m100
+[2m2026-01-25T21:43:02.551408Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS:torque [3mmean[0m[2m=[0m14.980477567300996 [3mstd[0m[2m=[0m0.2802999042743671 [3mwarning[0m[2m=[0m15.821377280124096 [3mcritical[0m[2m=[0m16.38197708867283 [3msamples[0m[2m=[0m100
+[2m2026-01-25T21:43:02.551416Z[0m [32m INFO[0m Baseline locked [3mmetric[0m[2m=[0mWITS:rop [3mmean[0m[2m=[0m49.93492522433665 [3mstd[0m[2m=[0m0.9343330142478906 [3mwarning[0m[2m=[0m52.737924267080324 [3mcritical[0m[2m=[0m54.606590295576105 [3msamples[0m[2m=[0m100
+[2m2026-01-25T21:43:02.551427Z[0m [32m INFO[0m Auto-locked baselines, switching to DynamicThresholds mode [3mequipment_id[0m[2m=[0mWITS [3mlocked_metrics[0m[2m=[0m["WITS:mse", "WITS:d_exponent", "WITS:flow_balance", "WITS:spp", "WITS:torque", "WITS:rop"]
+[2m2026-01-25T21:43:02.551450Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:02.551460Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m99 [3mdepth[0m[2m=[0m10001.387081256224 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:05.914381Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3362
+[2m2026-01-25T21:43:05.914393Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:05.914397Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3363 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:05.914399Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3363
+[2m2026-01-25T21:43:05.914404Z[0m [32m INFO[0m 🎯 ADVISORY #1: Critical | Efficiency: 70%
+[2m2026-01-25T21:43:05.914405Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:05.914406Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:05.914407Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.70 ppg, SPP st...
+[2m2026-01-25T21:43:05.914408Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -21....
+[2m2026-01-25T21:43:05.914408Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:05.914409Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:05.914413Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:05.914414Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m100 [3mdepth[0m[2m=[0m10001.400780250086 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:09.221724Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3307
+[2m2026-01-25T21:43:09.221750Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:09.221757Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3307 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mUncertain
+[2m2026-01-25T21:43:09.221759Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3307
+[2m2026-01-25T21:43:09.221764Z[0m [32m INFO[0m 🎯 ADVISORY #2: Critical | Efficiency: 70%
+[2m2026-01-25T21:43:09.221765Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:09.221766Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:09.221767Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:43:09.221767Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -95....
+[2m2026-01-25T21:43:09.221768Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:09.221769Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:09.221773Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:09.221775Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m101 [3mdepth[0m[2m=[0m10001.414637655364 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:12.571761Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3349
+[2m2026-01-25T21:43:12.571773Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:12.571777Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3350 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:12.571780Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3350
+[2m2026-01-25T21:43:12.571785Z[0m [32m INFO[0m 🎯 ADVISORY #3: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:12.571786Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:12.571787Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:12.571788Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.65 ppg, SPP st...
+[2m2026-01-25T21:43:12.571789Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 82.1...
+[2m2026-01-25T21:43:12.571790Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:12.571791Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:12.571794Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:12.571796Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m102 [3mdepth[0m[2m=[0m10001.428865393493 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:15.894664Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3322
+[2m2026-01-25T21:43:15.894676Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:15.894680Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3322 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mUncertain
+[2m2026-01-25T21:43:15.894682Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3322
+[2m2026-01-25T21:43:15.894687Z[0m [32m INFO[0m 🎯 ADVISORY #4: Critical | Efficiency: 70%
+[2m2026-01-25T21:43:15.894689Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:15.894689Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:15.894691Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.74 ppg, SPP st...
+[2m2026-01-25T21:43:15.894692Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 192....
+[2m2026-01-25T21:43:15.894693Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:15.894693Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:15.894697Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:15.894699Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m103 [3mdepth[0m[2m=[0m10001.442783094051 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:19.219482Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3324
+[2m2026-01-25T21:43:19.219495Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:19.219498Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3324 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mUncertain
+[2m2026-01-25T21:43:19.219501Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3324
+[2m2026-01-25T21:43:19.219506Z[0m [32m INFO[0m 🎯 ADVISORY #5: Critical | Efficiency: 70%
+[2m2026-01-25T21:43:19.219507Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:19.219507Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:19.219509Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:43:19.219510Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -160...
+[2m2026-01-25T21:43:19.219510Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:19.219511Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:19.219515Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:19.219517Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m105 [3mdepth[0m[2m=[0m10001.46980633608 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:22.504300Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3284
+[2m2026-01-25T21:43:22.504313Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:22.504317Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3284 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:22.504319Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3284
+[2m2026-01-25T21:43:22.504325Z[0m [32m INFO[0m 🎯 ADVISORY #6: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:22.504326Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:22.504327Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:22.504328Z[0m [32m INFO[0m    Hydraulic (25%): MEDIUM - SPP deviation 162 psi elevated - monitor
+[2m2026-01-25T21:43:22.504329Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.7 gpm, pit rate -415...
+[2m2026-01-25T21:43:22.504330Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:22.504331Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:22.504334Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:22.504336Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m106 [3mdepth[0m[2m=[0m10001.483725744809 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:25.787892Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3283
+[2m2026-01-25T21:43:25.787904Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:25.787908Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3283 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:25.787911Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3283
+[2m2026-01-25T21:43:25.787916Z[0m [32m INFO[0m 🎯 ADVISORY #7: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:25.787917Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:25.787918Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:25.787919Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.68 ppg, SPP st...
+[2m2026-01-25T21:43:25.787920Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 419....
+[2m2026-01-25T21:43:25.787921Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:25.787922Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:25.787925Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:25.787927Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m107 [3mdepth[0m[2m=[0m10001.497701421666 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:29.086096Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3298
+[2m2026-01-25T21:43:29.086109Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:29.086113Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3298 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:29.086116Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3298
+[2m2026-01-25T21:43:29.086120Z[0m [32m INFO[0m 🎯 ADVISORY #8: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:29.086122Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:29.086122Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:29.086124Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:43:29.086124Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 29.2...
+[2m2026-01-25T21:43:29.086125Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:29.086126Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:29.086130Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:29.086135Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m108 [3mdepth[0m[2m=[0m10001.512019432304 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:32.404270Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3318
+[2m2026-01-25T21:43:32.404282Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:32.404285Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3318 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:32.404288Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3318
+[2m2026-01-25T21:43:32.404292Z[0m [32m INFO[0m 🎯 ADVISORY #9: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:32.404293Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:32.404294Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:32.404295Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.75 ppg, SPP st...
+[2m2026-01-25T21:43:32.404296Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.2 gpm, pit rate 177....
+[2m2026-01-25T21:43:32.404297Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:32.404298Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:32.404301Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:32.404303Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m109 [3mdepth[0m[2m=[0m10001.526040881814 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:35.332187Z[0m [33m WARN[0m [WitsIngestion] Failed to parse packet: invalid number at line 1 column 3
+[2m2026-01-25T21:43:35.734841Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3330
+[2m2026-01-25T21:43:35.734853Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:35.734856Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3330 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:35.734859Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3330
+[2m2026-01-25T21:43:35.734863Z[0m [32m INFO[0m 🎯 ADVISORY #10: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:35.734864Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:35.734865Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:35.734866Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.66 ppg, SPP st...
+[2m2026-01-25T21:43:35.734867Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -153...
+[2m2026-01-25T21:43:35.734868Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:35.734869Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:35.734872Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:35.734874Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m110 [3mdepth[0m[2m=[0m10001.5395880161 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:39.055826Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3320
+[2m2026-01-25T21:43:39.055839Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:39.055842Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3320 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:39.055845Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3320
+[2m2026-01-25T21:43:39.055849Z[0m [32m INFO[0m 🎯 ADVISORY #11: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:39.055850Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:39.055851Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:39.055853Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.70 ppg, SPP st...
+[2m2026-01-25T21:43:39.055854Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -245...
+[2m2026-01-25T21:43:39.055854Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:39.055855Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:39.055859Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:39.055861Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m111 [3mdepth[0m[2m=[0m10001.553791780494 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:42.321191Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3265
+[2m2026-01-25T21:43:42.321203Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:42.321207Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3265 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:42.321209Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3265
+[2m2026-01-25T21:43:42.321213Z[0m [32m INFO[0m 🎯 ADVISORY #12: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:42.321215Z[0m [32m INFO[0m    Recommendation: [Monitor and maintain equipment for optimal performance.]
+[2m2026-01-25T21:43:42.321215Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:42.321217Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.71 ppg, SPP st...
+[2m2026-01-25T21:43:42.321218Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 340....
+[2m2026-01-25T21:43:42.321218Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:42.321219Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:42.321223Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:42.321225Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m112 [3mdepth[0m[2m=[0m10001.567366646665 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:45.636387Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3315
+[2m2026-01-25T21:43:45.636400Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:45.636404Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3315 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:45.636406Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3315
+[2m2026-01-25T21:43:45.636411Z[0m [32m INFO[0m 🎯 ADVISORY #13: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:45.636412Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:45.636413Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:45.636414Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.66 ppg, SPP st...
+[2m2026-01-25T21:43:45.636415Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -326...
+[2m2026-01-25T21:43:45.636416Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:45.636417Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:45.636421Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:45.636422Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m113 [3mdepth[0m[2m=[0m10001.58141626823 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:48.972687Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3336
+[2m2026-01-25T21:43:48.972700Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:48.972704Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3336 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:48.972706Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3336
+[2m2026-01-25T21:43:48.972710Z[0m [32m INFO[0m 🎯 ADVISORY #14: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:48.972712Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:48.972712Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:48.972714Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.71 ppg, SPP st...
+[2m2026-01-25T21:43:48.972715Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 246....
+[2m2026-01-25T21:43:48.972715Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:48.972716Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:48.972720Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:48.972722Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m114 [3mdepth[0m[2m=[0m10001.595341211188 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:52.295116Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3322
+[2m2026-01-25T21:43:52.295128Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:52.295137Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3322 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:52.295139Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3322
+[2m2026-01-25T21:43:52.295149Z[0m [32m INFO[0m 🎯 ADVISORY #15: Critical | Efficiency: 75%
+[2m2026-01-25T21:43:52.295150Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:52.295151Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:52.295152Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.70 ppg, SPP st...
+[2m2026-01-25T21:43:52.295153Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -64....
+[2m2026-01-25T21:43:52.295154Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:52.295154Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:52.295158Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:52.295160Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m115 [3mdepth[0m[2m=[0m10001.60937875849 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:55.618497Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3323
+[2m2026-01-25T21:43:55.618510Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:55.618514Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3323 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:55.618516Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3323
+[2m2026-01-25T21:43:55.618524Z[0m [32m INFO[0m 🎯 ADVISORY #16: Critical | Efficiency: 70%
+[2m2026-01-25T21:43:55.618525Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:55.618526Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:55.618528Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.74 ppg, SPP st...
+[2m2026-01-25T21:43:55.618529Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 58.4...
+[2m2026-01-25T21:43:55.618530Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:55.618531Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:55.618534Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:55.618536Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m116 [3mdepth[0m[2m=[0m10001.623481404597 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:43:58.935935Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3317
+[2m2026-01-25T21:43:58.935948Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:43:58.935952Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3317 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:43:58.935954Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3317
+[2m2026-01-25T21:43:58.935959Z[0m [32m INFO[0m 🎯 ADVISORY #17: Critical | Efficiency: 70%
+[2m2026-01-25T21:43:58.935960Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:43:58.935961Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:43:58.935962Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:43:58.935963Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 33.7...
+[2m2026-01-25T21:43:58.935964Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:43:58.935965Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:43:58.935982Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:43:58.935983Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m117 [3mdepth[0m[2m=[0m10001.637384630876 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:02.237192Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3301
+[2m2026-01-25T21:44:02.237205Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:02.237209Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3301 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:02.237211Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3301
+[2m2026-01-25T21:44:02.237216Z[0m [32m INFO[0m 🎯 ADVISORY #18: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:02.237217Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:02.237218Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:02.237219Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.69 ppg, SPP st...
+[2m2026-01-25T21:44:02.237220Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -103...
+[2m2026-01-25T21:44:02.237221Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:02.237221Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:02.237225Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:02.237227Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m118 [3mdepth[0m[2m=[0m10001.651617156896 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:05.524647Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3287
+[2m2026-01-25T21:44:05.524660Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:05.524664Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3287 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:05.524666Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3287
+[2m2026-01-25T21:44:05.524671Z[0m [32m INFO[0m 🎯 ADVISORY #19: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:05.524672Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:05.524673Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:05.524675Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.72 ppg, SPP st...
+[2m2026-01-25T21:44:05.524675Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 170....
+[2m2026-01-25T21:44:05.524676Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:05.524677Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:05.524681Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:05.524683Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m119 [3mdepth[0m[2m=[0m10001.66541716464 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:08.841317Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3316
+[2m2026-01-25T21:44:08.841335Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:08.841341Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3316 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:08.841345Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3316
+[2m2026-01-25T21:44:08.841351Z[0m [32m INFO[0m 🎯 ADVISORY #20: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:08.841353Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:08.841354Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:08.841356Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.66 ppg, SPP st...
+[2m2026-01-25T21:44:08.841358Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -224...
+[2m2026-01-25T21:44:08.841359Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:08.841362Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:08.841368Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:08.841371Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m120 [3mdepth[0m[2m=[0m10001.678805612257 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:12.167713Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3326
+[2m2026-01-25T21:44:12.167733Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:12.167738Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3326 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:12.167742Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3326
+[2m2026-01-25T21:44:12.167748Z[0m [32m INFO[0m 🎯 ADVISORY #21: Critical | Efficiency: 75%
+[2m2026-01-25T21:44:12.167751Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:12.167752Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:12.167754Z[0m [32m INFO[0m    Hydraulic (25%): MEDIUM - SPP deviation 112 psi elevated - monitor
+[2m2026-01-25T21:44:12.167755Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.8 gpm, pit rate -213...
+[2m2026-01-25T21:44:12.167757Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:12.167758Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:12.167765Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:12.167768Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m121 [3mdepth[0m[2m=[0m10001.69311825432 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:15.519288Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3351
+[2m2026-01-25T21:44:15.519306Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:15.519311Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3351 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:15.519315Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3351
+[2m2026-01-25T21:44:15.519321Z[0m [32m INFO[0m 🎯 ADVISORY #22: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:15.519323Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:15.519325Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:15.519327Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.70 ppg, SPP st...
+[2m2026-01-25T21:44:15.519328Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.2 gpm, pit rate 479....
+[2m2026-01-25T21:44:15.519330Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:15.519331Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:15.519338Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:15.519341Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m122 [3mdepth[0m[2m=[0m10001.707094340394 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:18.909520Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3390
+[2m2026-01-25T21:44:18.909539Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:18.909545Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3390 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:18.909549Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3390
+[2m2026-01-25T21:44:18.909554Z[0m [32m INFO[0m 🎯 ADVISORY #23: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:18.909557Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:18.909558Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:18.909560Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.69 ppg, SPP st...
+[2m2026-01-25T21:44:18.909562Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -174...
+[2m2026-01-25T21:44:18.909564Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:18.909565Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:18.909573Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:18.909576Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m123 [3mdepth[0m[2m=[0m10001.721146733971 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:22.228946Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3319
+[2m2026-01-25T21:44:22.228964Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:22.228970Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3319 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:22.228974Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3319
+[2m2026-01-25T21:44:22.228981Z[0m [32m INFO[0m 🎯 ADVISORY #24: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:22.228983Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:22.228984Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:22.228986Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:44:22.228988Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 39.6...
+[2m2026-01-25T21:44:22.228990Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:22.228991Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:22.228997Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:22.229001Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m124 [3mdepth[0m[2m=[0m10001.73500209847 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:25.606678Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3377
+[2m2026-01-25T21:44:25.606691Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:25.606695Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3377 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:25.606698Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3377
+[2m2026-01-25T21:44:25.606702Z[0m [32m INFO[0m 🎯 ADVISORY #25: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:25.606704Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:25.606704Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:25.606706Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:44:25.606707Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -102...
+[2m2026-01-25T21:44:25.606707Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:25.606708Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:25.606725Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:25.606727Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m125 [3mdepth[0m[2m=[0m10001.74856645628 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:28.960865Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3354
+[2m2026-01-25T21:44:28.960878Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:28.960882Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3354 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:28.960884Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3354
+[2m2026-01-25T21:44:28.960889Z[0m [32m INFO[0m 🎯 ADVISORY #26: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:28.960890Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:28.960891Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:28.960893Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.75 ppg, SPP st...
+[2m2026-01-25T21:44:28.960893Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -150...
+[2m2026-01-25T21:44:28.960894Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:28.960895Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:28.960912Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:28.960914Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m126 [3mdepth[0m[2m=[0m10001.76301617287 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:32.358891Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3397
+[2m2026-01-25T21:44:32.358904Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:32.358908Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3397 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:32.358911Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3397
+[2m2026-01-25T21:44:32.358915Z[0m [32m INFO[0m 🎯 ADVISORY #27: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:32.358917Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:32.358917Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:32.358918Z[0m [32m INFO[0m    Hydraulic (25%): MEDIUM - SPP deviation 111 psi elevated - monitor
+[2m2026-01-25T21:44:32.358919Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.2 gpm, pit rate 459....
+[2m2026-01-25T21:44:32.358920Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:32.358935Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:32.358939Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:32.358941Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m127 [3mdepth[0m[2m=[0m10001.777030351372 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:35.686730Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3327
+[2m2026-01-25T21:44:35.686742Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:35.686746Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3327 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:35.686748Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3327
+[2m2026-01-25T21:44:35.686753Z[0m [32m INFO[0m 🎯 ADVISORY #28: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:35.686754Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:35.686755Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:35.686756Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.72 ppg, SPP st...
+[2m2026-01-25T21:44:35.686757Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -225...
+[2m2026-01-25T21:44:35.686758Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:35.686759Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:35.686763Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:35.686764Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m128 [3mdepth[0m[2m=[0m10001.791389888893 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:39.093533Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3406
+[2m2026-01-25T21:44:39.093546Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:39.093549Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3406 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:39.093551Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3406
+[2m2026-01-25T21:44:39.093556Z[0m [32m INFO[0m 🎯 ADVISORY #29: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:39.093557Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:39.093558Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:39.093559Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.72 ppg, SPP st...
+[2m2026-01-25T21:44:39.093560Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.2 gpm, pit rate 179....
+[2m2026-01-25T21:44:39.093561Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:39.093562Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:39.093566Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:39.093568Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m129 [3mdepth[0m[2m=[0m10001.805369871372 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:42.350210Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3256
+[2m2026-01-25T21:44:42.350223Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:42.350227Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3256 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:42.350229Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3256
+[2m2026-01-25T21:44:42.350234Z[0m [32m INFO[0m 🎯 ADVISORY #30: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:42.350235Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:42.350236Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:42.350237Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.68 ppg, SPP st...
+[2m2026-01-25T21:44:42.350238Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -196...
+[2m2026-01-25T21:44:42.350239Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:42.350240Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:42.350244Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:42.350245Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m130 [3mdepth[0m[2m=[0m10001.81882003448 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:45.662653Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3312
+[2m2026-01-25T21:44:45.662666Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:45.662669Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3312 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:45.662672Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3312
+[2m2026-01-25T21:44:45.662677Z[0m [32m INFO[0m 🎯 ADVISORY #31: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:45.662678Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:45.662679Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:45.662680Z[0m [32m INFO[0m    Hydraulic (25%): MEDIUM - SPP deviation 111 psi elevated - monitor
+[2m2026-01-25T21:44:45.662681Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.8 gpm, pit rate -274...
+[2m2026-01-25T21:44:45.662682Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:45.662682Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:45.662686Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:45.662688Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m131 [3mdepth[0m[2m=[0m10001.832505938455 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:48.961261Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3298
+[2m2026-01-25T21:44:48.961274Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:48.961277Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3298 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:48.961280Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3298
+[2m2026-01-25T21:44:48.961284Z[0m [32m INFO[0m 🎯 ADVISORY #32: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:48.961285Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:48.961286Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:48.961287Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.71 ppg, SPP st...
+[2m2026-01-25T21:44:48.961288Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate 122....
+[2m2026-01-25T21:44:48.961289Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:48.961290Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:48.961294Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:48.961296Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m132 [3mdepth[0m[2m=[0m10001.846063302257 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:52.229686Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3268
+[2m2026-01-25T21:44:52.229698Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:52.229701Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3268 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:52.229704Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3268
+[2m2026-01-25T21:44:52.229708Z[0m [32m INFO[0m 🎯 ADVISORY #33: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:52.229709Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:52.229710Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:52.229711Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.69 ppg, SPP st...
+[2m2026-01-25T21:44:52.229712Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -66....
+[2m2026-01-25T21:44:52.229713Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:52.229714Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:52.229718Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:52.229719Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m133 [3mdepth[0m[2m=[0m10001.859806246375 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:55.555861Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3326
+[2m2026-01-25T21:44:55.555874Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:55.555878Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3326 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:55.555880Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3326
+[2m2026-01-25T21:44:55.555884Z[0m [32m INFO[0m 🎯 ADVISORY #34: Critical | Efficiency: 70%
+[2m2026-01-25T21:44:55.555886Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:55.555886Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:55.555888Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.69 ppg, SPP st...
+[2m2026-01-25T21:44:55.555889Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate 96.2...
+[2m2026-01-25T21:44:55.555889Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:55.555890Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:55.555894Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:55.555896Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m134 [3mdepth[0m[2m=[0m10001.87347635666 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:44:58.850516Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3294
+[2m2026-01-25T21:44:58.850529Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:44:58.850532Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3294 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:44:58.850535Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3294
+[2m2026-01-25T21:44:58.850539Z[0m [32m INFO[0m 🎯 ADVISORY #35: Critical | Efficiency: 75%
+[2m2026-01-25T21:44:58.850540Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:44:58.850541Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:44:58.850543Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:44:58.850543Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -37....
+[2m2026-01-25T21:44:58.850544Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:44:58.850545Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:44:58.850549Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:44:58.850551Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m135 [3mdepth[0m[2m=[0m10001.887203486918 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:02.146122Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3295
+[2m2026-01-25T21:45:02.146138Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:02.146141Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3295 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:02.146144Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3295
+[2m2026-01-25T21:45:02.146150Z[0m [32m INFO[0m 🎯 ADVISORY #36: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:02.146151Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:02.146152Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:02.146154Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.74 ppg, SPP st...
+[2m2026-01-25T21:45:02.146154Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate 29.6...
+[2m2026-01-25T21:45:02.146155Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:02.146156Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:02.146160Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:02.146162Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m136 [3mdepth[0m[2m=[0m10001.900966024228 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:05.461137Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3314
+[2m2026-01-25T21:45:05.461150Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:05.461154Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3314 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:05.461156Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3314
+[2m2026-01-25T21:45:05.461161Z[0m [32m INFO[0m 🎯 ADVISORY #37: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:05.461162Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:05.461163Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:05.461164Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.75 ppg, SPP st...
+[2m2026-01-25T21:45:05.461165Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 18.4...
+[2m2026-01-25T21:45:05.461166Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:05.461166Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:05.461170Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:05.461172Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m137 [3mdepth[0m[2m=[0m10001.914774984944 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:08.748941Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3287
+[2m2026-01-25T21:45:08.748955Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:08.748958Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3287 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:08.748961Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3287
+[2m2026-01-25T21:45:08.748966Z[0m [32m INFO[0m 🎯 ADVISORY #38: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:08.748967Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:08.748968Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:08.748969Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:45:08.748970Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 24.1...
+[2m2026-01-25T21:45:08.748971Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:08.748971Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:08.748975Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:08.748977Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m138 [3mdepth[0m[2m=[0m10001.929027598928 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:12.058608Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3309
+[2m2026-01-25T21:45:12.058620Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:12.058624Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3309 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:12.058626Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3309
+[2m2026-01-25T21:45:12.058631Z[0m [32m INFO[0m 🎯 ADVISORY #39: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:12.058632Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:12.058633Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:12.058634Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.65 ppg, SPP st...
+[2m2026-01-25T21:45:12.058635Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 230....
+[2m2026-01-25T21:45:12.058636Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:12.058637Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:12.058641Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:12.058642Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m139 [3mdepth[0m[2m=[0m10001.943031821193 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:15.371847Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3313
+[2m2026-01-25T21:45:15.371860Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:15.371864Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3313 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:15.371866Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3313
+[2m2026-01-25T21:45:15.371871Z[0m [32m INFO[0m 🎯 ADVISORY #40: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:15.371872Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:15.371873Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:15.371874Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.68 ppg, SPP st...
+[2m2026-01-25T21:45:15.371875Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -128...
+[2m2026-01-25T21:45:15.371876Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:15.371877Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:15.371881Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:15.371882Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m140 [3mdepth[0m[2m=[0m10001.957343522454 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:18.660624Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3288
+[2m2026-01-25T21:45:18.660637Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:18.660641Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3288 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:18.660643Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3288
+[2m2026-01-25T21:45:18.660648Z[0m [32m INFO[0m 🎯 ADVISORY #41: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:18.660649Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:18.660650Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:18.660651Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.69 ppg, SPP st...
+[2m2026-01-25T21:45:18.660652Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.2 gpm, pit rate 159....
+[2m2026-01-25T21:45:18.660653Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:18.660653Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:18.660657Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:18.660659Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m141 [3mdepth[0m[2m=[0m10001.97119369032 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:21.960401Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3299
+[2m2026-01-25T21:45:21.960413Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:21.960417Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3299 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:21.960419Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3299
+[2m2026-01-25T21:45:21.960424Z[0m [32m INFO[0m 🎯 ADVISORY #42: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:21.960425Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:21.960426Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:21.960427Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.66 ppg, SPP st...
+[2m2026-01-25T21:45:21.960428Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -239...
+[2m2026-01-25T21:45:21.960428Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:21.960429Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:21.960434Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:21.960436Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m143 [3mdepth[0m[2m=[0m10001.99904788794 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:25.244862Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3284
+[2m2026-01-25T21:45:25.244875Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:25.244879Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3284 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:25.244881Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3284
+[2m2026-01-25T21:45:25.244886Z[0m [32m INFO[0m 🎯 ADVISORY #43: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:25.244887Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:25.244888Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:25.244889Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.73 ppg, SPP st...
+[2m2026-01-25T21:45:25.244890Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 82.2...
+[2m2026-01-25T21:45:25.244891Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:25.244892Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:25.244896Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:25.244898Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m144 [3mdepth[0m[2m=[0m10002.013098767417 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:28.539618Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3294
+[2m2026-01-25T21:45:28.539631Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:28.539635Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3294 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:28.539637Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3294
+[2m2026-01-25T21:45:28.539641Z[0m [32m INFO[0m 🎯 ADVISORY #44: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:28.539642Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:28.539643Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:28.539645Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:45:28.539645Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 23.0...
+[2m2026-01-25T21:45:28.539646Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:28.539647Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:28.539650Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:28.539652Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m145 [3mdepth[0m[2m=[0m10002.027254791412 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:31.844832Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3305
+[2m2026-01-25T21:45:31.844846Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:31.844850Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3305 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:31.844853Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3305
+[2m2026-01-25T21:45:31.844860Z[0m [32m INFO[0m 🎯 ADVISORY #45: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:31.844861Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:31.844861Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:31.844863Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.70 ppg, SPP st...
+[2m2026-01-25T21:45:31.844864Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 54.5...
+[2m2026-01-25T21:45:31.844864Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:31.844865Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:31.844869Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:31.844871Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m146 [3mdepth[0m[2m=[0m10002.04055464692 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:35.148711Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3303
+[2m2026-01-25T21:45:35.148724Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:35.148728Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3303 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:35.148730Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3303
+[2m2026-01-25T21:45:35.148735Z[0m [32m INFO[0m 🎯 ADVISORY #46: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:35.148736Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:35.148737Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:35.148738Z[0m [32m INFO[0m    Hydraulic (25%): MEDIUM - SPP deviation 132 psi elevated - monitor
+[2m2026-01-25T21:45:35.148739Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.8 gpm, pit rate -443...
+[2m2026-01-25T21:45:35.148740Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:35.148741Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:35.148744Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:35.148746Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m147 [3mdepth[0m[2m=[0m10002.054111547448 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:38.379046Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3230
+[2m2026-01-25T21:45:38.379058Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:38.379062Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3230 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:38.379064Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3230
+[2m2026-01-25T21:45:38.379069Z[0m [32m INFO[0m 🎯 ADVISORY #47: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:38.379070Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:38.379071Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:38.379072Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:45:38.379073Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate 133....
+[2m2026-01-25T21:45:38.379074Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:38.379074Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:38.379078Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:38.379080Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m148 [3mdepth[0m[2m=[0m10002.06836244126 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:41.633579Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3254
+[2m2026-01-25T21:45:41.633592Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:41.633596Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3254 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:41.633598Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3254
+[2m2026-01-25T21:45:41.633602Z[0m [32m INFO[0m 🎯 ADVISORY #48: Critical | Efficiency: 70%
+[2m2026-01-25T21:45:41.633603Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:41.633604Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:41.633605Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.71 ppg, SPP st...
+[2m2026-01-25T21:45:41.633606Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 359....
+[2m2026-01-25T21:45:41.633607Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:41.633608Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:41.633612Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:41.633614Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m149 [3mdepth[0m[2m=[0m10002.082204150378 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:44.909125Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3275
+[2m2026-01-25T21:45:44.909142Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:44.909145Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3275 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:44.909148Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3275
+[2m2026-01-25T21:45:44.909152Z[0m [32m INFO[0m 🎯 ADVISORY #49: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:44.909153Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:44.909154Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:44.909155Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.74 ppg, SPP st...
+[2m2026-01-25T21:45:44.909156Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -212...
+[2m2026-01-25T21:45:44.909157Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:44.909158Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:44.909161Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:44.909163Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m150 [3mdepth[0m[2m=[0m10002.096319406272 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:48.218319Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3309
+[2m2026-01-25T21:45:48.218331Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:48.218335Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3309 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:48.218337Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3309
+[2m2026-01-25T21:45:48.218341Z[0m [32m INFO[0m 🎯 ADVISORY #50: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:48.218342Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:48.218343Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:48.218344Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:45:48.218345Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 141....
+[2m2026-01-25T21:45:48.218346Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:48.218347Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:48.218350Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:48.218352Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m151 [3mdepth[0m[2m=[0m10002.109887649964 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:51.502954Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3284
+[2m2026-01-25T21:45:51.502967Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:51.502971Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3284 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:51.502973Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3284
+[2m2026-01-25T21:45:51.502978Z[0m [32m INFO[0m 🎯 ADVISORY #51: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:51.502979Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:51.502979Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:51.502981Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.66 ppg, SPP st...
+[2m2026-01-25T21:45:51.502982Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -283...
+[2m2026-01-25T21:45:51.502982Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:51.502983Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:51.502987Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:51.502989Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m152 [3mdepth[0m[2m=[0m10002.123628055602 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:54.788303Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3285
+[2m2026-01-25T21:45:54.788315Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:54.788319Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3285 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:54.788321Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3285
+[2m2026-01-25T21:45:54.788325Z[0m [32m INFO[0m 🎯 ADVISORY #52: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:54.788327Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:54.788327Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:54.788329Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.72 ppg, SPP st...
+[2m2026-01-25T21:45:54.788329Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate 89.2...
+[2m2026-01-25T21:45:54.788330Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:54.788331Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:54.788335Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:54.788337Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m153 [3mdepth[0m[2m=[0m10002.13744720816 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:45:58.044224Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3255
+[2m2026-01-25T21:45:58.044236Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:45:58.044240Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3255 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:45:58.044242Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3255
+[2m2026-01-25T21:45:58.044247Z[0m [32m INFO[0m 🎯 ADVISORY #53: Critical | Efficiency: 75%
+[2m2026-01-25T21:45:58.044248Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:45:58.044249Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:45:58.044250Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.71 ppg, SPP st...
+[2m2026-01-25T21:45:58.044251Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 40.8...
+[2m2026-01-25T21:45:58.044252Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:45:58.044253Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:45:58.044256Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:45:58.044258Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m154 [3mdepth[0m[2m=[0m10002.151386612784 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:01.340623Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3296
+[2m2026-01-25T21:46:01.340635Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:01.340638Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3296 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:01.340641Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3296
+[2m2026-01-25T21:46:01.340645Z[0m [32m INFO[0m 🎯 ADVISORY #54: Critical | Efficiency: 75%
+[2m2026-01-25T21:46:01.340647Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:01.340647Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:01.340649Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:46:01.340650Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 62.3...
+[2m2026-01-25T21:46:01.340650Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:01.340651Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:01.340655Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:01.340656Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m155 [3mdepth[0m[2m=[0m10002.165144341989 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:04.645931Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3305
+[2m2026-01-25T21:46:04.645943Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:04.645947Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3305 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:04.645949Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3305
+[2m2026-01-25T21:46:04.645954Z[0m [32m INFO[0m 🎯 ADVISORY #55: Critical | Efficiency: 75%
+[2m2026-01-25T21:46:04.645955Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:04.645956Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:04.645957Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.68 ppg, SPP st...
+[2m2026-01-25T21:46:04.645958Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -94....
+[2m2026-01-25T21:46:04.645959Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:04.645959Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:04.645963Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:04.645965Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m156 [3mdepth[0m[2m=[0m10002.179236594491 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:07.949358Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3303
+[2m2026-01-25T21:46:07.949371Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:07.949375Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3303 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:07.949377Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3303
+[2m2026-01-25T21:46:07.949382Z[0m [32m INFO[0m 🎯 ADVISORY #56: Critical | Efficiency: 75%
+[2m2026-01-25T21:46:07.949383Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:07.949384Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:07.949385Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:46:07.949386Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 173....
+[2m2026-01-25T21:46:07.949387Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:07.949388Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:07.949391Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:07.949393Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m157 [3mdepth[0m[2m=[0m10002.1930687921 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:11.216199Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3266
+[2m2026-01-25T21:46:11.216212Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:11.216215Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3266 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:11.216218Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3266
+[2m2026-01-25T21:46:11.216222Z[0m [32m INFO[0m 🎯 ADVISORY #57: Critical | Efficiency: 75%
+[2m2026-01-25T21:46:11.216223Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:11.216224Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:11.216225Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:46:11.216230Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -134...
+[2m2026-01-25T21:46:11.216231Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:11.216232Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:11.216236Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:11.216238Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m158 [3mdepth[0m[2m=[0m10002.207435106526 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:14.488515Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3272
+[2m2026-01-25T21:46:14.488528Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:14.488531Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3272 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:14.488534Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3272
+[2m2026-01-25T21:46:14.488538Z[0m [32m INFO[0m 🎯 ADVISORY #58: Critical | Efficiency: 70%
+[2m2026-01-25T21:46:14.488539Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:14.488540Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:14.488541Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.66 ppg, SPP st...
+[2m2026-01-25T21:46:14.488542Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.2 gpm, pit rate 276....
+[2m2026-01-25T21:46:14.488543Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:14.488544Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:14.488548Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:14.488550Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m159 [3mdepth[0m[2m=[0m10002.22116527438 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:17.793971Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3305
+[2m2026-01-25T21:46:17.793984Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:17.793988Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3305 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:17.793990Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3305
+[2m2026-01-25T21:46:17.793995Z[0m [32m INFO[0m 🎯 ADVISORY #59: Critical | Efficiency: 70%
+[2m2026-01-25T21:46:17.793996Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:17.793996Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:17.793998Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.74 ppg, SPP st...
+[2m2026-01-25T21:46:17.793999Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -329...
+[2m2026-01-25T21:46:17.794000Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:17.794000Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:17.794004Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:17.794006Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m160 [3mdepth[0m[2m=[0m10002.23516458656 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:21.116477Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3322
+[2m2026-01-25T21:46:21.116494Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:21.116498Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3322 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:21.116500Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3322
+[2m2026-01-25T21:46:21.116506Z[0m [32m INFO[0m 🎯 ADVISORY #60: Critical | Efficiency: 70%
+[2m2026-01-25T21:46:21.116507Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:21.116508Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:21.116509Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.73 ppg, SPP st...
+[2m2026-01-25T21:46:21.116510Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate 139....
+[2m2026-01-25T21:46:21.116511Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:21.116512Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:21.116516Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:21.116518Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m161 [3mdepth[0m[2m=[0m10002.24886592593 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:24.404322Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3287
+[2m2026-01-25T21:46:24.404335Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:24.404338Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3287 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:24.404341Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3287
+[2m2026-01-25T21:46:24.404346Z[0m [32m INFO[0m 🎯 ADVISORY #61: Critical | Efficiency: 70%
+[2m2026-01-25T21:46:24.404347Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:24.404348Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:24.404349Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:46:24.404350Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -154...
+[2m2026-01-25T21:46:24.404351Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:24.404352Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:24.404355Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:24.404357Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m162 [3mdepth[0m[2m=[0m10002.262377848929 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:27.727557Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3323
+[2m2026-01-25T21:46:27.727569Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:27.727573Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3323 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:27.727575Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3323
+[2m2026-01-25T21:46:27.727580Z[0m [32m INFO[0m 🎯 ADVISORY #62: Critical | Efficiency: 70%
+[2m2026-01-25T21:46:27.727581Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:27.727582Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:27.727584Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.67 ppg, SPP st...
+[2m2026-01-25T21:46:27.727584Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 1.9 gpm, pit rate -98....
+[2m2026-01-25T21:46:27.727585Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:27.727586Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:27.727590Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:27.727592Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m163 [3mdepth[0m[2m=[0m10002.276470094092 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:30.980991Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3253
+[2m2026-01-25T21:46:30.981004Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:30.981007Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3253 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:30.981010Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3253
+[2m2026-01-25T21:46:30.981015Z[0m [32m INFO[0m 🎯 ADVISORY #63: Critical | Efficiency: 75%
+[2m2026-01-25T21:46:30.981016Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:30.981017Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:30.981018Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.74 ppg, SPP st...
+[2m2026-01-25T21:46:30.981019Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 300....
+[2m2026-01-25T21:46:30.981020Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:30.981020Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:30.981025Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:30.981027Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m165 [3mdepth[0m[2m=[0m10002.304516219314 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:34.245841Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3264
+[2m2026-01-25T21:46:34.245858Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:34.245862Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3264 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:34.245864Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3264
+[2m2026-01-25T21:46:34.245870Z[0m [32m INFO[0m 🎯 ADVISORY #64: Critical | Efficiency: 75%
+[2m2026-01-25T21:46:34.245871Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:34.245871Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:34.245873Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.73 ppg, SPP st...
+[2m2026-01-25T21:46:34.245874Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.0 gpm, pit rate -87....
+[2m2026-01-25T21:46:34.245875Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:34.245875Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:34.245879Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:34.245881Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m166 [3mdepth[0m[2m=[0m10002.318637812736 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:37.532613Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3286
+[2m2026-01-25T21:46:37.532625Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m75 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:37.532628Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3286 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m75 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:37.532631Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3286
+[2m2026-01-25T21:46:37.532635Z[0m [32m INFO[0m 🎯 ADVISORY #65: Critical | Efficiency: 75%
+[2m2026-01-25T21:46:37.532636Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:37.532637Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:37.532638Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.69 ppg, SPP st...
+[2m2026-01-25T21:46:37.532639Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate 94.9...
+[2m2026-01-25T21:46:37.532640Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:37.532641Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:37.532644Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:37.532646Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m167 [3mdepth[0m[2m=[0m10002.332707537063 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
+[2m2026-01-25T21:46:40.830253Z[0m [32m INFO[0m LLM advisory generation complete [3mlatency_ms[0m[2m=[0m3297
+[2m2026-01-25T21:46:40.830266Z[0m [32m INFO[0m Orchestrator voting complete [3mseverity[0m[2m=[0mCRITICAL [3mefficiency[0m[2m=[0m70 [3mrisk[0m[2m=[0mCRITICAL [3mvotes[0m[2m=[0m4
+[2m2026-01-25T21:46:40.830270Z[0m [32m INFO[0m Strategic analysis complete - advisory sent to dashboard [3mcycle_ms[0m[2m=[0m3297 [3mrisk_level[0m[2m=[0mCritical [3mefficiency_score[0m[2m=[0m70 [3mverification_status[0m[2m=[0mConfirmed
+[2m2026-01-25T21:46:40.830272Z[0m [33m WARN[0m Processing cycle exceeded 100ms target [3melapsed_ms[0m[2m=[0m3297
+[2m2026-01-25T21:46:40.830276Z[0m [32m INFO[0m 🎯 ADVISORY #66: Critical | Efficiency: 70%
+[2m2026-01-25T21:46:40.830278Z[0m [32m INFO[0m    Recommendation: Monitor situation and verify parameters.
+[2m2026-01-25T21:46:40.830278Z[0m [32m INFO[0m    MSE (25%): LOW - MSE efficiency 100% adequate for current formation
+[2m2026-01-25T21:46:40.830280Z[0m [32m INFO[0m    Hydraulic (25%): LOW - Hydraulics normal - ECD margin 1.75 ppg, SPP st...
+[2m2026-01-25T21:46:40.830281Z[0m [32m INFO[0m    WellControl (30%): CRITICAL - CRITICAL: Flow imbalance 2.1 gpm, pit rate -26....
+[2m2026-01-25T21:46:40.830281Z[0m [32m INFO[0m    Formation (20%): LOW - Formation stable (hardness 1.0/10) - no signifi...
+[2m2026-01-25T21:46:40.830282Z[0m [32m INFO[0m ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+[2m2026-01-25T21:46:40.830286Z[0m [32m INFO[0m CRITICAL ticket - bypassing cooldown
+[2m2026-01-25T21:46:40.830288Z[0m [32m INFO[0m Advisory ticket created [3mtimestamp[0m[2m=[0m168 [3mdepth[0m[2m=[0m10002.34694175904 [3mstate[0m[2m=[0mReaming [3mcategory[0m[2m=[0mWell Control
