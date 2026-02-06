@@ -1,6 +1,9 @@
 //! Mistral.rs LLM Backend
 //!
-//! Provides GPU-accelerated inference using mistral.rs with GGUF models.
+//! Provides LLM inference using mistral.rs with GGUF models.
+//! Automatically detects CUDA availability at runtime:
+//! - **CUDA available** (requires `cuda` feature): GPU inference with larger models
+//! - **CPU fallback**: CPU inference with smaller, optimised models
 
 use anyhow::{Context, Result};
 use async_trait::async_trait;
@@ -19,7 +22,7 @@ pub enum ModelFamily {
     Generic,
 }
 
-/// Mistral.rs backend using GGUF models with CUDA GPU support
+/// Mistral.rs backend using GGUF models with optional CUDA GPU support
 pub struct MistralRsBackend {
     /// The loaded mistralrs instance
     mistralrs: Arc<mistralrs::MistralRs>,
@@ -31,6 +34,25 @@ pub struct MistralRsBackend {
     model_family: ModelFamily,
 }
 
+/// Check if CUDA is available at runtime.
+///
+/// Returns `true` only if the binary was compiled with the `cuda` feature
+/// AND CUDA libraries/drivers are detected on the system.
+pub fn is_cuda_available() -> bool {
+    #[cfg(feature = "cuda")]
+    {
+        // Check for CUDA environment variables and libraries
+        std::env::var("CUDA_VISIBLE_DEVICES").is_ok()
+            || std::path::Path::new("/usr/local/cuda").exists()
+            || std::path::Path::new("/opt/cuda").exists()
+            || std::path::Path::new("/usr/lib/x86_64-linux-gnu/libcuda.so").exists()
+    }
+    #[cfg(not(feature = "cuda"))]
+    {
+        false
+    }
+}
+
 impl MistralRsBackend {
     /// Load a GGUF model from the specified path
     pub async fn load(model_path: &str) -> Result<Self> {
@@ -40,8 +62,11 @@ impl MistralRsBackend {
             MistralRsBuilder, ModelDType, ModelSelected, SchedulerConfig, TokenSource,
         };
 
+        let uses_gpu = is_cuda_available();
+
         tracing::info!(
             model_path = %model_path,
+            uses_gpu = uses_gpu,
             "Loading GGUF model with mistral.rs backend"
         );
 
@@ -53,13 +78,22 @@ impl MistralRsBackend {
 
         let start = std::time::Instant::now();
 
-        // Determine if we can use GPU
-        let uses_gpu = Self::check_cuda_available();
+        // Select device based on CUDA availability
         let device = if uses_gpu {
-            tracing::info!("CUDA detected, will attempt GPU inference");
-            Device::cuda_if_available(0).context("Failed to initialize CUDA device")?
+            tracing::info!("CUDA detected, using GPU inference");
+            #[cfg(feature = "cuda")]
+            {
+                Device::cuda_if_available(0).context("Failed to initialize CUDA device")?
+            }
+            #[cfg(not(feature = "cuda"))]
+            {
+                // Should not reach here since is_cuda_available() returns false
+                // when cuda feature is not compiled in, but handle gracefully
+                tracing::warn!("CUDA feature not compiled in, falling back to CPU");
+                Device::Cpu
+            }
         } else {
-            tracing::warn!("CUDA not available, falling back to CPU (slow)");
+            tracing::info!("CUDA not available, using CPU inference");
             Device::Cpu
         };
 
@@ -76,6 +110,9 @@ impl MistralRsBackend {
             .context("Invalid model filename")?
             .to_string();
 
+        // Adjust batch size based on device - CPU benefits from smaller batches
+        let max_batch_size = if uses_gpu { 8 } else { 1 };
+
         // Create ModelSelected for GGUF
         let model = ModelSelected::GGUF {
             tok_model_id: None,
@@ -84,7 +121,7 @@ impl MistralRsBackend {
             dtype: ModelDType::Auto,
             topology: None,
             max_seq_len: 4096,
-            max_batch_size: 8,
+            max_batch_size,
         };
 
         // Build loader
@@ -93,12 +130,11 @@ impl MistralRsBackend {
             .context("Failed to build loader")?;
 
         tracing::info!(
-            "Loading model with explicit sequence cleanup enabled (VRAM leak prevention)"
+            "Loading model ({})",
+            if uses_gpu { "GPU accelerated" } else { "CPU inference" }
         );
 
         // Load the pipeline (blocking operation)
-        // NOTE: We rely on mistral.rs's internal cache management + our explicit
-        // cleanup after each inference (dropping rx channel) to prevent VRAM leaks
         let pipeline = tokio::task::spawn_blocking(move || {
             loader.load_model_from_hf(
                 None,                                                        // revision
@@ -116,7 +152,7 @@ impl MistralRsBackend {
         .context("Failed to load model")?;
 
         // Create MistralRs instance with conservative scheduler settings
-        // Use Fixed(1) to process one request at a time, which prevents
+        // Use Fixed(1) to process one request at a time, preventing
         // accumulation of KV cache from concurrent requests
         let mistralrs = MistralRsBuilder::new(
             pipeline,
@@ -138,9 +174,8 @@ impl MistralRsBackend {
             load_time_secs = load_time.as_secs_f32(),
             uses_gpu = uses_gpu,
             model_family = ?model_family,
-            paged_attention = true,
-            block_size = 32,
-            "✓ Mistral.rs model loaded successfully with PagedAttention (cache leak prevention enabled)"
+            "Model loaded successfully ({})",
+            if uses_gpu { "GPU" } else { "CPU" }
         );
 
         Ok(Self {
@@ -149,15 +184,6 @@ impl MistralRsBackend {
             uses_gpu,
             model_family,
         })
-    }
-
-    /// Check if CUDA is available for GPU inference
-    fn check_cuda_available() -> bool {
-        // Check for CUDA environment variables and libraries
-        std::env::var("CUDA_VISIBLE_DEVICES").is_ok()
-            || std::path::Path::new("/usr/local/cuda").exists()
-            || std::path::Path::new("/opt/cuda").exists()
-            || std::path::Path::new("/usr/lib/x86_64-linux-gnu/libcuda.so").exists()
     }
 
     /// Detect model family from model path
@@ -316,13 +342,17 @@ impl MistralRsBackend {
             }
         }
 
-        // Wait for responses - loop until we get Done or error
-        tracing::debug!("Waiting for responses from mistral.rs");
+        // Wait for responses - use longer timeout for CPU inference
+        let timeout_secs = if self.uses_gpu { 120 } else { 300 };
+        tracing::debug!(timeout_secs = timeout_secs, "Waiting for response from mistral.rs");
         let text: String = loop {
-            let response = tokio::time::timeout(std::time::Duration::from_secs(120), rx.recv())
-                .await
-                .context("Response timeout after 120 seconds")?
-                .context("No response received from mistral.rs (channel closed)")?;
+            let response = tokio::time::timeout(
+                std::time::Duration::from_secs(timeout_secs),
+                rx.recv(),
+            )
+            .await
+            .context(format!("Response timeout after {} seconds", timeout_secs))?
+            .context("No response received from mistral.rs (channel closed)")?;
 
             tracing::debug!(
                 "Received response from mistral.rs: {:?}",
@@ -379,13 +409,11 @@ impl MistralRsBackend {
             "Received response from mistral.rs"
         );
 
-        // CRITICAL: Explicitly drop channel receiver to free KV cache resources
-        // This ensures the sequence is cleaned up in mistral.rs's cache manager
+        // Drop channel receiver to free KV cache resources
         drop(rx);
         tracing::trace!("Channel receiver dropped, KV cache sequence should be freed");
 
         // Small delay to allow cache manager to process cleanup
-        // PagedAttention should handle this automatically, but this ensures it completes
         tokio::time::sleep(tokio::time::Duration::from_millis(10)).await;
 
         Ok(text)

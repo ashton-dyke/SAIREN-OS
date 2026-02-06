@@ -1,10 +1,12 @@
 //! Strategic LLM - Drilling Advisory Intelligence
 //!
-//! Uses DeepSeek R1 Distill Qwen 7B for comprehensive drilling advisory analysis.
-//! Target latency: 800ms (acceptable for strategic analysis)
+//! Uses Qwen 2.5 7B (GPU) or Qwen 2.5 4B (CPU) for comprehensive drilling advisory analysis.
+//! Target latency: ~800ms (GPU) / ~10-30s (CPU)
 //!
 //! The strategic LLM combines physics analysis, drilling domain knowledge, and
 //! deep reasoning to generate actionable drilling optimization and risk prevention advice.
+//!
+//! Model selection happens automatically at startup based on CUDA availability.
 
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, DrillingMetrics, DrillingPhysicsReport,
@@ -24,9 +26,13 @@ use std::env;
 #[cfg(feature = "llm")]
 use super::MistralRsBackend;
 
-/// Default model path for strategic model (Qwen 2.5 7B Instruct)
+/// Default model path for strategic model when running on GPU (Qwen 2.5 7B Instruct)
 #[cfg(feature = "llm")]
-const DEFAULT_STRATEGIC_MODEL: &str = "/home/ashton/sairen-multiagent/models/qwen2.5-7b-instruct-q4_k_m.gguf";
+const DEFAULT_STRATEGIC_MODEL_GPU: &str = "models/qwen2.5-7b-instruct-q4_k_m.gguf";
+
+/// Default model path for strategic model when running on CPU (Qwen 2.5 4B Instruct)
+#[cfg(feature = "llm")]
+const DEFAULT_STRATEGIC_MODEL_CPU: &str = "models/qwen2.5-4b-instruct-q4_k_m.gguf";
 
 /// System prompt for drilling advisory output
 /// Optimized for drilling operational intelligence
@@ -175,18 +181,34 @@ pub struct StrategicLLM {
 
 impl StrategicLLM {
     /// Initialize the strategic LLM singleton
+    ///
+    /// Automatically selects the appropriate model based on CUDA availability:
+    /// - **GPU**: Qwen 2.5 7B Instruct (larger, faster on GPU)
+    /// - **CPU**: Qwen 2.5 4B Instruct (smaller, practical on CPU)
+    ///
+    /// The model path can be overridden via `STRATEGIC_MODEL_PATH` env var.
     #[cfg(feature = "llm")]
     pub async fn init() -> Result<Arc<Self>> {
         if let Some(existing) = STRATEGIC_INSTANCE.get() {
             return Ok(Arc::clone(existing));
         }
 
+        let uses_gpu = super::is_cuda_available();
+
+        // Select model: env var override > hardware-appropriate default
+        let default_model = if uses_gpu {
+            DEFAULT_STRATEGIC_MODEL_GPU
+        } else {
+            DEFAULT_STRATEGIC_MODEL_CPU
+        };
         let model_path = env::var("STRATEGIC_MODEL_PATH")
-            .unwrap_or_else(|_| DEFAULT_STRATEGIC_MODEL.to_string());
+            .unwrap_or_else(|_| default_model.to_string());
 
         tracing::info!(
             model_path = %model_path,
-            "Initializing Strategic LLM for drilling intelligence"
+            uses_gpu = uses_gpu,
+            "Initializing Strategic LLM for drilling intelligence ({})",
+            if uses_gpu { "GPU - Qwen 7B" } else { "CPU - Qwen 4B" }
         );
 
         let backend = MistralRsBackend::load(&model_path)
@@ -200,7 +222,10 @@ impl StrategicLLM {
 
         let _ = STRATEGIC_INSTANCE.set(Arc::clone(&instance));
 
-        tracing::info!("Strategic LLM initialized for drilling advisory");
+        tracing::info!(
+            "Strategic LLM initialized ({})",
+            if uses_gpu { "GPU - target ~800ms" } else { "CPU - target ~10-30s" }
+        );
         Ok(instance)
     }
 
@@ -752,7 +777,7 @@ impl std::fmt::Display for StrategicLLMStats {
     }
 }
 
-// VRAM monitoring helper
+// GPU VRAM monitoring helper (only useful when running on GPU)
 #[allow(dead_code)]
 pub fn get_vram_usage_mb() -> Option<f64> {
     std::process::Command::new("nvidia-smi")
@@ -768,14 +793,15 @@ pub fn get_vram_usage_mb() -> Option<f64> {
 }
 
 #[allow(dead_code)]
-pub fn print_vram_stats() {
+pub fn print_memory_stats() {
+    // Try GPU VRAM first
     if let Some(vram) = get_vram_usage_mb() {
-        tracing::info!(vram_mb = vram, "VRAM usage");
+        tracing::info!(vram_mb = vram, "GPU VRAM usage");
         if vram > 8192.0 {
             tracing::warn!("VRAM usage exceeds 8GB target ({:.0} MB)", vram);
         }
     } else {
-        tracing::debug!("VRAM usage: unable to query (nvidia-smi not available)");
+        tracing::debug!("GPU VRAM: not available (running on CPU or nvidia-smi not found)");
     }
 }
 

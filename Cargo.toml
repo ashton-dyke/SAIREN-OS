@@ -62,13 +62,14 @@ rand_distr = "0.4"
 # CLI argument parsing
 clap = { version = "4.4", features = ["derive"] }
 
-# LLM Inference (mistral.rs with CUDA support)
-mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true, features = ["cuda"] }
+# LLM Inference (mistral.rs - CPU by default, CUDA optional)
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true }
 candle-core = { git = "https://github.com/huggingface/candle.git", rev = "aaf5c86", optional = true }
 
 [features]
 default = []
 llm = ["mistralrs", "candle-core"]
+cuda = ["llm", "mistralrs/cuda"]
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -96,7 +97,7 @@ name = "sairen_os"
 path = "src/lib.rs"
 
 [lints.rust]
-# Allow unsafe in dependencies (mistralrs uses unsafe internally for GPU bindings)
+# Allow unsafe in dependencies (mistralrs uses unsafe internally for GPU/CPU bindings)
 unsafe_code = "warn"
 
 [lints.clippy]

@@ -1,7 +1,7 @@
 //! Tactical LLM - Fast Drilling Anomaly Classification
 //!
 //! Uses Qwen 2.5 1.5B Instruct for real-time drilling anomaly verification.
-//! Target latency: 60ms
+//! Target latency: ~60ms (GPU) / ~2-5s (CPU)
 //!
 //! The tactical LLM acts as a smart filter to reduce false positives from
 //! the physics-based detection by analyzing drilling parameter context.
@@ -19,7 +19,7 @@ use std::env;
 #[cfg(feature = "llm")]
 use super::MistralRsBackend;
 
-/// Default model path for tactical model (1.5B)
+/// Default model path for tactical model (Qwen 2.5 1.5B - used for both GPU and CPU)
 #[cfg(feature = "llm")]
 const DEFAULT_TACTICAL_MODEL: &str = "models/qwen2.5-1.5b-instruct-q4_k_m.gguf";
 
@@ -55,12 +55,15 @@ impl TacticalLLM {
             return Ok(Arc::clone(existing));
         }
 
+        let uses_gpu = super::is_cuda_available();
         let model_path = env::var("TACTICAL_MODEL_PATH")
             .unwrap_or_else(|_| DEFAULT_TACTICAL_MODEL.to_string());
 
         tracing::info!(
             model_path = %model_path,
-            "Initializing Tactical LLM for drilling intelligence"
+            uses_gpu = uses_gpu,
+            "Initializing Tactical LLM for drilling intelligence ({})",
+            if uses_gpu { "GPU" } else { "CPU" }
         );
 
         let backend = MistralRsBackend::load(&model_path)
@@ -74,7 +77,10 @@ impl TacticalLLM {
 
         let _ = TACTICAL_INSTANCE.set(Arc::clone(&instance));
 
-        tracing::info!("Tactical LLM initialized successfully");
+        tracing::info!(
+            "Tactical LLM initialized successfully ({})",
+            if uses_gpu { "GPU - target ~60ms" } else { "CPU - target ~2-5s" }
+        );
         Ok(instance)
     }
 
@@ -168,10 +174,13 @@ Is this a SIGNIFICANT drilling issue? Answer only: YES or NO"#,
             "Tactical drilling classification complete"
         );
 
-        if elapsed.as_millis() > 60 {
+        // Latency thresholds: 60ms for GPU, 5000ms for CPU
+        let target_ms: u128 = if self.backend.uses_gpu() { 60 } else { 5000 };
+        if elapsed.as_millis() > target_ms {
             tracing::warn!(
                 latency_ms = elapsed.as_millis(),
-                target_ms = 60,
+                target_ms = target_ms,
+                uses_gpu = self.backend.uses_gpu(),
                 "Tactical inference exceeded target latency"
             );
         }

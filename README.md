@@ -26,7 +26,7 @@ Real-time drilling advisory system using WITS Level 0 data and a multi-agent AI 
 ## Quick Start
 
 ```bash
-# 1. Build the system
+# 1. Build the system (use 'cuda' instead of 'llm' if you have a GPU)
 cargo build --release --features llm
 
 # 2. Terminal 1: Start the WITS simulator
@@ -217,12 +217,23 @@ python3 wits_simulator.py --campaign pa --operation cement-drillout
 ### Building Options
 
 ```bash
-# With LLM support (requires GPU)
+# With LLM support (CPU inference - works on any machine)
 cargo build --release --features llm
 
-# Without LLM (template-based advisories)
+# With LLM support + GPU acceleration (requires CUDA toolkit)
+cargo build --release --features cuda
+
+# Without LLM (template-based advisories only)
 cargo build --release
 ```
+
+**Hardware auto-detection**: When built with `llm` or `cuda`, SAIREN-OS checks for CUDA at startup and automatically selects the right models:
+
+| Hardware | Tactical Model | Strategic Model | Build Flag |
+|----------|---------------|----------------|------------|
+| **GPU** (CUDA) | Qwen 2.5 1.5B (~60ms) | Qwen 2.5 7B (~800ms) | `--features cuda` |
+| **CPU** | Qwen 2.5 1.5B (~2-5s) | Qwen 2.5 4B (~10-30s) | `--features llm` |
+| **No LLM** | Template-based | Template-based | *(default)* |
 
 ---
 
@@ -233,8 +244,8 @@ cargo build --release
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CAMPAIGN` | `production` | Campaign mode: `production` or `pa` |
-| `TACTICAL_MODEL_PATH` | `models/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Tactical LLM model |
-| `STRATEGIC_MODEL_PATH` | `models/qwen2.5-7b-instruct-q4_k_m.gguf` | Strategic LLM model |
+| `TACTICAL_MODEL_PATH` | `models/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Tactical LLM model (same for GPU/CPU) |
+| `STRATEGIC_MODEL_PATH` | GPU: `models/qwen2.5-7b-instruct-q4_k_m.gguf`, CPU: `models/qwen2.5-4b-instruct-q4_k_m.gguf` | Strategic LLM model (auto-selected) |
 | `TDS_SERVER_ADDR` | `0.0.0.0:8080` | HTTP server bind address |
 | `RUST_LOG` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `ML_INTERVAL_SECS` | `3600` | ML analysis interval (seconds) |
@@ -478,9 +489,11 @@ export STRATEGIC_MODEL_PATH=/path/to/strategic-model.gguf
 
 ### LLM inference too slow
 
-1. Ensure CUDA is available: `nvidia-smi`
-2. Use quantized models (Q4_K_M recommended)
-3. System works without LLM - falls back to templates
+1. Check what mode SAIREN-OS detected at startup (look for "Hardware:" in logs)
+2. If on CPU, this is expected — CPU inference targets ~2-5s (tactical) and ~10-30s (strategic)
+3. For faster inference, build with `--features cuda` and ensure CUDA is available: `nvidia-smi`
+4. Use quantized models (Q4_K_M recommended)
+5. System works without LLM - falls back to templates
 
 ### Another instance already running
 
@@ -529,8 +542,9 @@ src/
     wits_parser.rs     # WITS Level 0 TCP protocol parser
 
   llm/
-    tactical_llm.rs    # Qwen 2.5 1.5B classification
-    strategic_llm.rs   # Qwen 2.5 7B advisory generation
+    tactical_llm.rs    # Qwen 2.5 1.5B classification (GPU & CPU)
+    strategic_llm.rs   # Qwen 2.5 7B (GPU) / 4B (CPU) advisory generation
+    mistral_rs.rs      # Backend with runtime CUDA detection
 
   api/
     routes.rs          # HTTP route definitions
@@ -629,12 +643,28 @@ static/
 
 ## Performance
 
+### GPU Mode (with CUDA)
+
 | Metric | Target | Actual |
 |--------|--------|--------|
-| Tactical Latency | < 15ms | ~10ms |
-| Strategic Latency | < 800ms | ~750ms |
+| Tactical Physics | < 15ms | ~10ms |
+| Tactical LLM | < 60ms | ~50ms |
+| Strategic LLM | < 800ms | ~750ms |
 | WITS Packet Rate | 1 Hz | 1 Hz |
 | History Buffer | 60 packets | 60 |
+
+### CPU Mode (no CUDA)
+
+| Metric | Target | Actual |
+|--------|--------|--------|
+| Tactical Physics | < 15ms | ~10ms |
+| Tactical LLM | < 5s | ~2-5s |
+| Strategic LLM | < 30s | ~10-30s |
+| WITS Packet Rate | 1 Hz | 1 Hz |
+| History Buffer | 60 packets | 60 |
+
+> **Note**: Physics-based detection (MSE, d-exponent, flow balance) runs at the same speed
+> on both GPU and CPU. Only LLM advisory generation is affected by hardware.
 
 ---
 

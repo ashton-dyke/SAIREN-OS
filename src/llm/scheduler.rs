@@ -4,7 +4,8 @@
 //! - P0: Tactical (60-second loop, never delayed)
 //! - P1: Strategic (hourly/daily, can be deferred)
 //!
-//! Single-threaded scheduler ensures no GPU contention and predictable latency.
+//! Single-threaded scheduler ensures no resource contention (GPU or CPU)
+//! and predictable latency. Works identically on both GPU and CPU backends.
 
 use anyhow::{Context, Result};
 use std::cmp::Ordering;
@@ -396,7 +397,7 @@ impl LlmScheduler {
         let _ = request.response_tx.send(result);
     }
 
-    /// Generate with explicit cleanup (VRAM leak prevention)
+    /// Generate with explicit cleanup (KV cache leak prevention)
     async fn generate_with_cleanup(
         &self,
         model: &MistralRsBackend,

@@ -1,13 +1,21 @@
 //! LLM Backend Module
 //!
-//! Provides a unified interface for LLM backends.
+//! Provides a unified interface for LLM backends with automatic hardware detection.
 //!
 //! ## Dual-Model Architecture
 //!
-//! - **TacticalLLM**: Qwen 2.5 1.5B Instruct for fast anomaly classification (60ms target)
-//! - **StrategicLLM**: DeepSeek R1 Distill Qwen 7B for comprehensive diagnosis (800ms OK)
+//! - **TacticalLLM**: Qwen 2.5 1.5B Instruct for fast anomaly classification
+//! - **StrategicLLM**: Qwen 2.5 7B (GPU) or 4B (CPU) for comprehensive diagnosis
 //!
-//! Both models are loaded via mistral.rs with CUDA acceleration.
+//! ## Hardware Detection
+//!
+//! On startup the system checks for CUDA availability:
+//! - **GPU mode** (requires `cuda` feature + CUDA runtime): Uses larger models on GPU
+//!   - Tactical: Qwen 2.5 1.5B (~60ms)
+//!   - Strategic: Qwen 2.5 7B (~800ms)
+//! - **CPU mode** (default `llm` feature): Uses smaller models on CPU
+//!   - Tactical: Qwen 2.5 1.5B (~2-5s)
+//!   - Strategic: Qwen 2.5 4B (~10-30s)
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -18,6 +26,8 @@ use std::sync::Arc;
 mod mistral_rs;
 #[cfg(feature = "llm")]
 pub use mistral_rs::MistralRsBackend;
+#[cfg(feature = "llm")]
+pub use mistral_rs::is_cuda_available;
 
 #[cfg(feature = "llm")]
 pub mod scheduler;
@@ -47,7 +57,7 @@ pub trait LlmBackend: Send + Sync {
 /// LLM Backend wrapper
 #[cfg(feature = "llm")]
 pub enum Backend {
-    /// Real Mistral.rs backend with GPU support
+    /// Mistral.rs backend (GPU or CPU depending on CUDA availability)
     MistralRs(Arc<MistralRsBackend>),
 }
 
@@ -97,7 +107,7 @@ impl LlmFactory {
     pub async fn create(model_path: &str) -> Result<Backend> {
         tracing::info!(
             model_path = %model_path,
-            "Attempting to load Mistral.rs backend with GPU support"
+            "Attempting to load Mistral.rs backend"
         );
 
         let backend = MistralRsBackend::load(model_path).await?;

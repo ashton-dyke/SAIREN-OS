@@ -345,10 +345,17 @@ impl PipelineCoordinator {
             "Strategic analysis complete - advisory sent to dashboard"
         );
 
-        if cycle_time.as_millis() > 100 {
+        // Cycle time targets: 100ms for GPU, 60s for CPU (LLM inference is slower on CPU)
+        #[cfg(feature = "llm")]
+        let cycle_target_ms: u128 = if crate::llm::is_cuda_available() { 100 } else { 60_000 };
+        #[cfg(not(feature = "llm"))]
+        let cycle_target_ms: u128 = 100;
+
+        if cycle_time.as_millis() > cycle_target_ms {
             warn!(
                 elapsed_ms = cycle_time.as_millis(),
-                "Processing cycle exceeded 100ms target"
+                target_ms = cycle_target_ms,
+                "Processing cycle exceeded target"
             );
         }
 

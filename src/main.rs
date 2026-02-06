@@ -12,16 +12,17 @@
 //! # Run with simulation input from stdin
 //! python wits_simulator.py | ./sairen-os --stdin
 //!
-//! # Run with LLM models
-//! TACTICAL_MODEL_PATH=models/qwen2.5-1.5b-instruct-q4_k_m.gguf \
-//! STRATEGIC_MODEL_PATH=models/deepseek-r1-distill-qwen-7b-q4.gguf \
+//! # Run with LLM models (CPU - auto-detects hardware)
 //! cargo run --release --features llm
+//!
+//! # Run with LLM models (GPU - requires CUDA toolkit)
+//! cargo run --release --features cuda
 //! ```
 //!
 //! # Environment Variables
 //!
-//! - `TACTICAL_MODEL_PATH`: Path to tactical LLM (Qwen 2.5 1.5B Instruct)
-//! - `STRATEGIC_MODEL_PATH`: Path to strategic LLM (DeepSeek R1 Distill Qwen 7B)
+//! - `TACTICAL_MODEL_PATH`: Path to tactical LLM (default: Qwen 2.5 1.5B)
+//! - `STRATEGIC_MODEL_PATH`: Path to strategic LLM (default: Qwen 7B GPU / 4B CPU)
 //! - `RUST_LOG`: Logging level (default: info)
 //! - `RESET_DB`: Set to "true" to wipe all persistent data on startup (for testing)
 
@@ -251,10 +252,11 @@ async fn run_drilling_pipeline(
     // Initialize pipeline coordinator
     #[cfg(feature = "llm")]
     let mut coordinator = {
-        info!("🧠 Initializing LLM-enabled pipeline...");
+        let mode = if llm::is_cuda_available() { "GPU" } else { "CPU" };
+        info!("🧠 Initializing LLM-enabled pipeline ({} mode)...", mode);
         match PipelineCoordinator::init_with_llm().await {
             Ok(c) => {
-                info!("✓ LLM loaded successfully");
+                info!("✓ LLM loaded successfully ({})", mode);
                 c
             }
             Err(e) => {
@@ -1274,6 +1276,27 @@ async fn main() -> Result<()> {
     info!("  Drilling Operational Intelligence System");
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("");
+
+    // Log hardware detection for LLM inference
+    #[cfg(feature = "llm")]
+    {
+        let cuda_available = llm::is_cuda_available();
+        if cuda_available {
+            info!("🖥️  Hardware: CUDA detected - LLM inference will use GPU");
+            info!("   Tactical model: Qwen 2.5 1.5B (GPU, ~60ms)");
+            info!("   Strategic model: Qwen 2.5 7B (GPU, ~800ms)");
+        } else {
+            info!("🖥️  Hardware: CUDA not available - LLM inference will use CPU");
+            info!("   Tactical model: Qwen 2.5 1.5B (CPU, ~2-5s)");
+            info!("   Strategic model: Qwen 2.5 4B (CPU, ~10-30s)");
+        }
+        info!("");
+    }
+    #[cfg(not(feature = "llm"))]
+    {
+        info!("🖥️  LLM: disabled (template-based advisories)");
+        info!("");
+    }
 
     // Create cancellation token for graceful shutdown
     let cancel_token = CancellationToken::new();

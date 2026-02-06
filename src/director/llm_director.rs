@@ -289,13 +289,18 @@ pub struct DirectorConfig {
 
 impl Default for DirectorConfig {
     fn default() -> Self {
+        #[cfg(feature = "llm")]
+        let use_gpu = crate::llm::is_cuda_available();
+        #[cfg(not(feature = "llm"))]
+        let use_gpu = false;
+
         Self {
             model_path: "models/qwen2.5-1.5b-instruct-q4_k_m.gguf".to_string(),
             max_tokens: 512,
             temperature: 0.1, // Low temperature for consistent analysis
-            use_gpu: true,
-            timeout_secs: 30,
-            gpu_layers: 35, // Offload most layers for 4-bit model
+            use_gpu,
+            timeout_secs: if use_gpu { 30 } else { 120 },
+            gpu_layers: if use_gpu { 35 } else { 0 },
         }
     }
 }
@@ -343,16 +348,22 @@ ACTION: [Specific recommended action]"#;
 // LLM Director
 // ============================================================================
 
-/// LLM Director for vibration analysis using Mistral 7B.
+/// LLM Director for vibration analysis.
 ///
-/// The director wraps a Mistral 7B model (4-bit quantized) and provides
+/// The director wraps a GGUF model (4-bit quantized) and provides
 /// high-level methods for analyzing FFT spectrum data.
 ///
-/// # GPU Requirements
+/// # Hardware Requirements
 ///
-/// - Minimum: 6 GB VRAM for 4-bit quantized model
-/// - Recommended: 8 GB VRAM for faster inference
-/// - Fallback: CPU inference available but slower (~10-30 seconds)
+/// - **GPU mode** (with `cuda` feature + CUDA runtime):
+///   - Minimum: 6 GB VRAM for 4-bit quantized model
+///   - Recommended: 8 GB VRAM for faster inference
+/// - **CPU mode** (default):
+///   - Minimum: 8 GB system RAM
+///   - Recommended: 16 GB for larger models
+///   - Inference is slower (~10-30 seconds per request)
+///
+/// Hardware detection is automatic at startup.
 ///
 /// # Thread Safety
 ///
