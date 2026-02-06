@@ -17,14 +17,12 @@
 //! The LLM receives physics analysis, contextual knowledge from vector DB,
 //! and ticket details to generate actionable drilling recommendations.
 
-use crate::baseline::{wits_metrics, ThresholdManager};
-use crate::context::vector_db;
+use crate::baseline::ThresholdManager;
 use crate::llm::StrategicLLM;
 use crate::physics_engine;
 use crate::types::{
-    AdvisoryTicket, AnomalyCategory, CheckStatus, DrillingMetrics,
-    DrillingPhysicsReport, EnhancedPhysicsReport, FinalSeverity, HistoryEntry, RiskLevel,
-    StrategicAdvisory, TicketEvent, TicketSeverity, TicketStage, TicketType, VerificationResult,
+    AdvisoryTicket, AnomalyCategory, CheckStatus, EnhancedPhysicsReport, FinalSeverity,
+    HistoryEntry, TicketEvent, TicketSeverity, TicketStage, TicketType, VerificationResult,
     VerificationStatus, WitsPacket,
 };
 use std::sync::{Arc, RwLock};
@@ -619,7 +617,7 @@ impl StrategicAgent {
         &self,
         ticket: &mut AdvisoryTicket,
         physics: &EnhancedPhysicsReport,
-        history: &[HistoryEntry],
+        _history: &[HistoryEntry],
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
         let cfg = crate::config::get();
 
@@ -696,7 +694,7 @@ impl StrategicAgent {
         &self,
         ticket: &mut AdvisoryTicket,
         physics: &EnhancedPhysicsReport,
-        history: &[HistoryEntry],
+        _history: &[HistoryEntry],
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
         let cfg = crate::config::get();
 

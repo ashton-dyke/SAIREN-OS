@@ -23,11 +23,11 @@
 //! - State filter: Only during Drilling or Reaming
 //! - Cooldown: 60 seconds (CRITICAL bypasses)
 
-use crate::baseline::{wits_metrics, AnomalyLevel, ThresholdManager};
+use crate::baseline::{wits_metrics, ThresholdManager};
 use crate::physics_engine;
 use crate::types::{
-    AdvisoryTicket, AnomalyCategory, Campaign, CheckStatus, DrillingMetrics,
-    HistoryEntry, Operation, RigState, TicketEvent, TicketSeverity, TicketStage, TicketType, WitsPacket,
+    AdvisoryTicket, AnomalyCategory, Campaign, DrillingMetrics,
+    HistoryEntry, Operation, RigState, TicketSeverity, TicketStage, TicketType, WitsPacket,
 };
 
 // ============================================================================

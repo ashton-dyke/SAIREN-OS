@@ -6,7 +6,7 @@ mod fft;
 mod health_scoring;
 
 pub use fft::*;
-pub use health_scoring::{calculate_health_score, calculate_health_score_with_buffer};
+pub use health_scoring::calculate_health_score_with_buffer;
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;

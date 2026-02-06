@@ -34,8 +34,7 @@
 
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, DrillingMetrics,
-    DrillingPhysicsReport, FinalSeverity, RiskLevel, SpecialistVote, StrategicAdvisory,
-    TicketEvent, TicketSeverity, TicketStage,
+    DrillingPhysicsReport, FinalSeverity, RiskLevel, SpecialistVote, StrategicAdvisory, TicketSeverity,
 };
 use tracing::info;
 
@@ -147,7 +146,7 @@ impl Orchestrator {
     /// MSE Specialist vote (25% weight) - Drilling efficiency
     fn mse_specialist_vote(
         &self,
-        metrics: &DrillingMetrics,
+        _metrics: &DrillingMetrics,
         physics: &DrillingPhysicsReport,
     ) -> SpecialistVote {
         let efficiency = physics.mse_efficiency;
@@ -310,7 +309,7 @@ impl Orchestrator {
     /// Formation Specialist vote (20% weight) - D-exponent, torque trends
     fn formation_specialist_vote(
         &self,
-        metrics: &DrillingMetrics,
+        _metrics: &DrillingMetrics,
         physics: &DrillingPhysicsReport,
     ) -> SpecialistVote {
         let dxc_trend = physics.dxc_trend;

@@ -261,6 +261,9 @@ impl WellConfig {
         if p.kick_gas_severity_divisor <= 0.0 {
             errors.push("physics.kick_gas_severity_divisor must be > 0".to_string());
         }
+        if p.confidence_full_window == 0 {
+            errors.push("physics.confidence_full_window must be > 0".to_string());
+        }
 
         // Reject NaN/Inf in any config value (sweep all f64 fields via serialization)
         let serialized = toml::to_string(self);

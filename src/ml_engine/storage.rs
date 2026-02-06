@@ -11,7 +11,7 @@
 use crate::types::{AnalysisResult, Campaign, MLInsightsReport};
 use sled::Db;
 use std::path::Path;
-use tracing::{debug, warn};
+use tracing::debug;
 
 /// Storage error types
 #[derive(Debug)]

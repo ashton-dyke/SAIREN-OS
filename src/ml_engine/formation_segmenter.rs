@@ -85,7 +85,7 @@ impl FormationSegmenter {
 
     /// Create a segment for a given range
     fn create_segment(
-        packets: &[&WitsPacket],
+        _packets: &[&WitsPacket],
         d_exp_values: &[f64],
         start: usize,
         end: usize,

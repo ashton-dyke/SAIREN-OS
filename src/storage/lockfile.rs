@@ -112,7 +112,7 @@ impl ProcessLock {
     fn is_process_running(pid: u32) -> bool {
         // On Unix, we can use kill with signal 0 to check if process exists
         // This doesn't actually send a signal, just checks if the process exists
-        use std::os::unix::process::CommandExt;
+        
 
         // Try to read /proc/PID/cmdline to verify it's a SAIREN process
         let proc_path = format!("/proc/{}/cmdline", pid);

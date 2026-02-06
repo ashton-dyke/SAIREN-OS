@@ -12,7 +12,7 @@ use serde::Serialize;
 use std::sync::Arc;
 use tokio::sync::RwLock;
 
-use crate::baseline::{tds_metrics, wits_metrics, LearningStatus, ThresholdManager};
+use crate::baseline::{wits_metrics, LearningStatus, ThresholdManager};
 use crate::pipeline::AppState;
 use crate::processing::calculate_bearing_frequencies;
 use crate::ml_engine::{MLInsightsStorage, OptimalFinder};

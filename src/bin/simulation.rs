@@ -385,7 +385,7 @@ impl SimulationState {
             self.rng.gen_range(-3.0..3.0)
         };
 
-        let mse_delta = ((self.mse - self.baseline_mse) / self.baseline_mse * 100.0).abs();
+        let _mse_delta = ((self.mse - self.baseline_mse) / self.baseline_mse * 100.0).abs();
         let torque_delta = if self.current_phase == Phase::PackOff {
             20.0 + self.rng.gen_range(0.0..10.0)
         } else {

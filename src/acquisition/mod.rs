@@ -8,9 +8,8 @@ mod sensors;
 mod stdin_source;
 pub mod wits_parser;
 
-pub use sensors::*;
 pub use stdin_source::StdinSensorSource;
-pub use wits_parser::{WitsClient, WitsError, parse_wits_json, wits_items};
+pub use wits_parser::{WitsClient, WitsError};
 
 use anyhow::Result;
 use async_trait::async_trait;

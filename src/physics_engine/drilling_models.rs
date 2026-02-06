@@ -7,7 +7,7 @@
 //! - Pack-off and stick-slip detection
 //! - Formation change detection
 
-use crate::types::{DrillingMetrics, DrillingPhysicsReport, HistoryEntry, RigState, WitsPacket};
+use crate::types::{DrillingPhysicsReport, HistoryEntry, RigState, WitsPacket};
 
 // ============================================================================
 // MSE (Mechanical Specific Energy) Calculations

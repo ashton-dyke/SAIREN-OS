@@ -30,4 +30,4 @@ mod processor;
 mod coordinator;
 
 pub use processor::*;
-pub use coordinator::{PipelineCoordinator, PipelineStats};
+pub use coordinator::PipelineCoordinator;

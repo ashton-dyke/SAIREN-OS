@@ -193,7 +193,7 @@ impl DysfunctionFilter {
     /// Check if a single sample exhibits dysfunction
     fn check_dysfunction(
         index: usize,
-        packet: &WitsPacket,
+        _packet: &WitsPacket,
         metric: &DrillingMetrics,
         torque_cv: &[f64],
         founder_flags: &[bool],
@@ -351,7 +351,7 @@ impl DysfunctionFilter {
     /// Returns a score from 0.0 (highly unstable) to 1.0 (very stable)
     /// Used by OptimalFinder for stability penalty calculation
     pub fn calculate_stability_score(
-        packet: &WitsPacket,
+        _packet: &WitsPacket,
         metric: &DrillingMetrics,
         torque_cv: f64,
     ) -> f64 {
