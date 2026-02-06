@@ -6,7 +6,7 @@
 //! - Frequency spectrum visualization
 //! - Static file serving for the dashboard
 
-mod handlers;
+pub mod handlers;
 mod routes;
 
 pub use handlers::DashboardState;

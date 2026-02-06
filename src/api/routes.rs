@@ -37,6 +37,15 @@ pub fn api_routes(state: DashboardState) -> Router {
         .route("/reports/critical", get(handlers::get_critical_reports))
         // Test endpoint for creating sample critical report
         .route("/reports/test", post(handlers::create_test_critical_report))
+        // Well configuration endpoints
+        .route("/config", get(handlers::get_config))
+        .route("/config", post(handlers::update_config))
+        .route("/config/validate", post(handlers::validate_config))
+        // Advisory acknowledgment
+        .route("/advisory/acknowledge", post(handlers::acknowledge_advisory))
+        .route("/advisory/acknowledgments", get(handlers::get_acknowledgments))
+        // Shift summary
+        .route("/shift/summary", get(handlers::get_shift_summary))
         .with_state(state)
 }
 

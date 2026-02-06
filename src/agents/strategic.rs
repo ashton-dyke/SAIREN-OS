@@ -22,7 +22,7 @@ use crate::context::vector_db;
 use crate::llm::StrategicLLM;
 use crate::physics_engine;
 use crate::types::{
-    verification_thresholds, AdvisoryTicket, AnomalyCategory, CheckStatus, DrillingMetrics,
+    AdvisoryTicket, AnomalyCategory, CheckStatus, DrillingMetrics,
     DrillingPhysicsReport, EnhancedPhysicsReport, FinalSeverity, HistoryEntry, RiskLevel,
     StrategicAdvisory, TicketEvent, TicketSeverity, TicketStage, TicketType, VerificationResult,
     VerificationStatus, WitsPacket,
@@ -253,6 +253,8 @@ impl StrategicAgent {
         physics: &EnhancedPhysicsReport,
         history: &[HistoryEntry],
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
+        let cfg = crate::config::get();
+
         // Log well control check
         ticket.log_info(TicketStage::WellControlCheck, "Analyzing well control indicators");
 
@@ -287,13 +289,17 @@ impl StrategicAgent {
         // Well control is CRITICAL - almost always confirm
         let is_sustained = physics.is_sustained || recent_flow_balances.len() >= 3;
 
-        if avg_flow_balance.abs() > 15.0 || avg_pit_rate.abs() > 10.0 {
+        if avg_flow_balance.abs() > cfg.thresholds.strategic_verification.flow_balance_confirmation_gpm
+            || avg_pit_rate.abs() > cfg.thresholds.strategic_verification.pit_rate_confirmation_bbl_hr
+        {
             ticket.log_passed(
                 TicketStage::WellControlCheck,
                 format!("Sustained well control issue: flow={:.1}, pit_rate={:.1}", avg_flow_balance, avg_pit_rate),
             );
 
-            let severity = if avg_flow_balance.abs() > 20.0 || avg_pit_rate.abs() > 15.0 {
+            let severity = if avg_flow_balance.abs() > cfg.thresholds.strategic_verification.flow_balance_critical_gpm
+                || avg_pit_rate.abs() > cfg.thresholds.strategic_verification.pit_rate_critical_bbl_hr
+            {
                 FinalSeverity::Critical
             } else {
                 FinalSeverity::High
@@ -313,7 +319,10 @@ impl StrategicAgent {
             );
         }
 
-        if is_sustained && (avg_flow_balance.abs() > 5.0 || avg_pit_rate.abs() > 3.0) {
+        if is_sustained
+            && (avg_flow_balance.abs() > cfg.thresholds.strategic_verification.flow_balance_transient_gpm
+                || avg_pit_rate.abs() > cfg.thresholds.strategic_verification.pit_rate_transient_bbl_hr)
+        {
             return (
                 VerificationStatus::Confirmed,
                 format!(
@@ -327,7 +336,7 @@ impl StrategicAgent {
         }
 
         // Check if it was transient
-        if !is_sustained && avg_flow_balance.abs() < 5.0 {
+        if !is_sustained && avg_flow_balance.abs() < cfg.thresholds.strategic_verification.flow_balance_transient_gpm {
             ticket.log_failed(
                 TicketStage::WellControlCheck,
                 "Flow balance returned to normal - transient event",
@@ -359,6 +368,8 @@ impl StrategicAgent {
         physics: &EnhancedPhysicsReport,
         history: &[HistoryEntry],
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
+        let cfg = crate::config::get();
+
         ticket.log_info(TicketStage::HydraulicsCheck, "Analyzing hydraulics indicators");
 
         // Check ECD margin trend
@@ -382,7 +393,7 @@ impl StrategicAgent {
         };
 
         // Critical ECD margin
-        if avg_ecd_margin < 0.1 {
+        if avg_ecd_margin < cfg.thresholds.hydraulics.ecd_margin_critical_ppg {
             ticket.log_passed(
                 TicketStage::HydraulicsCheck,
                 format!("Critical ECD margin: {:.2} ppg", avg_ecd_margin),
@@ -413,7 +424,9 @@ impl StrategicAgent {
             ticket.current_metrics.spp_delta
         };
 
-        if avg_spp_delta.abs() > 150.0 && physics.is_sustained {
+        if avg_spp_delta.abs() > cfg.thresholds.strategic_verification.spp_deviation_sustained_psi
+            && physics.is_sustained
+        {
             ticket.log_passed(
                 TicketStage::HydraulicsCheck,
                 format!("Sustained SPP deviation: {:.0} psi", avg_spp_delta),
@@ -431,7 +444,7 @@ impl StrategicAgent {
         }
 
         // Low ECD margin warning
-        if avg_ecd_margin < 0.3 {
+        if avg_ecd_margin < cfg.thresholds.hydraulics.ecd_margin_warning_ppg {
             return (
                 VerificationStatus::Confirmed,
                 format!(
@@ -444,7 +457,9 @@ impl StrategicAgent {
         }
 
         // Transient or normal
-        if avg_spp_delta.abs() < 50.0 && avg_ecd_margin > 0.3 {
+        if avg_spp_delta.abs() < cfg.thresholds.strategic_verification.spp_deviation_normal_psi
+            && avg_ecd_margin > cfg.thresholds.hydraulics.ecd_margin_warning_ppg
+        {
             ticket.log_failed(TicketStage::HydraulicsCheck, "Hydraulics returned to normal");
             return (
                 VerificationStatus::Rejected,
@@ -469,6 +484,8 @@ impl StrategicAgent {
         physics: &EnhancedPhysicsReport,
         history: &[HistoryEntry],
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
+        let cfg = crate::config::get();
+
         ticket.log_info(TicketStage::MseAnalysis, "Analyzing mechanical indicators");
 
         // Check torque trend
@@ -499,9 +516,9 @@ impl StrategicAgent {
 
         // === FOUNDER DETECTION (priority over other mechanical issues) ===
         if has_founder {
-            let severity_level = if founder_severity >= 0.7 {
+            let severity_level = if founder_severity >= cfg.thresholds.founder.severity_high {
                 FinalSeverity::High
-            } else if founder_severity >= 0.3 {
+            } else if founder_severity >= cfg.thresholds.founder.severity_warning {
                 FinalSeverity::Medium
             } else {
                 FinalSeverity::Low
@@ -543,7 +560,7 @@ impl StrategicAgent {
         }
 
         // === STICK-SLIP DETECTION ===
-        if has_stick_slip && physics.trend_consistency > 0.5 {
+        if has_stick_slip && physics.trend_consistency > cfg.thresholds.strategic_verification.trend_consistency_threshold {
             ticket.log_passed(TicketStage::MseAnalysis, "Stick-slip detected with consistent pattern");
             return (
                 VerificationStatus::Confirmed,
@@ -555,7 +572,7 @@ impl StrategicAgent {
         }
 
         // === PACK-OFF DETECTION ===
-        if has_packoff || (avg_torque_delta > 0.20 && physics.is_sustained) {
+        if has_packoff || (avg_torque_delta > cfg.thresholds.mechanical.torque_increase_critical && physics.is_sustained) {
             ticket.log_passed(
                 TicketStage::MseAnalysis,
                 format!("Pack-off condition: torque_delta={:.1}%", avg_torque_delta * 100.0),
@@ -572,7 +589,7 @@ impl StrategicAgent {
             );
         }
 
-        if avg_torque_delta > 0.15 {
+        if avg_torque_delta > cfg.thresholds.mechanical.torque_increase_warning {
             return (
                 VerificationStatus::Uncertain,
                 format!(
@@ -600,6 +617,8 @@ impl StrategicAgent {
         physics: &EnhancedPhysicsReport,
         history: &[HistoryEntry],
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
+        let cfg = crate::config::get();
+
         ticket.log_info(TicketStage::MseAnalysis, "Analyzing drilling efficiency");
 
         // Use physics report efficiency
@@ -608,7 +627,9 @@ impl StrategicAgent {
         let avg_mse = physics.base.avg_mse;
 
         // Sustained low efficiency
-        if efficiency < 50.0 && physics.trend_consistency > 0.5 {
+        if efficiency < cfg.thresholds.mse.efficiency_poor_percent
+            && physics.trend_consistency > cfg.thresholds.strategic_verification.trend_consistency_threshold
+        {
             ticket.log_passed(
                 TicketStage::MseAnalysis,
                 format!("Low efficiency: {:.0}%", efficiency),
@@ -634,7 +655,7 @@ impl StrategicAgent {
             );
         }
 
-        if efficiency < 70.0 && physics.is_sustained {
+        if efficiency < cfg.thresholds.mse.efficiency_warning_percent && physics.is_sustained {
             return (
                 VerificationStatus::Confirmed,
                 format!(
@@ -648,7 +669,7 @@ impl StrategicAgent {
         }
 
         // Efficiency improved
-        if efficiency >= 70.0 {
+        if efficiency >= cfg.thresholds.mse.efficiency_warning_percent {
             ticket.log_failed(TicketStage::MseAnalysis, "Efficiency improved");
             return (
                 VerificationStatus::Rejected,
@@ -673,6 +694,8 @@ impl StrategicAgent {
         physics: &EnhancedPhysicsReport,
         history: &[HistoryEntry],
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
+        let cfg = crate::config::get();
+
         ticket.log_info(TicketStage::FormationAnalysis, "Analyzing formation indicators");
 
         // D-exponent trend analysis
@@ -680,11 +703,13 @@ impl StrategicAgent {
         let formation_hardness = physics.base.formation_hardness;
 
         // Significant d-exponent change indicates formation change
-        if dxc_trend.abs() > 0.1 && physics.trend_consistency > 0.6 {
+        if dxc_trend.abs() > cfg.thresholds.strategic_verification.dxc_change_threshold
+            && physics.trend_consistency > cfg.thresholds.strategic_verification.formation_trend_consistency
+        {
             let formation_type = if dxc_trend > 0.0 { "harder" } else { "softer" };
             let recommendation = if dxc_trend > 0.0 {
                 "Adjust WOB/RPM for harder formation"
-            } else if dxc_trend < -0.1 {
+            } else if dxc_trend < -cfg.thresholds.strategic_verification.dxc_change_threshold {
                 "Possible abnormal pressure - monitor closely"
             } else {
                 "Optimize parameters for new formation"
@@ -762,6 +787,14 @@ mod tests {
     use crate::types::{DrillingMetrics, RigState};
     use std::sync::Arc;
 
+    /// Ensure the global config is initialized for tests.
+    /// Safe to call multiple times; only the first call initializes.
+    fn ensure_config() {
+        if !crate::config::is_initialized() {
+            crate::config::init(crate::config::WellConfig::default());
+        }
+    }
+
     fn create_test_ticket(category: AnomalyCategory, severity: TicketSeverity) -> AdvisoryTicket {
         AdvisoryTicket {
             timestamp: 1705564800,
@@ -831,6 +864,7 @@ mod tests {
 
     #[test]
     fn test_verify_well_control_confirmed() {
+        ensure_config();
         let mut agent = StrategicAgent::new();
         let ticket = create_test_ticket(AnomalyCategory::WellControl, TicketSeverity::High);
         let history = create_test_history();
@@ -843,6 +877,7 @@ mod tests {
 
     #[test]
     fn test_verification_count() {
+        ensure_config();
         let mut agent = StrategicAgent::new();
         let ticket = create_test_ticket(AnomalyCategory::DrillingEfficiency, TicketSeverity::Low);
         let history = create_test_history();

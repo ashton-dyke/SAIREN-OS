@@ -12,14 +12,15 @@ Real-time drilling advisory system using WITS Level 0 data and a multi-agent AI 
 4. [Architecture](#architecture)
 5. [Running the System](#running-the-system)
 6. [Configuration](#configuration)
-7. [WITS Simulator](#wits-simulator)
-8. [API Reference](#api-reference)
-9. [Understanding Advisories](#understanding-advisories)
-10. [Thresholds Reference](#thresholds-reference)
-11. [Troubleshooting](#troubleshooting)
-12. [Project Structure](#project-structure)
-13. [Glossary](#glossary)
-14. [Changelog](#changelog)
+7. [Deployment](#deployment)
+8. [WITS Simulator](#wits-simulator)
+9. [API Reference](#api-reference)
+10. [Understanding Advisories](#understanding-advisories)
+11. [Thresholds Reference](#thresholds-reference)
+12. [Troubleshooting](#troubleshooting)
+13. [Project Structure](#project-structure)
+14. [Glossary](#glossary)
+15. [Changelog](#changelog)
 
 ---
 
@@ -239,14 +240,66 @@ cargo build --release
 
 ## Configuration
 
+### Well Configuration File (`well_config.toml`)
+
+Every drilling threshold in SAIREN-OS is configurable via a single TOML file. The system searches for configuration in this order:
+
+1. `$SAIREN_CONFIG` environment variable (if set)
+2. `./well_config.toml` in the working directory
+3. Built-in defaults (safe for most wells)
+
+Copy the reference config and edit for your well:
+
+```bash
+cp well_config.default.toml well_config.toml
+vi well_config.toml
+```
+
+**Key sections:**
+
+| Section | Controls | Example |
+|---------|----------|---------|
+| `[well]` | Well name, rig ID, bit diameter | `bit_diameter_inches = 8.5` |
+| `[thresholds.well_control]` | Kick/loss warning & critical triggers | `flow_imbalance_warning_gpm = 10.0` |
+| `[thresholds.mse]` | MSE efficiency bands | `efficiency_poor_percent = 50.0` |
+| `[thresholds.hydraulics]` | ECD margin, SPP deviation | `ecd_margin_warning_ppg = 0.3` |
+| `[thresholds.mechanical]` | Torque, pack-off detection | `torque_increase_warning_pct = 15.0` |
+| `[thresholds.founder]` | Founder point detection sensitivity | `wob_increase_pct = 5.0` |
+| `[baseline_learning]` | Sigma thresholds, min samples | `min_samples = 100` |
+| `[ensemble_weights]` | Specialist voting weights (must sum to ~1.0) | `well_control = 0.30` |
+| `[physics]` | Mud weight, formation constants | `normal_mud_weight_ppg = 10.0` |
+| `[campaign.*]` | Per-campaign threshold overrides | `[campaign.plug_abandonment]` |
+
+Only include sections you want to override — all omitted values use safe defaults. The system validates consistency on load (e.g., critical > warning thresholds, weights sum check).
+
+### Runtime Configuration API
+
+Thresholds can be viewed and updated at runtime without restarting:
+
+```bash
+# View current config
+curl http://localhost:8080/api/v1/config | jq .
+
+# Update thresholds (validates before applying, saves to well_config.toml)
+curl -X POST http://localhost:8080/api/v1/config \
+  -H "Content-Type: application/json" \
+  -d '{"config": {"thresholds": {"well_control": {"flow_imbalance_warning_gpm": 8.0}}}}'
+
+# Validate without applying
+curl -X POST http://localhost:8080/api/v1/config/validate \
+  -H "Content-Type: application/json" \
+  -d '{"config": {"ensemble_weights": {"mse": 0.5, "hydraulic": 0.5, "well_control": 0.0, "formation": 0.0}}}'
+```
+
 ### Environment Variables
 
 | Variable | Default | Description |
 |----------|---------|-------------|
+| `SAIREN_CONFIG` | *(none)* | Path to `well_config.toml` (overrides search) |
 | `CAMPAIGN` | `production` | Campaign mode: `production` or `pa` |
 | `TACTICAL_MODEL_PATH` | `models/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Tactical LLM model (same for GPU/CPU) |
 | `STRATEGIC_MODEL_PATH` | GPU: `models/qwen2.5-7b-instruct-q4_k_m.gguf`, CPU: `models/qwen2.5-4b-instruct-q4_k_m.gguf` | Strategic LLM model (auto-selected) |
-| `TDS_SERVER_ADDR` | `0.0.0.0:8080` | HTTP server bind address |
+| `SAIREN_SERVER_ADDR` | `0.0.0.0:8080` | HTTP server bind address |
 | `RUST_LOG` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `ML_INTERVAL_SECS` | `3600` | ML analysis interval (seconds) |
 | `WELL_ID` | `WELL-001` | Well identifier for ML storage |
@@ -258,7 +311,59 @@ cargo build --release
 |----------|-------------|
 | `--wits-tcp <host:port>` | Connect to WITS Level 0 TCP server |
 | `--stdin` | Read WITS JSON packets from stdin |
+| `--csv <path>` | Replay WITS data from CSV file |
 | `--addr <host:port>` | Override HTTP server address |
+| `--speed <N>` | Simulation speed multiplier (default: 1) |
+| `--reset-db` | Wipe all persistent data on startup |
+
+---
+
+## Deployment
+
+### Production Deployment (systemd)
+
+SAIREN-OS ships with a systemd service unit and install script for rig-edge deployment.
+
+```bash
+# 1. Build the release binary
+cargo build --release --features llm
+
+# 2. Run the installer (as root)
+sudo deploy/install.sh
+```
+
+This creates:
+
+| Path | Purpose |
+|------|---------|
+| `/opt/sairen-os/bin/sairen-os` | Binary |
+| `/opt/sairen-os/data/` | Persistent state (baseline, ML insights, databases) |
+| `/etc/sairen-os/well_config.toml` | Well configuration (edit before starting) |
+| `/etc/sairen-os/env` | Environment overrides |
+
+```bash
+# Edit well config for this well
+sudo vi /etc/sairen-os/well_config.toml
+
+# Edit env (WITS host, log level, etc.)
+sudo vi /etc/sairen-os/env
+
+# Enable and start
+sudo systemctl enable sairen-os
+sudo systemctl start sairen-os
+
+# Monitor
+sudo journalctl -u sairen-os -f
+```
+
+**Security hardening** — the service runs as a dedicated `sairen` user with:
+- `NoNewPrivileges`, `ProtectSystem=strict`, `ProtectHome=yes`, `PrivateTmp=yes`
+- Read-write access only to `/opt/sairen-os/data` and `/var/log/sairen-os`
+- Automatic restart on failure (5s delay, max 5 retries per 5 minutes)
+
+### Baseline Persistence
+
+Baseline learning state (locked thresholds) is automatically saved to `data/baseline_state.json` after each metric locks. On restart, the system reloads locked thresholds so it doesn't need to re-learn from scratch. In-progress learning accumulators are intentionally not persisted — learning restarts cleanly.
 
 ---
 
@@ -337,12 +442,32 @@ Base URL: `http://localhost:8080`
 |----------|--------|-------------|
 | `/api/v1/health` | GET | System health status |
 | `/api/v1/status` | GET | System status, metrics, current operation |
+| `/api/v1/spectrum` | GET | FFT spectrum data for visualization |
+| `/api/v1/ttf` | GET | Time-to-failure estimates |
+| `/api/v1/drilling` | GET | Current drilling metrics |
 | `/api/v1/history` | GET | Recent advisory history (last 50) |
 | `/api/v1/verification` | GET | Latest ticket verification result |
 | `/api/v1/diagnosis` | GET | Current strategic advisory (204 if none) |
 | `/api/v1/baseline` | GET | Baseline learning status |
 | `/api/v1/campaign` | GET | Current campaign and thresholds |
 | `/api/v1/campaign` | POST | Switch campaign |
+
+### Configuration Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/config` | GET | Current well configuration (all thresholds) |
+| `/api/v1/config` | POST | Update configuration (validates, saves to file) |
+| `/api/v1/config/validate` | POST | Validate config without applying |
+
+### Advisory & Shift Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/advisory/acknowledge` | POST | Acknowledge an advisory (audit trail) |
+| `/api/v1/advisory/acknowledgments` | GET | List all advisory acknowledgments |
+| `/api/v1/shift/summary` | GET | Shift summary with `?hours=12` or `?from=&to=` |
+| `/api/v1/reports/critical` | GET | Critical advisory reports |
 
 ### ML Engine Endpoints
 
@@ -352,12 +477,38 @@ Base URL: `http://localhost:8080`
 | `/api/v1/ml/history?hours=N` | GET | ML analysis history |
 | `/api/v1/ml/optimal?depth=N` | GET | Optimal parameters for depth |
 
+### Strategic Report Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/v1/strategic/hourly` | GET | Hourly strategic reports |
+| `/api/v1/strategic/daily` | GET | Daily strategic reports |
+| `/api/v1/report/:timestamp` | GET | Specific report by timestamp |
+
 ### Example: Switch Campaign
 
 ```bash
 curl -X POST http://localhost:8080/api/v1/campaign \
   -H "Content-Type: application/json" \
   -d '{"campaign":"PlugAbandonment"}'
+```
+
+### Example: Acknowledge Advisory
+
+```bash
+curl -X POST http://localhost:8080/api/v1/advisory/acknowledge \
+  -H "Content-Type: application/json" \
+  -d '{"advisory_id": "ADV-042", "acknowledged_by": "J. Smith", "action_taken": "Reduced WOB to 25 klbs per recommendation"}'
+```
+
+### Example: Shift Summary
+
+```bash
+# Last 12 hours (default)
+curl http://localhost:8080/api/v1/shift/summary
+
+# Custom time range
+curl "http://localhost:8080/api/v1/shift/summary?hours=8"
 ```
 
 ---
@@ -520,14 +671,21 @@ src/
   types.rs             # Core data structures (WitsPacket, DrillingMetrics,
                        # Campaign, Operation, AdvisoryTicket, etc.)
 
+  config/
+    mod.rs             # OnceLock global config access (init/get/is_initialized)
+    well_config.rs     # WellConfig TOML loader, all threshold structs, validation
+
   agents/
     tactical.rs        # Fast anomaly detection + operation classification
-    strategic.rs       # Physics verification
-    orchestrator.rs    # 4-specialist voting
+    strategic.rs       # Physics verification with configurable thresholds
+    orchestrator.rs    # 4-specialist weighted voting
 
   pipeline/
     coordinator.rs     # 10-phase pipeline coordinator
     processor.rs       # AppState, system status
+
+  baseline/
+    mod.rs             # Adaptive threshold learning with crash-safe persistence
 
   ml_engine/
     analyzer.rs        # Core ML analysis
@@ -536,10 +694,12 @@ src/
     scheduler.rs       # Configurable interval scheduler
 
   physics_engine/
-    drilling_models.rs # MSE, d-exponent, kick/loss detection
+    mod.rs             # Anomaly detection with configurable thresholds
+    drilling_models.rs # MSE, d-exponent, kick/loss/founder detection
 
   acquisition/
-    wits_parser.rs     # WITS Level 0 TCP protocol parser
+    wits_parser.rs     # WITS Level 0 TCP with reconnection, timeouts,
+                       # and data quality validation
 
   llm/
     tactical_llm.rs    # Qwen 2.5 1.5B classification (GPU & CPU)
@@ -548,10 +708,16 @@ src/
 
   api/
     routes.rs          # HTTP route definitions
-    handlers.rs        # Request handlers
+    handlers.rs        # Request handlers (config, advisory ack, shift summary)
 
 static/
   index.html           # Dashboard UI
+
+deploy/
+  sairen-os.service    # systemd service unit (hardened)
+  install.sh           # Production install script
+
+well_config.default.toml  # Reference configuration with all thresholds documented
 ```
 
 ---
@@ -584,6 +750,31 @@ static/
 ---
 
 ## Changelog
+
+### v0.8 - Production Hardening
+
+**Well Configuration System** — every hardcoded threshold (43 total) replaced with a configurable TOML file:
+- `well_config.toml` with 3-tier search (`$SAIREN_CONFIG` → `./well_config.toml` → defaults)
+- Runtime config API (`GET/POST /api/v1/config`, `POST /api/v1/config/validate`)
+- Validation on load: critical > warning consistency, weights sum check, sigma ordering
+- `well_config.default.toml` reference with comprehensive operational documentation
+
+**WITS Feed Resilience:**
+- Read timeouts (120s default) prevent silent hangs
+- TCP keepalive via `socket2` for stale connection detection
+- Exponential backoff reconnection (2s → 60s cap, 10 attempts max)
+- Per-packet data quality validation (all-zero detection, physically impossible values, consistency checks)
+
+**Operational Features:**
+- Advisory acknowledgment API with audit trail (`POST /api/v1/advisory/acknowledge`)
+- Shift summary endpoint with time-range filtering (`GET /api/v1/shift/summary`)
+- Baseline learning state persists across crashes (`data/baseline_state.json`)
+- Critical reports endpoint (`GET /api/v1/reports/critical`)
+
+**Deployment:**
+- systemd service unit with security hardening (`deploy/sairen-os.service`)
+- Production install script (`deploy/install.sh`)
+- Dedicated `sairen` service user with minimal privileges
 
 ### v0.7 - ML Engine V2.2 (Dysfunction-Aware Optimization)
 - **Dysfunction Filter**: New pipeline stage that rejects samples with:

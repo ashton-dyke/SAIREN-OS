@@ -22,7 +22,7 @@ use crate::baseline::ThresholdManager;
 use crate::context::vector_db;
 use crate::physics_engine;
 use crate::types::{
-    drilling_thresholds, AdvisoryTicket, AnomalyCategory, Campaign, DrillingMetrics,
+    AdvisoryTicket, AnomalyCategory, Campaign, DrillingMetrics,
     DrillingPhysicsReport, HistoryEntry, RigState, StrategicAdvisory,
     VerificationResult, VerificationStatus, WitsPacket,
 };
@@ -442,7 +442,7 @@ impl PipelineCoordinator {
                 "anomaly_rate".to_string(),
                 anomaly_rate,
             )
-        } else if avg_mse > drilling_thresholds::MSE_EFFICIENCY_POOR as f64 * 1000.0 {
+        } else if avg_mse > crate::config::get().thresholds.mse.efficiency_poor_percent * 1000.0 {
             (
                 TicketType::Optimization,
                 TicketSeverity::Low,

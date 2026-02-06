@@ -33,7 +33,7 @@
 //! - Otherwise: weighted average of votes converted to severity
 
 use crate::types::{
-    drilling_thresholds, weights, AdvisoryTicket, AnomalyCategory, DrillingMetrics,
+    AdvisoryTicket, AnomalyCategory, DrillingMetrics,
     DrillingPhysicsReport, FinalSeverity, RiskLevel, SpecialistVote, StrategicAdvisory,
     TicketEvent, TicketSeverity, TicketStage,
 };
@@ -152,7 +152,8 @@ impl Orchestrator {
     ) -> SpecialistVote {
         let efficiency = physics.mse_efficiency;
 
-        let (vote, reasoning) = if efficiency < drilling_thresholds::MSE_EFFICIENCY_POOR {
+        let cfg = crate::config::get();
+        let (vote, reasoning) = if efficiency < cfg.thresholds.mse.efficiency_poor_percent {
             (
                 TicketSeverity::High,
                 format!(
@@ -160,7 +161,7 @@ impl Orchestrator {
                     efficiency
                 ),
             )
-        } else if efficiency < drilling_thresholds::MSE_EFFICIENCY_WARNING {
+        } else if efficiency < cfg.thresholds.mse.efficiency_warning_percent {
             (
                 TicketSeverity::Medium,
                 format!(
@@ -178,7 +179,7 @@ impl Orchestrator {
         SpecialistVote {
             specialist: "MSE".to_string(),
             vote,
-            weight: weights::MSE,
+            weight: cfg.ensemble_weights.mse,
             reasoning,
         }
     }
@@ -188,7 +189,8 @@ impl Orchestrator {
         let ecd_margin = metrics.ecd_margin;
         let spp_delta = metrics.spp_delta.abs();
 
-        let (vote, reasoning) = if ecd_margin < drilling_thresholds::ECD_MARGIN_CRITICAL {
+        let cfg = crate::config::get();
+        let (vote, reasoning) = if ecd_margin < cfg.thresholds.hydraulics.ecd_margin_critical_ppg {
             (
                 TicketSeverity::Critical,
                 format!(
@@ -196,7 +198,7 @@ impl Orchestrator {
                     ecd_margin
                 ),
             )
-        } else if ecd_margin < drilling_thresholds::ECD_MARGIN_WARNING {
+        } else if ecd_margin < cfg.thresholds.hydraulics.ecd_margin_warning_ppg {
             (
                 TicketSeverity::High,
                 format!(
@@ -204,12 +206,12 @@ impl Orchestrator {
                     ecd_margin
                 ),
             )
-        } else if spp_delta > drilling_thresholds::SPP_DEVIATION_CRITICAL {
+        } else if spp_delta > cfg.thresholds.hydraulics.spp_deviation_critical_psi {
             (
                 TicketSeverity::High,
                 format!("SPP deviation {:.0} psi significant - check for washout/pack-off", spp_delta),
             )
-        } else if spp_delta > drilling_thresholds::SPP_DEVIATION_WARNING {
+        } else if spp_delta > cfg.thresholds.hydraulics.spp_deviation_warning_psi {
             (
                 TicketSeverity::Medium,
                 format!("SPP deviation {:.0} psi elevated - monitor", spp_delta),
@@ -227,7 +229,7 @@ impl Orchestrator {
         SpecialistVote {
             specialist: "Hydraulic".to_string(),
             vote,
-            weight: weights::HYDRAULIC,
+            weight: cfg.ensemble_weights.hydraulic,
             reasoning,
         }
     }
@@ -241,16 +243,19 @@ impl Orchestrator {
         let flow_balance = metrics.flow_balance.abs();
         let pit_rate = metrics.pit_rate.abs();
 
+        let cfg = crate::config::get();
+        let wc = &cfg.thresholds.well_control;
+
         // Direct category override for well control
         if category == AnomalyCategory::WellControl {
             // Already flagged as well control issue
-            if flow_balance > drilling_thresholds::FLOW_IMBALANCE_CRITICAL
-                || pit_rate > drilling_thresholds::PIT_RATE_CRITICAL
+            if flow_balance > wc.flow_imbalance_critical_gpm
+                || pit_rate > wc.pit_rate_critical_bbl_hr
             {
                 return SpecialistVote {
                     specialist: "WellControl".to_string(),
                     vote: TicketSeverity::Critical,
-                    weight: weights::WELL_CONTROL,
+                    weight: cfg.ensemble_weights.well_control,
                     reasoning: format!(
                         "CRITICAL: Flow imbalance {:.1} gpm, pit rate {:.1} bbl/hr - immediate action",
                         metrics.flow_balance, metrics.pit_rate
@@ -259,8 +264,8 @@ impl Orchestrator {
             }
         }
 
-        let (vote, reasoning) = if flow_balance > drilling_thresholds::FLOW_IMBALANCE_CRITICAL
-            || pit_rate > drilling_thresholds::PIT_RATE_CRITICAL
+        let (vote, reasoning) = if flow_balance > wc.flow_imbalance_critical_gpm
+            || pit_rate > wc.pit_rate_critical_bbl_hr
         {
             (
                 TicketSeverity::Critical,
@@ -269,8 +274,8 @@ impl Orchestrator {
                     metrics.flow_balance, metrics.pit_rate
                 ),
             )
-        } else if flow_balance > drilling_thresholds::FLOW_IMBALANCE_WARNING
-            || pit_rate > drilling_thresholds::PIT_RATE_WARNING
+        } else if flow_balance > wc.flow_imbalance_warning_gpm
+            || pit_rate > wc.pit_rate_warning_bbl_hr
         {
             (
                 TicketSeverity::High,
@@ -297,7 +302,7 @@ impl Orchestrator {
         SpecialistVote {
             specialist: "WellControl".to_string(),
             vote,
-            weight: weights::WELL_CONTROL,
+            weight: cfg.ensemble_weights.well_control,
             reasoning,
         }
     }
@@ -311,7 +316,11 @@ impl Orchestrator {
         let dxc_trend = physics.dxc_trend;
         let formation_hardness = physics.formation_hardness;
 
-        let (vote, reasoning) = if dxc_trend < -0.15 {
+        let cfg = crate::config::get();
+        let dexp_decrease = cfg.thresholds.formation.dexp_decrease_warning;
+        let dxc_threshold = cfg.thresholds.strategic_verification.dxc_change_threshold;
+
+        let (vote, reasoning) = if dxc_trend < dexp_decrease {
             // Decreasing d-exponent can indicate abnormal pore pressure
             (
                 TicketSeverity::High,
@@ -320,7 +329,7 @@ impl Orchestrator {
                     dxc_trend
                 ),
             )
-        } else if dxc_trend.abs() > 0.1 {
+        } else if dxc_trend.abs() > dxc_threshold {
             // Significant formation change
             let change_type = if dxc_trend > 0.0 { "harder" } else { "softer" };
             (
@@ -343,7 +352,7 @@ impl Orchestrator {
         SpecialistVote {
             specialist: "Formation".to_string(),
             vote,
-            weight: weights::FORMATION,
+            weight: cfg.ensemble_weights.formation,
             reasoning,
         }
     }
@@ -445,6 +454,12 @@ mod tests {
     use super::*;
     use crate::types::{RigState, TicketType};
 
+    fn ensure_config() {
+        if !crate::config::is_initialized() {
+            crate::config::init(crate::config::WellConfig::default());
+        }
+    }
+
     fn create_test_ticket() -> AdvisoryTicket {
         AdvisoryTicket {
             timestamp: 1000,
@@ -513,6 +528,7 @@ mod tests {
 
     #[test]
     fn test_orchestrator_voting() {
+        ensure_config();
         let mut orchestrator = Orchestrator::new();
         let ticket = create_test_ticket();
         let physics = create_test_physics();
@@ -534,6 +550,7 @@ mod tests {
 
     #[test]
     fn test_well_control_critical_override() {
+        ensure_config();
         let mut orchestrator = Orchestrator::new();
         let mut ticket = create_test_ticket();
 
@@ -561,6 +578,7 @@ mod tests {
 
     #[test]
     fn test_all_specialists_vote() {
+        ensure_config();
         let mut orchestrator = Orchestrator::new();
         let ticket = create_test_ticket();
         let physics = create_test_physics();
@@ -592,6 +610,7 @@ mod tests {
 
     #[test]
     fn test_efficiency_score() {
+        ensure_config();
         let mut orchestrator = Orchestrator::new();
 
         // Test with good efficiency

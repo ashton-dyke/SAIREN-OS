@@ -29,6 +29,8 @@ use crate::types::{DrillingMetrics, DrillingPhysicsReport, HistoryEntry, RigStat
 ///
 /// Returns MSE in psi
 pub fn calculate_mse(torque: f64, rpm: f64, bit_diameter: f64, rop: f64, wob: f64) -> f64 {
+    let cfg = crate::config::get();
+
     if bit_diameter <= 0.0 || rop <= 0.0 {
         return 0.0;
     }
@@ -36,7 +38,7 @@ pub fn calculate_mse(torque: f64, rpm: f64, bit_diameter: f64, rop: f64, wob: f6
     let d_squared = bit_diameter * bit_diameter;
 
     // Rotary component: (480 × T × RPM) / (D² × ROP)
-    let rotary_component = if rop > 0.1 {
+    let rotary_component = if rop > cfg.physics.min_rop_for_mse {
         (480.0 * torque * rpm) / (d_squared * rop)
     } else {
         0.0
@@ -75,9 +77,12 @@ pub fn calculate_mse_efficiency(actual_mse: f64, optimal_mse: f64) -> f64 {
 ///
 /// formation_hardness: 0-10 scale (0=very soft, 10=very hard)
 pub fn estimate_optimal_mse(formation_hardness: f64) -> f64 {
-    // Linear approximation: 5000 + (hardness * 8000)
-    // Gives range of ~5,000 to ~85,000 psi
-    5000.0 + (formation_hardness.clamp(0.0, 10.0) * 8000.0)
+    let cfg = crate::config::get();
+
+    // Linear approximation: base + (hardness * multiplier)
+    // Gives range of ~5,000 to ~85,000 psi with defaults
+    cfg.physics.formation_hardness_base_psi
+        + (formation_hardness.clamp(0.0, 10.0) * cfg.physics.formation_hardness_multiplier)
 }
 
 // ============================================================================
@@ -176,9 +181,11 @@ pub fn calculate_ecd(mud_weight: f64, annular_pressure_loss: f64, tvd: f64) -> f
 /// Simplified Bingham plastic model approximation
 /// APL = K × (Q^n) × (L / (Dh - Dp)^m)
 ///
-/// For quick estimation: APL ≈ 0.1 × flow_rate × depth / 1000
+/// For quick estimation: APL ≈ coefficient × flow_rate × depth / 1000
 pub fn estimate_annular_pressure_loss(flow_rate: f64, depth: f64) -> f64 {
-    0.1 * flow_rate * depth / 1000.0
+    let cfg = crate::config::get();
+
+    cfg.thresholds.hydraulics.annular_pressure_loss_coefficient * flow_rate * depth / 1000.0
 }
 
 // ============================================================================
@@ -203,31 +210,33 @@ pub fn detect_kick(
     gas_units: f64,
     background_gas: f64,
 ) -> (bool, f64) {
+    let cfg = crate::config::get();
+
     let mut indicators = 0;
     let mut severity = 0.0;
 
     // Flow imbalance (flow out > flow in)
     let flow_imbalance = flow_out - flow_in;
-    if flow_imbalance > 10.0 {
+    if flow_imbalance > cfg.thresholds.well_control.flow_imbalance_warning_gpm {
         indicators += 1;
-        severity += (flow_imbalance / 50.0).min(1.0);
+        severity += (flow_imbalance / cfg.physics.kick_flow_severity_divisor).min(1.0);
     }
 
     // Pit gain
-    if pit_volume_change > 5.0 {
+    if pit_volume_change > cfg.thresholds.well_control.pit_gain_warning_bbl {
         indicators += 1;
-        severity += (pit_volume_change / 20.0).min(1.0);
+        severity += (pit_volume_change / cfg.physics.kick_pit_severity_divisor).min(1.0);
     }
 
     // Gas increase above background
     let gas_increase = gas_units - background_gas;
-    if gas_increase > 50.0 {
+    if gas_increase > cfg.physics.kick_gas_increase_threshold {
         indicators += 1;
-        severity += (gas_increase / 500.0).min(1.0);
+        severity += (gas_increase / cfg.physics.kick_gas_severity_divisor).min(1.0);
     }
 
-    // Kick detected if 2+ indicators present
-    let is_kick = indicators >= 2;
+    // Kick detected if minimum indicators present
+    let is_kick = indicators >= cfg.physics.kick_min_indicators;
     let final_severity = if indicators > 0 {
         (severity / indicators as f64).min(1.0)
     } else {
@@ -252,30 +261,32 @@ pub fn detect_lost_circulation(
     pit_volume_change: f64,
     spp_drop: f64,
 ) -> (bool, f64) {
+    let cfg = crate::config::get();
+
     let mut indicators = 0;
     let mut severity = 0.0;
 
     // Flow imbalance (flow in > flow out)
     let flow_imbalance = flow_in - flow_out;
-    if flow_imbalance > 10.0 {
+    if flow_imbalance > cfg.thresholds.well_control.flow_imbalance_warning_gpm {
         indicators += 1;
-        severity += (flow_imbalance / 50.0).min(1.0);
+        severity += (flow_imbalance / cfg.physics.kick_flow_severity_divisor).min(1.0);
     }
 
     // Pit loss (negative change)
-    if pit_volume_change < -5.0 {
+    if pit_volume_change < -cfg.thresholds.well_control.pit_gain_warning_bbl {
         indicators += 1;
-        severity += (pit_volume_change.abs() / 20.0).min(1.0);
+        severity += (pit_volume_change.abs() / cfg.physics.kick_pit_severity_divisor).min(1.0);
     }
 
     // SPP drop
-    if spp_drop > 100.0 {
+    if spp_drop > cfg.thresholds.hydraulics.spp_deviation_warning_psi {
         indicators += 1;
-        severity += (spp_drop / 500.0).min(1.0);
+        severity += (spp_drop / cfg.physics.kick_gas_severity_divisor).min(1.0);
     }
 
-    // Loss detected if 2+ indicators present
-    let is_loss = indicators >= 2;
+    // Loss detected if minimum indicators present
+    let is_loss = indicators >= cfg.physics.loss_min_indicators;
     let final_severity = if indicators > 0 {
         (severity / indicators as f64).min(1.0)
     } else {
@@ -305,29 +316,35 @@ pub fn detect_packoff(
     spp_increase_percent: f64,
     rop_decrease_percent: f64,
 ) -> (bool, f64) {
+    let cfg = crate::config::get();
+
+    let torque_threshold = cfg.thresholds.mechanical.torque_increase_warning;
+    let spp_threshold = cfg.thresholds.mechanical.packoff_spp_increase_threshold;
+    let rop_threshold = cfg.thresholds.mechanical.packoff_rop_decrease_threshold;
+
     let mut indicators = 0;
     let mut severity = 0.0;
 
     // Torque increase
-    if torque_increase_percent > 0.15 {
+    if torque_increase_percent > torque_threshold {
         indicators += 1;
         severity += (torque_increase_percent / 0.30).min(1.0);
     }
 
     // SPP increase
-    if spp_increase_percent > 0.10 {
+    if spp_increase_percent > spp_threshold {
         indicators += 1;
         severity += (spp_increase_percent / 0.25).min(1.0);
     }
 
     // ROP decrease
-    if rop_decrease_percent > 0.20 {
+    if rop_decrease_percent > rop_threshold {
         indicators += 1;
         severity += (rop_decrease_percent / 0.50).min(1.0);
     }
 
     // Pack-off detected if torque AND (SPP or ROP) indicate
-    let is_packoff = torque_increase_percent > 0.15 && (spp_increase_percent > 0.10 || rop_decrease_percent > 0.20);
+    let is_packoff = torque_increase_percent > torque_threshold && (spp_increase_percent > spp_threshold || rop_decrease_percent > rop_threshold);
     let final_severity = if indicators > 0 {
         (severity / indicators as f64).min(1.0)
     } else {
@@ -350,7 +367,13 @@ pub fn detect_packoff(
 ///
 /// Returns (is_stick_slip, severity_factor)
 pub fn detect_stick_slip(torque_values: &[f64]) -> (bool, f64) {
-    if torque_values.len() < 5 {
+    let cfg = crate::config::get();
+
+    let min_samples = cfg.thresholds.mechanical.stick_slip_min_samples;
+    let cv_warning = cfg.thresholds.mechanical.stick_slip_cv_warning;
+    let cv_critical = cfg.thresholds.mechanical.stick_slip_cv_critical;
+
+    if torque_values.len() < min_samples {
         return (false, 0.0);
     }
 
@@ -368,11 +391,11 @@ pub fn detect_stick_slip(torque_values: &[f64]) -> (bool, f64) {
     let std_dev = variance.sqrt();
     let cv = std_dev / mean;
 
-    let is_stick_slip = cv > 0.15;
-    let severity = if cv > 0.25 {
+    let is_stick_slip = cv > cv_warning;
+    let severity = if cv > cv_critical {
         1.0
-    } else if cv > 0.15 {
-        (cv - 0.15) / 0.10
+    } else if cv > cv_warning {
+        (cv - cv_warning) / (cv_critical - cv_warning)
     } else {
         0.0
     };
@@ -401,8 +424,12 @@ pub fn detect_founder(
     wob_values: &[f64],
     rop_values: &[f64],
 ) -> (bool, f64, f64) {
-    // Need at least 5 samples for reliable trend
-    if wob_values.len() < 5 || rop_values.len() < 5 {
+    let cfg = crate::config::get();
+
+    let min_samples = cfg.thresholds.founder.min_samples;
+
+    // Need at least min_samples for reliable trend
+    if wob_values.len() < min_samples || rop_values.len() < min_samples {
         return (false, 0.0, 0.0);
     }
 
@@ -424,10 +451,10 @@ pub fn detect_founder(
     let rop_trend_percent = rop_trend / avg_rop;
 
     // Founder condition:
-    // - WOB increasing by at least 2% per sample period
-    // - ROP flat (within ±1%) or decreasing
-    let wob_increasing = wob_trend_percent > 0.02;
-    let rop_not_responding = rop_trend_percent < 0.01;
+    // - WOB increasing by at least wob_increase_min per sample period
+    // - ROP flat (within ±rop_response_min) or decreasing
+    let wob_increasing = wob_trend_percent > cfg.thresholds.founder.wob_increase_min;
+    let rop_not_responding = rop_trend_percent < cfg.thresholds.founder.rop_response_min;
 
     let is_founder = wob_increasing && rop_not_responding;
 
@@ -476,6 +503,8 @@ pub fn detect_founder_quick(
     curr_wob: f64,
     curr_rop: f64,
 ) -> (bool, f64, f64) {
+    let cfg = crate::config::get();
+
     // Guard against zero values
     if prev_wob <= 0.0 || prev_rop <= 0.0 {
         return (false, 0.0, 0.0);
@@ -484,8 +513,8 @@ pub fn detect_founder_quick(
     let wob_delta_percent = (curr_wob - prev_wob) / prev_wob;
     let rop_delta_percent = (curr_rop - prev_rop) / prev_rop;
 
-    // Potential founder: WOB up >5% but ROP not responding or decreasing
-    let is_potential = wob_delta_percent > 0.05 && rop_delta_percent <= 0.0;
+    // Potential founder: WOB up > quick_wob_delta_percent but ROP not responding or decreasing
+    let is_potential = wob_delta_percent > cfg.thresholds.founder.quick_wob_delta_percent && rop_delta_percent <= 0.0;
 
     (is_potential, wob_delta_percent, rop_delta_percent)
 }
@@ -513,18 +542,25 @@ pub fn detect_formation_change(
     dxc_trend: f64,
     mse_change_percent: f64,
 ) -> FormationChange {
+    let cfg = crate::config::get();
+
+    let mse_significant = cfg.thresholds.formation.mse_change_significant;
+    let dxc_threshold = cfg.thresholds.formation.dxc_trend_threshold;
+    let dxc_pressure = cfg.thresholds.formation.dxc_pressure_threshold;
+    let mse_tolerance = cfg.thresholds.formation.mse_pressure_tolerance;
+
     // Significant MSE increase with d-exp increase = hard stringer
-    if mse_change_percent > 0.20 && mse_trend > 0.0 && dxc_trend > 0.05 {
+    if mse_change_percent > mse_significant && mse_trend > 0.0 && dxc_trend > dxc_threshold {
         return FormationChange::HardStringer;
     }
 
     // Significant MSE decrease = soft stringer
-    if mse_change_percent < -0.20 && mse_trend < 0.0 {
+    if mse_change_percent < -mse_significant && mse_trend < 0.0 {
         return FormationChange::SoftStringer;
     }
 
     // D-exponent decrease trend without MSE change = abnormal pressure
-    if dxc_trend < -0.05 && mse_change_percent.abs() < 0.10 {
+    if dxc_trend < dxc_pressure && mse_change_percent.abs() < mse_tolerance {
         return FormationChange::PressureIncrease;
     }
 
@@ -539,43 +575,53 @@ pub fn detect_formation_change(
 ///
 /// Uses RPM, WOB, flow rate, and hook load to determine state.
 pub fn classify_rig_state(packet: &WitsPacket) -> RigState {
+    let cfg = crate::config::get();
+
     let rpm = packet.rpm;
     let wob = packet.wob;
     let flow_in = packet.flow_in;
     let hook_load = packet.hook_load;
     let rop = packet.rop;
 
+    let rpm_threshold = cfg.thresholds.rig_state.idle_rpm_max;
+    let flow_min = cfg.thresholds.rig_state.circulation_flow_min;
+    let wob_min = cfg.thresholds.rig_state.drilling_wob_min;
+    let reaming_offset = cfg.thresholds.rig_state.reaming_depth_offset;
+    let trip_out_hl = cfg.thresholds.rig_state.trip_out_hook_load_min;
+    let trip_in_hl = cfg.thresholds.rig_state.trip_in_hook_load_max;
+    let trip_flow_max = cfg.thresholds.rig_state.tripping_flow_max;
+
     // Idle: No rotation, no flow
-    if rpm < 5.0 && flow_in < 50.0 {
+    if rpm < rpm_threshold && flow_in < flow_min {
         return RigState::Idle;
     }
 
     // Connection: Flow but no rotation, typical during connections
-    if rpm < 5.0 && flow_in > 50.0 {
+    if rpm < rpm_threshold && flow_in > flow_min {
         return RigState::Connection;
     }
 
     // Drilling: Rotation + WOB + ROP
-    if rpm > 5.0 && wob > 1.0 && rop > 0.0 {
+    if rpm > rpm_threshold && wob > wob_min && rop > 0.0 {
         // Reaming if bit is above hole depth
-        if packet.bit_depth < packet.hole_depth - 5.0 {
+        if packet.bit_depth < packet.hole_depth - reaming_offset {
             return RigState::Reaming;
         }
         return RigState::Drilling;
     }
 
     // Circulating: Rotation without weight on bit
-    if rpm > 5.0 && wob < 1.0 && flow_in > 50.0 {
+    if rpm > rpm_threshold && wob < wob_min && flow_in > flow_min {
         return RigState::Circulating;
     }
 
     // Tripping: Moving pipe based on hook load changes
     // High hook load = pulling up (tripping out)
     // Low hook load = running in (tripping in)
-    if rpm < 5.0 && flow_in < 100.0 {
-        if hook_load > 200.0 {
+    if rpm < rpm_threshold && flow_in < trip_flow_max {
+        if hook_load > trip_out_hl {
             return RigState::TrippingOut;
-        } else if hook_load < 50.0 {
+        } else if hook_load < trip_in_hl {
             return RigState::TrippingIn;
         }
     }
@@ -672,6 +718,8 @@ pub fn calculate_r_squared(values: &[f64]) -> f64 {
 /// - Formation hardness estimates
 /// - WOB/ROP trends for founder detection
 pub fn strategic_drilling_analysis(history: &[HistoryEntry]) -> DrillingPhysicsReport {
+    let cfg = crate::config::get();
+
     if history.is_empty() {
         return DrillingPhysicsReport::default();
     }
@@ -700,8 +748,10 @@ pub fn strategic_drilling_analysis(history: &[HistoryEntry]) -> DrillingPhysicsR
     let rop_trend = calculate_trend(&rop_values);
 
     // Estimate formation hardness from MSE (0-10 scale)
-    // MSE of 5000 = soft (hardness 0), MSE of 85000 = very hard (hardness 10)
-    let formation_hardness = ((avg_mse - 5000.0) / 8000.0).clamp(0.0, 10.0);
+    // MSE of base = soft (hardness 0), MSE of base + 10*multiplier = very hard (hardness 10)
+    let formation_hardness = ((avg_mse - cfg.physics.formation_hardness_base_psi)
+        / cfg.physics.formation_hardness_multiplier)
+        .clamp(0.0, 10.0);
 
     // Calculate optimal MSE and efficiency
     let optimal_mse = estimate_optimal_mse(formation_hardness);
@@ -747,7 +797,7 @@ pub fn strategic_drilling_analysis(history: &[HistoryEntry]) -> DrillingPhysicsR
     }
 
     // Calculate confidence based on data quality
-    let confidence = (history.len() as f64 / 60.0).min(1.0); // Full confidence at 60 packets (1 hour)
+    let confidence = (history.len() as f64 / cfg.physics.confidence_full_window as f64).min(1.0);
 
     // Get current values from most recent packet
     let latest = history.last().map(|h| &h.packet);
@@ -788,8 +838,16 @@ pub fn strategic_drilling_analysis(history: &[HistoryEntry]) -> DrillingPhysicsR
 mod tests {
     use super::*;
 
+    fn ensure_config() {
+        if !crate::config::is_initialized() {
+            crate::config::init(crate::config::WellConfig::default());
+        }
+    }
+
     #[test]
     fn test_calculate_mse() {
+        ensure_config();
+
         // Test MSE calculation with typical drilling parameters
         // Torque: 15 kft-lbs, RPM: 120, Bit: 8.5", ROP: 60 ft/hr, WOB: 25 klbs
         let mse = calculate_mse(15.0, 120.0, 8.5, 60.0, 25.0);
@@ -818,6 +876,8 @@ mod tests {
 
     #[test]
     fn test_detect_kick() {
+        ensure_config();
+
         // Test kick detection with flow imbalance and pit gain
         let (is_kick, severity) = detect_kick(500.0, 525.0, 8.0, 150.0, 50.0);
 
@@ -827,6 +887,8 @@ mod tests {
 
     #[test]
     fn test_detect_lost_circulation() {
+        ensure_config();
+
         // Test loss detection
         let (is_loss, severity) = detect_lost_circulation(500.0, 475.0, -8.0, 150.0);
 
@@ -836,6 +898,8 @@ mod tests {
 
     #[test]
     fn test_detect_stick_slip() {
+        ensure_config();
+
         // Test stick-slip detection with high torque variance
         let torque_values = vec![10.0, 15.0, 8.0, 18.0, 5.0, 20.0, 7.0, 16.0];
         let (is_stick_slip, severity) = detect_stick_slip(&torque_values);
@@ -855,6 +919,8 @@ mod tests {
 
     #[test]
     fn test_classify_rig_state_drilling() {
+        ensure_config();
+
         let mut packet = WitsPacket::default();
         packet.rpm = 120.0;
         packet.wob = 25.0;
@@ -868,6 +934,8 @@ mod tests {
 
     #[test]
     fn test_classify_rig_state_circulating() {
+        ensure_config();
+
         let mut packet = WitsPacket::default();
         packet.rpm = 60.0;
         packet.wob = 0.0;
@@ -879,6 +947,8 @@ mod tests {
 
     #[test]
     fn test_classify_rig_state_idle() {
+        ensure_config();
+
         let packet = WitsPacket::default();
         assert_eq!(classify_rig_state(&packet), RigState::Idle);
     }

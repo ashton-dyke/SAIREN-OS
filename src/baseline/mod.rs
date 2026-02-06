@@ -47,7 +47,7 @@ use thiserror::Error;
 use tracing::{debug, info, warn};
 
 // ============================================================================
-// Configuration Constants
+// Configuration Constants (defaults — overridden by well_config.toml)
 // ============================================================================
 
 /// Default sigma multiplier for warning threshold
@@ -70,6 +70,58 @@ pub const OUTLIER_SIGMA_THRESHOLD: f64 = 3.0;
 
 /// Schema version for persistence compatibility
 pub const SCHEMA_VERSION: u32 = 2; // Updated for WITS metrics
+
+// ============================================================================
+// Config-aware accessors (read from well_config.toml when available)
+// ============================================================================
+
+fn cfg_warning_sigma() -> f64 {
+    if crate::config::is_initialized() {
+        crate::config::get().baseline_learning.warning_sigma
+    } else {
+        DEFAULT_WARNING_SIGMA
+    }
+}
+
+fn cfg_critical_sigma() -> f64 {
+    if crate::config::is_initialized() {
+        crate::config::get().baseline_learning.critical_sigma
+    } else {
+        DEFAULT_CRITICAL_SIGMA
+    }
+}
+
+fn cfg_min_samples() -> usize {
+    if crate::config::is_initialized() {
+        crate::config::get().baseline_learning.min_samples_for_lock
+    } else {
+        MIN_SAMPLES_FOR_LOCK
+    }
+}
+
+fn cfg_min_std_floor() -> f64 {
+    if crate::config::is_initialized() {
+        crate::config::get().baseline_learning.min_std_floor
+    } else {
+        MIN_STD_FLOOR
+    }
+}
+
+fn cfg_max_outlier_pct() -> f64 {
+    if crate::config::is_initialized() {
+        crate::config::get().baseline_learning.max_outlier_percentage
+    } else {
+        MAX_OUTLIER_PERCENTAGE
+    }
+}
+
+fn cfg_outlier_sigma() -> f64 {
+    if crate::config::is_initialized() {
+        crate::config::get().baseline_learning.outlier_sigma_threshold
+    } else {
+        OUTLIER_SIGMA_THRESHOLD
+    }
+}
 
 // ============================================================================
 // Error Types
@@ -200,8 +252,8 @@ impl DynamicThresholds {
             sensor_id: sensor_id.to_string(),
             baseline_mean: 0.0,
             baseline_std: 0.0,
-            warning_sigma: DEFAULT_WARNING_SIGMA,
-            critical_sigma: DEFAULT_CRITICAL_SIGMA,
+            warning_sigma: cfg_warning_sigma(),
+            critical_sigma: cfg_critical_sigma(),
             locked: false,
             locked_timestamp: None,
             sample_count: 0,
@@ -227,7 +279,8 @@ impl DynamicThresholds {
 
     /// Get effective standard deviation (with floor to avoid divide-by-zero)
     pub fn effective_std(&self) -> f64 {
-        let min_std = (self.baseline_mean.abs() * MIN_STD_FLOOR).max(MIN_STD_FLOOR);
+        let floor = cfg_min_std_floor();
+        let min_std = (self.baseline_mean.abs() * floor).max(floor);
         self.baseline_std.max(min_std)
     }
 
@@ -347,12 +400,12 @@ impl BaselineAccumulator {
         // Check for outlier (after we have enough samples for meaningful std)
         let is_outlier = if self.count > 10 {
             let std = self.variance().sqrt();
-            let z = if std > MIN_STD_FLOOR {
+            let z = if std > cfg_min_std_floor() {
                 (value - self.mean).abs() / std
             } else {
                 0.0
             };
-            if z > OUTLIER_SIGMA_THRESHOLD {
+            if z > cfg_outlier_sigma() {
                 self.outlier_count += 1;
                 true
             } else {
@@ -390,12 +443,12 @@ impl BaselineAccumulator {
 
     /// Check if baseline is contaminated
     pub fn is_contaminated(&self) -> bool {
-        self.outlier_percentage() > MAX_OUTLIER_PERCENTAGE
+        self.outlier_percentage() > cfg_max_outlier_pct()
     }
 
     /// Check if we have enough samples to lock
     pub fn has_enough_samples(&self) -> bool {
-        self.count >= MIN_SAMPLES_FOR_LOCK
+        self.count >= cfg_min_samples()
     }
 
     /// Finalize into DynamicThresholds
@@ -409,7 +462,7 @@ impl BaselineAccumulator {
             return Err(BaselineError::InsufficientSamples(
                 composite_id,
                 self.count,
-                MIN_SAMPLES_FOR_LOCK,
+                cfg_min_samples(),
             ));
         }
 
@@ -419,7 +472,7 @@ impl BaselineAccumulator {
             return Err(BaselineError::Contaminated(
                 composite_id,
                 outlier_pct,
-                MAX_OUTLIER_PERCENTAGE * 100.0,
+                cfg_max_outlier_pct() * 100.0,
             ));
         }
 
@@ -431,8 +484,8 @@ impl BaselineAccumulator {
             sensor_id: self.sensor_id,
             baseline_mean: self.mean,
             baseline_std: std_dev,
-            warning_sigma: DEFAULT_WARNING_SIGMA,
-            critical_sigma: DEFAULT_CRITICAL_SIGMA,
+            warning_sigma: cfg_warning_sigma(),
+            critical_sigma: cfg_critical_sigma(),
             locked: true,
             locked_timestamp: Some(timestamp),
             sample_count: self.count,
@@ -458,8 +511,8 @@ impl BaselineAccumulator {
             sensor_id: self.sensor_id,
             baseline_mean: self.mean,
             baseline_std: std_dev,
-            warning_sigma: DEFAULT_WARNING_SIGMA,
-            critical_sigma: DEFAULT_CRITICAL_SIGMA,
+            warning_sigma: cfg_warning_sigma(),
+            critical_sigma: cfg_critical_sigma(),
             locked: true,
             locked_timestamp: Some(timestamp),
             sample_count: self.count,
@@ -498,6 +551,24 @@ pub enum LearningStatus {
         outlier_percentage: f64,
         samples_collected: usize,
     },
+}
+
+// ============================================================================
+// Baseline State Persistence
+// ============================================================================
+
+/// Default file path for baseline state persistence
+pub const DEFAULT_STATE_PATH: &str = "data/baseline_state.json";
+
+/// Serializable baseline state for crash-safe persistence.
+///
+/// Only locked thresholds are persisted.  In-progress accumulators are
+/// intentionally excluded so that learning restarts cleanly after a reboot
+/// rather than resuming from potentially stale partial data.
+#[derive(Serialize, Deserialize)]
+struct BaselineState {
+    schema_version: u32,
+    thresholds: HashMap<String, DynamicThresholds>,
 }
 
 // ============================================================================
@@ -621,6 +692,12 @@ impl ThresholdManager {
         );
 
         self.thresholds.insert(composite_id.clone(), thresholds);
+
+        // Auto-persist after successful lock
+        if let Err(e) = self.save_to_file(Path::new(DEFAULT_STATE_PATH)) {
+            warn!(error = %e, "Failed to auto-persist baseline state after lock");
+        }
+
         Ok(self.thresholds.get(&composite_id).expect("just inserted"))
     }
 
@@ -655,6 +732,12 @@ impl ThresholdManager {
         );
 
         self.thresholds.insert(composite_id.clone(), thresholds);
+
+        // Auto-persist after successful force-lock
+        if let Err(e) = self.save_to_file(Path::new(DEFAULT_STATE_PATH)) {
+            warn!(error = %e, "Failed to auto-persist baseline state after force-lock");
+        }
+
         Ok(self.thresholds.get(&composite_id).expect("just inserted"))
     }
 
@@ -697,7 +780,7 @@ impl ThresholdManager {
             }
             return Some(LearningStatus::Learning {
                 samples_collected: acc.count,
-                samples_needed: MIN_SAMPLES_FOR_LOCK,
+                samples_needed: cfg_min_samples(),
                 outlier_percentage: acc.outlier_percentage() * 100.0,
                 current_mean: acc.mean,
                 current_std: acc.std_dev(),
@@ -762,45 +845,72 @@ impl ThresholdManager {
     // Persistence
     // ========================================================================
 
-    /// Save thresholds to a JSON file
+    /// Save locked thresholds to a JSON file via [`BaselineState`].
+    ///
+    /// Only locked thresholds are persisted; in-progress accumulators are
+    /// intentionally omitted so that learning restarts cleanly after a reboot.
+    /// Parent directories are created automatically if they do not exist.
     pub fn save_to_file(&self, path: &Path) -> Result<(), BaselineError> {
-        let json = serde_json::to_string_pretty(self)?;
+        let state = BaselineState {
+            schema_version: SCHEMA_VERSION,
+            thresholds: self.thresholds.clone(),
+        };
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let json = serde_json::to_string_pretty(&state)?;
         std::fs::write(path, json)?;
-        info!(path = %path.display(), "Thresholds saved to file");
+        info!(
+            path = %path.display(),
+            locked = self.thresholds.len(),
+            "Baseline state saved"
+        );
         Ok(())
     }
 
-    /// Load thresholds from a JSON file
-    pub fn load_from_file(path: &Path) -> Result<Self, BaselineError> {
-        let json = std::fs::read_to_string(path)?;
-        let manager: Self = serde_json::from_str(&json)?;
-
-        // Check schema version
-        if manager.schema_version != SCHEMA_VERSION {
-            return Err(BaselineError::SchemaMismatch(
-                manager.schema_version,
-                SCHEMA_VERSION,
-            ));
+    /// Load locked thresholds from a JSON file.
+    ///
+    /// Returns `None` when the file is missing, corrupt, or has an
+    /// incompatible schema version.  Accumulators are always empty on load
+    /// so learning restarts from scratch after a crash.
+    pub fn load_from_file(path: &Path) -> Option<Self> {
+        let json = match std::fs::read_to_string(path) {
+            Ok(j) => j,
+            Err(e) => {
+                debug!(path = %path.display(), error = %e, "No baseline state file found");
+                return None;
+            }
+        };
+        let state: BaselineState = match serde_json::from_str(&json) {
+            Ok(s) => s,
+            Err(e) => {
+                warn!(path = %path.display(), error = %e, "Corrupt baseline state file, ignoring");
+                return None;
+            }
+        };
+        if state.schema_version != SCHEMA_VERSION {
+            warn!(
+                file_version = state.schema_version,
+                expected = SCHEMA_VERSION,
+                "Schema version mismatch, ignoring saved baseline state"
+            );
+            return None;
         }
-
-        info!(
-            path = %path.display(),
-            locked = manager.locked_count(),
-            learning = manager.learning_count(),
-            "Thresholds loaded from file"
-        );
-        Ok(manager)
+        let locked = state.thresholds.len();
+        info!(path = %path.display(), locked, "Baseline state loaded");
+        Some(Self {
+            thresholds: state.thresholds,
+            accumulators: HashMap::new(),
+            schema_version: SCHEMA_VERSION,
+        })
     }
 
-    /// Load from file if exists, otherwise create new
+    /// Load from file if it exists and is valid, otherwise create new.
     pub fn load_or_new(path: &Path) -> Self {
-        match Self::load_from_file(path) {
-            Ok(manager) => manager,
-            Err(e) => {
-                debug!(error = %e, "Could not load thresholds, starting fresh");
-                Self::new()
-            }
-        }
+        Self::load_from_file(path).unwrap_or_else(|| {
+            debug!("No valid baseline state found, starting fresh");
+            Self::new()
+        })
     }
 }
 

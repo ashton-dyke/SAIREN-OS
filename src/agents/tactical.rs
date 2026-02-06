@@ -26,7 +26,7 @@
 use crate::baseline::{wits_metrics, AnomalyLevel, ThresholdManager};
 use crate::physics_engine;
 use crate::types::{
-    drilling_thresholds, AdvisoryTicket, AnomalyCategory, Campaign, CheckStatus, DrillingMetrics,
+    AdvisoryTicket, AnomalyCategory, Campaign, CheckStatus, DrillingMetrics,
     HistoryEntry, Operation, RigState, TicketEvent, TicketSeverity, TicketStage, TicketType, WitsPacket,
 };
 
@@ -166,11 +166,11 @@ impl DrillingBaseline {
 /// # Returns
 /// The detected `Operation` type
 pub fn detect_operation(packet: &WitsPacket, campaign: Campaign) -> Operation {
-    use operation_thresholds::*;
+    let cfg = crate::config::get();
 
-    let flow_active = packet.flow_in >= CIRCULATION_FLOW_MIN;
-    let rotating = packet.rpm >= NO_ROTATION_RPM_MAX;
-    let on_bottom = packet.wob >= OFF_BOTTOM_WOB_MAX;
+    let flow_active = packet.flow_in >= cfg.thresholds.rig_state.circulation_flow_min;
+    let rotating = packet.rpm >= cfg.thresholds.operation_detection.no_rotation_rpm_max;
+    let on_bottom = packet.wob >= cfg.thresholds.operation_detection.off_bottom_wob_max;
 
     // Priority 1: Static - no pumps, no rotation
     if !flow_active && !rotating {
@@ -186,8 +186,8 @@ pub fn detect_operation(packet: &WitsPacket, campaign: Campaign) -> Operation {
     if campaign == Campaign::PlugAbandonment {
         // Priority 3: Milling - high torque, low ROP, circulating
         // Milling involves cutting casing/cement with specialized mills
-        let is_milling = packet.torque >= MILLING_TORQUE_MIN
-            && packet.rop < MILLING_ROP_MAX
+        let is_milling = packet.torque >= cfg.thresholds.operation_detection.milling_torque_min
+            && packet.rop < cfg.thresholds.operation_detection.milling_rop_max
             && flow_active
             && rotating;
 
@@ -197,10 +197,10 @@ pub fn detect_operation(packet: &WitsPacket, campaign: Campaign) -> Operation {
 
         // Priority 4: Cement Drill-Out - high WOB, moderate torque, slow drilling
         // Cement drill-out involves drilling through cement plugs
-        let is_cement_drillout = packet.wob >= CEMENT_DRILLOUT_WOB_MIN
-            && packet.torque >= CEMENT_DRILLOUT_TORQUE_MIN
+        let is_cement_drillout = packet.wob >= cfg.thresholds.operation_detection.cement_drillout_wob_min
+            && packet.torque >= cfg.thresholds.operation_detection.cement_drillout_torque_min
             && packet.rop > 0.0
-            && packet.rop < CEMENT_DRILLOUT_ROP_MAX
+            && packet.rop < cfg.thresholds.operation_detection.cement_drillout_rop_max
             && flow_active
             && rotating;
 
@@ -250,12 +250,7 @@ impl std::fmt::Display for TacticalMode {
     }
 }
 
-/// Cooldown period between non-critical tickets (seconds)
-const TICKET_COOLDOWN_SECS: u64 = 60;
-
-/// Minimum cooldown for CRITICAL tickets (seconds)
-/// Prevents advisory spam while still allowing rapid response to critical events
-const CRITICAL_COOLDOWN_SECS: u64 = 30;
+// Cooldown values are now read from crate::config::get().advisory at runtime.
 
 /// Tactical Agent for Phase 2-3 drilling processing
 ///
@@ -575,14 +570,16 @@ impl TacticalAgent {
         let (severity, ticket_type) = self.determine_severity_and_type(metrics);
 
         // RULE 3: Cooldown period between tickets
-        // CRITICAL tickets have a shorter cooldown (30s) to prevent spam while staying responsive
-        // Non-critical tickets have standard 60s cooldown
+        // CRITICAL tickets bypass cooldown when configured, otherwise use default
+        let cfg = crate::config::get();
         if let Some(last_time) = self.last_ticket_time {
             let elapsed = last_time.elapsed().as_secs();
-            let cooldown = if severity == TicketSeverity::Critical {
-                CRITICAL_COOLDOWN_SECS
+            let cooldown = if severity == TicketSeverity::Critical
+                && cfg.advisory.critical_bypass_cooldown
+            {
+                0
             } else {
-                TICKET_COOLDOWN_SECS
+                cfg.advisory.default_cooldown_seconds
             };
 
             if elapsed < cooldown {
@@ -640,11 +637,12 @@ impl TacticalAgent {
 
     /// Determine ticket severity and type based on metrics
     fn determine_severity_and_type(&self, metrics: &DrillingMetrics) -> (TicketSeverity, TicketType) {
+        let cfg = crate::config::get();
         match metrics.anomaly_category {
             AnomalyCategory::WellControl => {
                 // Well control issues are always high priority
-                if metrics.flow_balance.abs() > drilling_thresholds::FLOW_IMBALANCE_CRITICAL
-                    || metrics.pit_rate.abs() > drilling_thresholds::PIT_RATE_CRITICAL
+                if metrics.flow_balance.abs() > cfg.thresholds.well_control.flow_imbalance_critical_gpm
+                    || metrics.pit_rate.abs() > cfg.thresholds.well_control.pit_rate_critical_bbl_hr
                 {
                     (TicketSeverity::Critical, TicketType::Intervention)
                 } else {
@@ -652,8 +650,8 @@ impl TacticalAgent {
                 }
             }
             AnomalyCategory::Hydraulics => {
-                if metrics.ecd_margin < drilling_thresholds::ECD_MARGIN_CRITICAL
-                    || metrics.spp_delta.abs() > drilling_thresholds::SPP_DEVIATION_CRITICAL
+                if metrics.ecd_margin < cfg.thresholds.hydraulics.ecd_margin_critical_ppg
+                    || metrics.spp_delta.abs() > cfg.thresholds.hydraulics.spp_deviation_critical_psi
                 {
                     (TicketSeverity::High, TicketType::RiskWarning)
                 } else {
@@ -661,14 +659,14 @@ impl TacticalAgent {
                 }
             }
             AnomalyCategory::Mechanical => {
-                if metrics.torque_delta_percent > drilling_thresholds::TORQUE_INCREASE_CRITICAL {
+                if metrics.torque_delta_percent > cfg.thresholds.mechanical.torque_increase_critical {
                     (TicketSeverity::High, TicketType::Intervention)
                 } else {
                     (TicketSeverity::Medium, TicketType::RiskWarning)
                 }
             }
             AnomalyCategory::DrillingEfficiency => {
-                if metrics.mse_efficiency < drilling_thresholds::MSE_EFFICIENCY_POOR {
+                if metrics.mse_efficiency < cfg.thresholds.mse.efficiency_poor_percent {
                     (TicketSeverity::Medium, TicketType::Optimization)
                 } else {
                     (TicketSeverity::Low, TicketType::Optimization)
@@ -681,46 +679,47 @@ impl TacticalAgent {
 
     /// Determine the primary trigger parameter and its value
     fn determine_trigger(&self, metrics: &DrillingMetrics) -> (String, f64, f64) {
+        let cfg = crate::config::get();
         match metrics.anomaly_category {
             AnomalyCategory::WellControl => {
-                if metrics.flow_balance.abs() > drilling_thresholds::FLOW_IMBALANCE_WARNING {
+                if metrics.flow_balance.abs() > cfg.thresholds.well_control.flow_imbalance_warning_gpm {
                     (
                         "flow_balance".to_string(),
                         metrics.flow_balance,
-                        drilling_thresholds::FLOW_IMBALANCE_WARNING,
+                        cfg.thresholds.well_control.flow_imbalance_warning_gpm,
                     )
                 } else {
                     (
                         "pit_rate".to_string(),
                         metrics.pit_rate,
-                        drilling_thresholds::PIT_RATE_WARNING,
+                        cfg.thresholds.well_control.pit_rate_warning_bbl_hr,
                     )
                 }
             }
             AnomalyCategory::Hydraulics => {
-                if metrics.ecd_margin < drilling_thresholds::ECD_MARGIN_WARNING {
+                if metrics.ecd_margin < cfg.thresholds.hydraulics.ecd_margin_warning_ppg {
                     (
                         "ecd_margin".to_string(),
                         metrics.ecd_margin,
-                        drilling_thresholds::ECD_MARGIN_WARNING,
+                        cfg.thresholds.hydraulics.ecd_margin_warning_ppg,
                     )
                 } else {
                     (
                         "spp_delta".to_string(),
                         metrics.spp_delta,
-                        drilling_thresholds::SPP_DEVIATION_WARNING,
+                        cfg.thresholds.hydraulics.spp_deviation_warning_psi,
                     )
                 }
             }
             AnomalyCategory::Mechanical => (
                 "torque_delta_percent".to_string(),
                 metrics.torque_delta_percent,
-                drilling_thresholds::TORQUE_INCREASE_WARNING,
+                cfg.thresholds.mechanical.torque_increase_warning,
             ),
             AnomalyCategory::DrillingEfficiency => (
                 "mse_efficiency".to_string(),
                 metrics.mse_efficiency,
-                drilling_thresholds::MSE_EFFICIENCY_WARNING,
+                cfg.thresholds.mse.efficiency_warning_percent,
             ),
             AnomalyCategory::Formation => (
                 "d_exponent".to_string(),
@@ -835,6 +834,12 @@ mod tests {
     use super::*;
     use std::sync::Arc;
 
+    fn ensure_config() {
+        if !crate::config::is_initialized() {
+            crate::config::init(crate::config::WellConfig::default());
+        }
+    }
+
     fn create_normal_drilling_packet() -> WitsPacket {
         let mut packet = WitsPacket::default();
         packet.timestamp = 1000;
@@ -868,6 +873,7 @@ mod tests {
 
     #[test]
     fn test_normal_drilling_no_ticket() {
+        ensure_config();
         let mut agent = TacticalAgent::new();
         let packet = create_normal_drilling_packet();
         let (ticket, metrics, _entry) = agent.process(&packet);
@@ -878,6 +884,7 @@ mod tests {
 
     #[test]
     fn test_kick_generates_ticket() {
+        ensure_config();
         let mut agent = TacticalAgent::new();
         let packet = create_kick_packet();
         let (ticket, metrics, _entry) = agent.process(&packet);
@@ -892,6 +899,7 @@ mod tests {
 
     #[test]
     fn test_history_entry_always_created() {
+        ensure_config();
         let mut agent = TacticalAgent::new();
         let (_, _, entry) = agent.process(&create_normal_drilling_packet());
         assert!(entry.packet.timestamp > 0);
@@ -899,6 +907,7 @@ mod tests {
 
     #[test]
     fn test_stats_tracking() {
+        ensure_config();
         let mut agent = TacticalAgent::new();
 
         agent.process(&create_normal_drilling_packet());
@@ -911,6 +920,7 @@ mod tests {
 
     #[test]
     fn test_baseline_update() {
+        ensure_config();
         let mut agent = TacticalAgent::new();
 
         // Process several packets to build baseline

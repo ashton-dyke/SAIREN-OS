@@ -490,8 +490,9 @@ impl Default for DrillingMetrics {
 }
 
 /// Severity level for advisory tickets
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord, Default)]
 pub enum TicketSeverity {
+    #[default]
     Low = 1,
     Medium = 2,
     High = 3,

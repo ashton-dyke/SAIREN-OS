@@ -35,7 +35,7 @@ pub use models::{l10_life, miners_rule, wear_acceleration};
 
 use crate::types::{
     AnomalyCategory, DrillingMetrics, DrillingPhysicsReport, EnhancedPhysicsReport, HistoryEntry,
-    RigState, WitsPacket, drilling_thresholds,
+    RigState, WitsPacket,
 };
 
 // ============================================================================
@@ -78,7 +78,12 @@ pub fn tactical_update(packet: &WitsPacket, prev_packet: Option<&WitsPacket>) ->
     };
 
     // Calculate corrected d-exponent using configurable normal mud weight
-    let dxc = calculate_dxc(d_exponent, packet.mud_weight_in, drilling_thresholds::NORMAL_MUD_WEIGHT);
+    let normal_mud_weight = if crate::config::is_initialized() {
+        crate::config::get().thresholds.hydraulics.normal_mud_weight_ppg
+    } else {
+        8.6
+    };
+    let dxc = calculate_dxc(d_exponent, packet.mud_weight_in, normal_mud_weight);
 
     // Calculate flow balance (positive = gain/kick, negative = loss)
     let flow_balance = packet.flow_out - packet.flow_in;
@@ -227,9 +232,36 @@ fn detect_anomalies(
         );
     }
 
+    // Read thresholds from config
+    let cfg_available = crate::config::is_initialized();
+    let (gas_warn, gas_crit) = if cfg_available {
+        let wc = &crate::config::get().thresholds.well_control;
+        (wc.gas_units_warning, wc.gas_units_critical)
+    } else { (100.0, 500.0) };
+    let (h2s_warn, h2s_crit) = if cfg_available {
+        let wc = &crate::config::get().thresholds.well_control;
+        (wc.h2s_warning_ppm, wc.h2s_critical_ppm)
+    } else { (10.0, 20.0) };
+    let (pr_warn, pr_crit) = if cfg_available {
+        let wc = &crate::config::get().thresholds.well_control;
+        (wc.pit_rate_warning_bbl_hr, wc.pit_rate_critical_bbl_hr)
+    } else { (5.0, 15.0) };
+    let (ecd_warn, ecd_crit) = if cfg_available {
+        let h = &crate::config::get().thresholds.hydraulics;
+        (h.ecd_margin_warning_ppg, h.ecd_margin_critical_ppg)
+    } else { (0.3, 0.1) };
+    let (spp_warn, spp_crit) = if cfg_available {
+        let h = &crate::config::get().thresholds.hydraulics;
+        (h.spp_deviation_warning_psi, h.spp_deviation_critical_psi)
+    } else { (100.0, 200.0) };
+    let (torq_warn, torq_crit) = if cfg_available {
+        let m = &crate::config::get().thresholds.mechanical;
+        (m.torque_increase_warning, m.torque_increase_critical)
+    } else { (0.15, 0.25) };
+
     // Gas warning
-    if packet.gas_units > drilling_thresholds::GAS_UNITS_WARNING {
-        let severity_str = if packet.gas_units > drilling_thresholds::GAS_UNITS_CRITICAL { "CRITICAL" } else { "WARNING" };
+    if packet.gas_units > gas_warn {
+        let severity_str = if packet.gas_units > gas_crit { "CRITICAL" } else { "WARNING" };
         return (
             true,
             AnomalyCategory::WellControl,
@@ -239,8 +271,8 @@ fn detect_anomalies(
     }
 
     // H2S warning
-    if packet.h2s > drilling_thresholds::H2S_WARNING {
-        let severity_str = if packet.h2s > drilling_thresholds::H2S_CRITICAL { "CRITICAL" } else { "WARNING" };
+    if packet.h2s > h2s_warn {
+        let severity_str = if packet.h2s > h2s_crit { "CRITICAL" } else { "WARNING" };
         return (
             true,
             AnomalyCategory::WellControl,
@@ -249,8 +281,8 @@ fn detect_anomalies(
     }
 
     // Pit rate anomaly
-    if pit_rate.abs() > drilling_thresholds::PIT_RATE_WARNING {
-        let severity_str = if pit_rate.abs() > drilling_thresholds::PIT_RATE_CRITICAL { "CRITICAL" } else { "WARNING" };
+    if pit_rate.abs() > pr_warn {
+        let severity_str = if pit_rate.abs() > pr_crit { "CRITICAL" } else { "WARNING" };
         let direction = if pit_rate > 0.0 { "gain" } else { "loss" };
         return (
             true,
@@ -262,8 +294,8 @@ fn detect_anomalies(
     // === HYDRAULICS ===
 
     // ECD margin
-    if packet.ecd_margin() < drilling_thresholds::ECD_MARGIN_WARNING {
-        let severity_str = if packet.ecd_margin() < drilling_thresholds::ECD_MARGIN_CRITICAL { "CRITICAL" } else { "WARNING" };
+    if packet.ecd_margin() < ecd_warn {
+        let severity_str = if packet.ecd_margin() < ecd_crit { "CRITICAL" } else { "WARNING" };
         return (
             true,
             AnomalyCategory::Hydraulics,
@@ -272,8 +304,8 @@ fn detect_anomalies(
     }
 
     // SPP deviation
-    if spp_delta.abs() > drilling_thresholds::SPP_DEVIATION_WARNING {
-        let severity_str = if spp_delta.abs() > drilling_thresholds::SPP_DEVIATION_CRITICAL { "HIGH" } else { "WARNING" };
+    if spp_delta.abs() > spp_warn {
+        let severity_str = if spp_delta.abs() > spp_crit { "HIGH" } else { "WARNING" };
         let direction = if spp_delta > 0.0 { "increase" } else { "decrease" };
         return (
             true,
@@ -285,8 +317,8 @@ fn detect_anomalies(
     // === MECHANICAL ===
 
     // Torque increase (potential pack-off or stuck pipe)
-    if torque_delta_percent > drilling_thresholds::TORQUE_INCREASE_WARNING {
-        let severity_str = if torque_delta_percent > drilling_thresholds::TORQUE_INCREASE_CRITICAL { "HIGH" } else { "WARNING" };
+    if torque_delta_percent > torq_warn {
+        let severity_str = if torque_delta_percent > torq_crit { "HIGH" } else { "WARNING" };
         return (
             true,
             AnomalyCategory::Mechanical,
@@ -322,8 +354,12 @@ fn detect_anomalies(
     // === DRILLING EFFICIENCY ===
 
     // MSE efficiency warning (only during drilling)
-    if *state == RigState::Drilling && mse_efficiency < drilling_thresholds::MSE_EFFICIENCY_WARNING {
-        let severity_str = if mse_efficiency < drilling_thresholds::MSE_EFFICIENCY_POOR { "HIGH" } else { "LOW" };
+    let (mse_warn, mse_poor) = if cfg_available {
+        let m = &crate::config::get().thresholds.mse;
+        (m.efficiency_warning_percent, m.efficiency_poor_percent)
+    } else { (70.0, 50.0) };
+    if *state == RigState::Drilling && mse_efficiency < mse_warn {
+        let severity_str = if mse_efficiency < mse_poor { "HIGH" } else { "LOW" };
         return (
             true,
             AnomalyCategory::DrillingEfficiency,

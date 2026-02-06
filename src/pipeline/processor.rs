@@ -181,6 +181,31 @@ pub struct AppState {
     /// Drilling metrics history for ML analysis
     #[serde(skip)]
     pub metrics_history: std::collections::VecDeque<crate::types::DrillingMetrics>,
+
+    // === Advisory Acknowledgment & Shift Tracking ===
+
+    /// Acknowledged advisory audit trail
+    #[serde(skip)]
+    pub acknowledgments: Vec<crate::api::handlers::AcknowledgmentRecord>,
+
+    /// Total packets processed (for shift summary)
+    pub packets_processed: u64,
+
+    /// Total advisory tickets created (for shift summary)
+    pub tickets_created: u64,
+
+    /// Total tickets verified/confirmed (for shift summary)
+    pub tickets_verified: u64,
+
+    /// Total tickets rejected as transient (for shift summary)
+    pub tickets_rejected: u64,
+
+    /// Peak severity observed during current session
+    #[serde(skip)]
+    pub peak_severity: crate::types::TicketSeverity,
+
+    /// Running average MSE efficiency (None if no drilling data yet)
+    pub avg_mse_efficiency: Option<f64>,
 }
 
 impl Default for AppState {
@@ -236,6 +261,14 @@ impl Default for AppState {
             latest_ml_report: None,
             wits_history: std::collections::VecDeque::with_capacity(7200), // 2 hours at 1 Hz
             metrics_history: std::collections::VecDeque::with_capacity(7200),
+            // Advisory tracking
+            acknowledgments: Vec::new(),
+            packets_processed: 0,
+            tickets_created: 0,
+            tickets_verified: 0,
+            tickets_rejected: 0,
+            peak_severity: crate::types::TicketSeverity::Low,
+            avg_mse_efficiency: None,
         }
     }
 }

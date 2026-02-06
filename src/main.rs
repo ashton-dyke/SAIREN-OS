@@ -45,6 +45,7 @@ mod storage;
 mod strategic;
 
 // Multi-agent architecture modules
+pub mod config;
 pub mod types;
 pub mod agents;
 pub mod physics_engine;
@@ -430,15 +431,15 @@ async fn run_pipeline_stdin(
     let equipment_id = "WITS".to_string();
     info!("📊 Initializing dynamic threshold system for: {}", equipment_id);
 
-    let thresholds_path = Path::new("./data/thresholds.json");
+    let thresholds_path = Path::new(baseline::DEFAULT_STATE_PATH);
     let threshold_manager = Arc::new(std::sync::RwLock::new({
         match ThresholdManager::load_from_file(thresholds_path) {
-            Ok(mgr) => {
+            Some(mgr) => {
                 let locked_count = mgr.locked_count();
                 info!("✓ Loaded {} locked baselines from {:?}", locked_count, thresholds_path);
                 mgr
             }
-            Err(_) => {
+            None => {
                 info!("📝 No existing thresholds found, starting fresh baseline learning");
                 let mut mgr = ThresholdManager::new();
                 mgr.start_wits_learning(&equipment_id, 0);
@@ -798,15 +799,15 @@ async fn run_pipeline_wits_tcp(
     let equipment_id = "WITS-TCP".to_string();
     info!("📊 Initializing dynamic threshold system for: {}", equipment_id);
 
-    let thresholds_path = Path::new("./data/thresholds.json");
+    let thresholds_path = Path::new(baseline::DEFAULT_STATE_PATH);
     let threshold_manager = Arc::new(std::sync::RwLock::new({
         match ThresholdManager::load_from_file(thresholds_path) {
-            Ok(mgr) => {
+            Some(mgr) => {
                 let locked_count = mgr.locked_count();
                 info!("✓ Loaded {} locked baselines from {:?}", locked_count, thresholds_path);
                 mgr
             }
-            Err(_) => {
+            None => {
                 info!("📝 No existing thresholds found, starting fresh baseline learning");
                 let mut mgr = ThresholdManager::new();
                 mgr.start_wits_learning(&equipment_id, 0);
@@ -1265,7 +1266,16 @@ async fn main() -> Result<()> {
         reset_data_directory()?;
     }
 
-    // Load configuration
+    // Load well configuration (thresholds, physics, baseline learning params)
+    let well_config = config::WellConfig::load();
+    info!("Well: {} | Rig: {} | Bit: {:.1}\"",
+        well_config.well.name,
+        if well_config.well.rig.is_empty() { "unset" } else { &well_config.well.rig },
+        well_config.well.bit_diameter_inches
+    );
+    config::init(well_config);
+
+    // Load application configuration
     let config = AppConfig::from_env();
 
     // Override server address if provided via CLI

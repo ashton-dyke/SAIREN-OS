@@ -10,6 +10,7 @@
 //! - **LLM Module**: Dual-model inference for drilling advisories
 
 // Multi-agent architecture modules
+pub mod config;
 pub mod types;
 pub mod agents;
 pub mod physics_engine;
@@ -19,6 +20,9 @@ pub mod history_storage;
 pub mod llm;
 pub mod baseline;
 pub mod ml_engine;
+
+// Re-export well configuration
+pub use config::WellConfig;
 
 // Re-export commonly used types
 pub use types::{

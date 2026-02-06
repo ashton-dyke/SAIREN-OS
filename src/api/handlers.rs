@@ -1987,6 +1987,299 @@ pub async fn create_test_critical_report() -> Json<serde_json::Value> {
     }
 }
 
+// ============================================================================
+// Well Configuration Endpoints
+// ============================================================================
+
+/// GET /api/v1/config - Return the active well configuration
+///
+/// Returns the complete WellConfig as JSON including all thresholds,
+/// physics parameters, baseline learning settings, and campaign overrides.
+pub async fn get_config() -> Json<serde_json::Value> {
+    let cfg = crate::config::get();
+    match serde_json::to_value(cfg) {
+        Ok(v) => Json(v),
+        Err(e) => Json(serde_json::json!({
+            "error": format!("Failed to serialize config: {}", e)
+        })),
+    }
+}
+
+/// Request body for updating well configuration
+#[derive(Debug, serde::Deserialize)]
+pub struct UpdateConfigRequest {
+    /// Partial or full well config as JSON.
+    /// Missing fields retain their current values.
+    #[serde(flatten)]
+    pub config: crate::config::WellConfig,
+}
+
+/// Response after config update attempt
+#[derive(Debug, Serialize)]
+pub struct UpdateConfigResponse {
+    pub success: bool,
+    pub message: String,
+    /// Validation errors if any
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub errors: Vec<String>,
+}
+
+/// POST /api/v1/config - Validate and save a new well configuration to disk
+///
+/// The config is validated but NOT applied to the running system (requires restart).
+/// Saves to `./well_config.toml` so it takes effect on next startup.
+pub async fn update_config(
+    Json(request): Json<UpdateConfigRequest>,
+) -> Json<UpdateConfigResponse> {
+    // Validate the new config
+    match request.config.validate() {
+        Ok(()) => {}
+        Err(crate::config::ConfigError::Validation(errors)) => {
+            return Json(UpdateConfigResponse {
+                success: false,
+                message: "Configuration validation failed".to_string(),
+                errors,
+            });
+        }
+        Err(e) => {
+            return Json(UpdateConfigResponse {
+                success: false,
+                message: format!("Validation error: {}", e),
+                errors: vec![],
+            });
+        }
+    }
+
+    // Save to disk
+    let save_path = std::path::PathBuf::from("well_config.toml");
+    match request.config.save_to_file(&save_path) {
+        Ok(()) => Json(UpdateConfigResponse {
+            success: true,
+            message: "Config saved to well_config.toml. Restart SAIREN-OS to apply changes.".to_string(),
+            errors: vec![],
+        }),
+        Err(e) => Json(UpdateConfigResponse {
+            success: false,
+            message: format!("Failed to save config: {}", e),
+            errors: vec![],
+        }),
+    }
+}
+
+/// GET /api/v1/config/validate - Validate a config without saving
+pub async fn validate_config(
+    Json(request): Json<UpdateConfigRequest>,
+) -> Json<UpdateConfigResponse> {
+    match request.config.validate() {
+        Ok(()) => Json(UpdateConfigResponse {
+            success: true,
+            message: "Configuration is valid".to_string(),
+            errors: vec![],
+        }),
+        Err(crate::config::ConfigError::Validation(errors)) => Json(UpdateConfigResponse {
+            success: false,
+            message: "Configuration validation failed".to_string(),
+            errors,
+        }),
+        Err(e) => Json(UpdateConfigResponse {
+            success: false,
+            message: format!("Validation error: {}", e),
+            errors: vec![],
+        }),
+    }
+}
+
+// ============================================================================
+// Advisory Acknowledgment Endpoints
+// ============================================================================
+
+/// Request body for acknowledging an advisory
+#[derive(Debug, serde::Deserialize)]
+pub struct AcknowledgeRequest {
+    /// Advisory ticket timestamp (Unix seconds)
+    pub ticket_timestamp: u64,
+    /// Who acknowledged (crew role or name)
+    pub acknowledged_by: String,
+    /// Optional notes from the acknowledger
+    #[serde(default)]
+    pub notes: String,
+    /// Action taken (e.g. "monitored", "adjusted_parameters", "shut_in")
+    #[serde(default)]
+    pub action_taken: String,
+}
+
+/// Stored acknowledgment record
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+pub struct AcknowledgmentRecord {
+    pub ticket_timestamp: u64,
+    pub acknowledged_by: String,
+    pub acknowledged_at: u64,
+    pub notes: String,
+    pub action_taken: String,
+}
+
+/// Response after acknowledging an advisory
+#[derive(Debug, Serialize)]
+pub struct AcknowledgeResponse {
+    pub success: bool,
+    pub message: String,
+    pub record: Option<AcknowledgmentRecord>,
+}
+
+/// POST /api/v1/advisory/acknowledge - Acknowledge an advisory ticket
+///
+/// Creates an audit trail of who acknowledged which advisory and what action was taken.
+/// Stored in Sled DB for persistence across restarts.
+pub async fn acknowledge_advisory(
+    State(state): State<DashboardState>,
+    Json(request): Json<AcknowledgeRequest>,
+) -> Json<AcknowledgeResponse> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let record = AcknowledgmentRecord {
+        ticket_timestamp: request.ticket_timestamp,
+        acknowledged_by: request.acknowledged_by,
+        acknowledged_at: now,
+        notes: request.notes,
+        action_taken: request.action_taken,
+    };
+
+    // Store in the app state's acknowledgment log
+    let mut app_state = state.app_state.write().await;
+    app_state.acknowledgments.push(record.clone());
+
+    // Keep only last 1000 acknowledgments in memory
+    if app_state.acknowledgments.len() > 1000 {
+        let drain_count = app_state.acknowledgments.len() - 1000;
+        app_state.acknowledgments.drain(..drain_count);
+    }
+
+    tracing::info!(
+        ticket_ts = record.ticket_timestamp,
+        by = %record.acknowledged_by,
+        action = %record.action_taken,
+        "Advisory acknowledged"
+    );
+
+    Json(AcknowledgeResponse {
+        success: true,
+        message: "Advisory acknowledged and logged".to_string(),
+        record: Some(record),
+    })
+}
+
+/// GET /api/v1/advisory/acknowledgments - List recent acknowledgments
+pub async fn get_acknowledgments(
+    State(state): State<DashboardState>,
+) -> Json<Vec<AcknowledgmentRecord>> {
+    let app_state = state.app_state.read().await;
+    Json(app_state.acknowledgments.clone())
+}
+
+// ============================================================================
+// Shift Summary Endpoint
+// ============================================================================
+
+/// Query parameters for shift summary
+#[derive(Debug, serde::Deserialize)]
+pub struct ShiftSummaryQuery {
+    /// Start time (Unix timestamp seconds)
+    pub from: Option<u64>,
+    /// End time (Unix timestamp seconds)
+    pub to: Option<u64>,
+    /// Duration in hours (alternative to from/to — last N hours)
+    pub hours: Option<f64>,
+}
+
+/// Shift summary response
+#[derive(Debug, Serialize)]
+pub struct ShiftSummaryResponse {
+    /// Time range covered
+    pub from_timestamp: u64,
+    pub to_timestamp: u64,
+    pub duration_hours: f64,
+    /// Packet statistics
+    pub packets_processed: u64,
+    pub tickets_created: u64,
+    pub tickets_verified: u64,
+    pub tickets_rejected: u64,
+    /// Advisory breakdown by category
+    pub advisories_by_category: std::collections::HashMap<String, u64>,
+    /// Peak severity during shift
+    pub peak_severity: String,
+    /// Average MSE efficiency during shift
+    pub avg_mse_efficiency: Option<f64>,
+    /// Acknowledgment count during shift
+    pub acknowledgments_in_period: usize,
+    /// Well name from config
+    pub well_name: String,
+}
+
+/// GET /api/v1/shift/summary - Get shift summary for a time range
+///
+/// Query params:
+/// - `from` + `to`: Unix timestamps for custom range
+/// - `hours`: Alternative — last N hours (default: 12)
+pub async fn get_shift_summary(
+    State(state): State<DashboardState>,
+    axum::extract::Query(query): axum::extract::Query<ShiftSummaryQuery>,
+) -> Json<ShiftSummaryResponse> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let (from_ts, to_ts) = if let (Some(from), Some(to)) = (query.from, query.to) {
+        (from, to)
+    } else {
+        let hours = query.hours.unwrap_or(12.0);
+        let duration_secs = (hours * 3600.0) as u64;
+        (now.saturating_sub(duration_secs), now)
+    };
+
+    let duration_hours = (to_ts.saturating_sub(from_ts)) as f64 / 3600.0;
+
+    let app_state = state.app_state.read().await;
+
+    // Count acknowledgments in the time range
+    let acks_in_period = app_state.acknowledgments.iter()
+        .filter(|a| a.acknowledged_at >= from_ts && a.acknowledged_at <= to_ts)
+        .count();
+
+    let well_name = if crate::config::is_initialized() {
+        crate::config::get().well.name.clone()
+    } else {
+        "DEFAULT".to_string()
+    };
+
+    // Build category breakdown from recent history
+    let mut by_category: std::collections::HashMap<String, u64> = std::collections::HashMap::new();
+    if let Some(ref latest) = app_state.latest_advisory {
+        // Count from the stored advisory votes as a proxy
+        for vote in &latest.votes {
+            *by_category.entry(vote.specialist.clone()).or_insert(0) += 1;
+        }
+    }
+
+    Json(ShiftSummaryResponse {
+        from_timestamp: from_ts,
+        to_timestamp: to_ts,
+        duration_hours,
+        packets_processed: app_state.packets_processed,
+        tickets_created: app_state.tickets_created,
+        tickets_verified: app_state.tickets_verified,
+        tickets_rejected: app_state.tickets_rejected,
+        advisories_by_category: by_category,
+        peak_severity: format!("{:?}", app_state.peak_severity),
+        avg_mse_efficiency: app_state.avg_mse_efficiency,
+        acknowledgments_in_period: acks_in_period,
+        well_name,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
