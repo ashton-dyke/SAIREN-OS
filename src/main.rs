@@ -451,7 +451,7 @@ async fn run_pipeline_stdin(
 
     // Determine if we should start in learning mode
     let start_in_learning_mode = {
-        let mgr = threshold_manager.read().unwrap();
+        let mgr = threshold_manager.read().unwrap_or_else(|e| e.into_inner());
         if mgr.locked_count() > 0 {
             info!("🎯 Mode: DynamicThresholds (using learned baselines)");
             false
@@ -819,7 +819,7 @@ async fn run_pipeline_wits_tcp(
 
     // Determine if we should start in learning mode
     let start_in_learning_mode = {
-        let mgr = threshold_manager.read().unwrap();
+        let mgr = threshold_manager.read().unwrap_or_else(|e| e.into_inner());
         if mgr.locked_count() > 0 {
             info!("🎯 Mode: DynamicThresholds (using learned baselines)");
             false

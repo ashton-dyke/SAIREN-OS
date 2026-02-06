@@ -1231,7 +1231,7 @@ pub struct BaselineStatusResponse {
 /// Includes learned thresholds for locked metrics.
 pub async fn get_baseline_status(State(state): State<DashboardState>) -> Json<BaselineStatusResponse> {
     let manager = match &state.threshold_manager {
-        Some(m) => m.read().expect("lock poisoned"),
+        Some(m) => m.read().unwrap_or_else(|e| e.into_inner()),
         None => {
             // No threshold manager configured - return empty status
             return Json(BaselineStatusResponse {

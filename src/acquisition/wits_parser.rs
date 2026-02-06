@@ -324,7 +324,9 @@ impl WitsClient {
                 let value_str = &line[4..];
 
                 if let Ok(value) = value_str.trim().parse::<f64>() {
-                    items.insert(item_code.to_string(), value);
+                    if value.is_finite() {
+                        items.insert(item_code.to_string(), value);
+                    }
                 }
             }
         }

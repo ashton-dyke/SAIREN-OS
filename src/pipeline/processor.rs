@@ -836,15 +836,19 @@ impl VibrationProcessor {
         // - Harmonic summation for bearing fault amplitudes (captures ~1.7x more energy)
         // - Buffer std as alternative amplitude estimate (more robust to FFT frequency smearing)
         // - Buffer std * sqrt(2) approximates peak amplitude for sinusoidal faults
-        let (health_score, severity_str) = crate::processing::calculate_health_score_with_buffer(
-            spectrum,
-            &baseline,
-            &self.motor_temps,
-            &self.gearbox_temps,
-            bpfo_amp,
-            bpfi_amp,
-            Some(buf_std),
-        );
+        let (health_score, severity_str) = {
+            let (score, sev) = crate::processing::calculate_health_score_with_buffer(
+                spectrum,
+                &baseline,
+                &self.motor_temps,
+                &self.gearbox_temps,
+                bpfo_amp,
+                bpfi_amp,
+                Some(buf_std),
+            );
+            // Guard against NaN/Inf from bad FFT data — default to 50.0 (unknown)
+            if score.is_finite() { (score, sev) } else { (50.0, "UNKNOWN".to_string()) }
+        };
 
         info!(
             health_score = health_score,

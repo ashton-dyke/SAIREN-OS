@@ -247,6 +247,29 @@ impl WellConfig {
             errors.push("baseline_learning.min_samples_for_lock must be > 0".to_string());
         }
 
+        // Physics: divisors must be positive (used in division)
+        let p = &self.physics;
+        if p.formation_hardness_multiplier <= 0.0 {
+            errors.push("physics.formation_hardness_multiplier must be > 0".to_string());
+        }
+        if p.kick_flow_severity_divisor <= 0.0 {
+            errors.push("physics.kick_flow_severity_divisor must be > 0".to_string());
+        }
+        if p.kick_pit_severity_divisor <= 0.0 {
+            errors.push("physics.kick_pit_severity_divisor must be > 0".to_string());
+        }
+        if p.kick_gas_severity_divisor <= 0.0 {
+            errors.push("physics.kick_gas_severity_divisor must be > 0".to_string());
+        }
+
+        // Reject NaN/Inf in any config value (sweep all f64 fields via serialization)
+        let serialized = toml::to_string(self);
+        if let Ok(ref s) = serialized {
+            if s.contains("nan") || s.contains("inf") {
+                errors.push("Config contains NaN or Inf values — all thresholds must be finite numbers".to_string());
+            }
+        }
+
         if errors.is_empty() {
             Ok(())
         } else {
@@ -255,6 +278,13 @@ impl WellConfig {
     }
 
     fn check_escalation(warning: f64, critical: f64, name: &str, errors: &mut Vec<String>) {
+        // NaN/Inf comparisons silently pass — catch them explicitly
+        if !warning.is_finite() || !critical.is_finite() {
+            errors.push(format!(
+                "{name}: values must be finite (got warning={warning}, critical={critical})"
+            ));
+            return;
+        }
         if critical < warning {
             errors.push(format!(
                 "{name}: critical ({critical:.3}) must be >= warning ({warning:.3})"

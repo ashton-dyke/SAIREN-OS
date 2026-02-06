@@ -258,12 +258,13 @@ impl StrategicAgent {
         // Log well control check
         ticket.log_info(TicketStage::WellControlCheck, "Analyzing well control indicators");
 
-        // Check if flow imbalance is sustained
+        // Check if flow imbalance is sustained (filter non-finite to prevent NaN propagation)
         let recent_flow_balances: Vec<f64> = history
             .iter()
             .rev()
             .take(5)
             .map(|h| h.metrics.flow_balance)
+            .filter(|v| v.is_finite())
             .collect();
 
         let avg_flow_balance = if !recent_flow_balances.is_empty() {
@@ -278,6 +279,7 @@ impl StrategicAgent {
             .rev()
             .take(5)
             .map(|h| h.metrics.pit_rate)
+            .filter(|v| v.is_finite())
             .collect();
 
         let avg_pit_rate = if !recent_pit_rates.is_empty() {
@@ -378,7 +380,7 @@ impl StrategicAgent {
             .rev()
             .take(10)
             .filter_map(|h| {
-                if h.metrics.ecd_margin < f64::MAX {
+                if h.metrics.ecd_margin < f64::MAX && h.metrics.ecd_margin.is_finite() {
                     Some(h.metrics.ecd_margin)
                 } else {
                     None
@@ -416,6 +418,7 @@ impl StrategicAgent {
             .rev()
             .take(10)
             .map(|h| h.metrics.spp_delta)
+            .filter(|v| v.is_finite())
             .collect();
 
         let avg_spp_delta = if !spp_deltas.is_empty() {
@@ -494,6 +497,7 @@ impl StrategicAgent {
             .rev()
             .take(10)
             .map(|h| h.metrics.torque_delta_percent)
+            .filter(|v| v.is_finite())
             .collect();
 
         let avg_torque_delta = if !torque_deltas.is_empty() {
@@ -635,8 +639,8 @@ impl StrategicAgent {
                 format!("Low efficiency: {:.0}%", efficiency),
             );
 
-            // Calculate recommended adjustment
-            let mse_excess = avg_mse / optimal_mse;
+            // Calculate recommended adjustment (guard against zero optimal_mse)
+            let mse_excess = if optimal_mse > 0.0 { avg_mse / optimal_mse } else { 1.0 };
             let recommendation = if mse_excess > 2.0 {
                 "Significantly reduce WOB or increase ROP target"
             } else {
@@ -757,7 +761,7 @@ impl StrategicAgent {
 
     /// Truncate text for trace log
     fn truncate_text(&self, s: &str, max_len: usize) -> String {
-        if s.len() <= max_len {
+        if max_len < 4 || s.len() <= max_len {
             s.to_string()
         } else {
             format!("{}...", &s[..max_len - 3])

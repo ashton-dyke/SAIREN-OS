@@ -378,7 +378,7 @@ pub fn detect_stick_slip(torque_values: &[f64]) -> (bool, f64) {
     }
 
     let mean = torque_values.iter().sum::<f64>() / torque_values.len() as f64;
-    if mean <= 0.0 {
+    if !mean.is_finite() || mean <= 0.0 {
         return (false, 0.0);
     }
 
@@ -395,7 +395,7 @@ pub fn detect_stick_slip(torque_values: &[f64]) -> (bool, f64) {
     let severity = if cv > cv_critical {
         1.0
     } else if cv > cv_warning {
-        (cv - cv_warning) / (cv_critical - cv_warning)
+        if cv_critical > cv_warning { (cv - cv_warning) / (cv_critical - cv_warning) } else { 0.5 }
     } else {
         0.0
     };
@@ -640,18 +640,20 @@ pub fn classify_rig_state(packet: &WitsPacket) -> RigState {
 /// Positive slope = increasing trend
 /// Negative slope = decreasing trend
 pub fn calculate_trend(values: &[f64]) -> f64 {
-    if values.len() < 2 {
+    // Filter non-finite values to prevent NaN propagation from bad sensor data
+    let finite: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+    if finite.len() < 2 {
         return 0.0;
     }
 
-    let n = values.len() as f64;
+    let n = finite.len() as f64;
     let x_mean = (n - 1.0) / 2.0;
-    let y_mean = values.iter().sum::<f64>() / n;
+    let y_mean = finite.iter().sum::<f64>() / n;
 
     let mut sum_xy = 0.0;
     let mut sum_xx = 0.0;
 
-    for (i, &y) in values.iter().enumerate() {
+    for (i, &y) in finite.iter().enumerate() {
         let x = i as f64;
         sum_xy += (x - x_mean) * (y - y_mean);
         sum_xx += (x - x_mean) * (x - x_mean);
@@ -669,19 +671,20 @@ pub fn calculate_trend(values: &[f64]) -> f64 {
 /// Higher R² indicates the data follows a consistent trend.
 /// Used to distinguish real trends from noise.
 pub fn calculate_r_squared(values: &[f64]) -> f64 {
-    if values.len() < 3 {
+    let finite: Vec<f64> = values.iter().copied().filter(|v| v.is_finite()).collect();
+    if finite.len() < 3 {
         return 0.0;
     }
 
-    let n = values.len() as f64;
+    let n = finite.len() as f64;
     let x_mean = (n - 1.0) / 2.0;
-    let y_mean = values.iter().sum::<f64>() / n;
+    let y_mean = finite.iter().sum::<f64>() / n;
 
     let mut sum_xy = 0.0;
     let mut sum_xx = 0.0;
     let mut ss_tot = 0.0;
 
-    for (i, &y) in values.iter().enumerate() {
+    for (i, &y) in finite.iter().enumerate() {
         let x = i as f64;
         sum_xy += (x - x_mean) * (y - y_mean);
         sum_xx += (x - x_mean) * (x - x_mean);
@@ -696,7 +699,7 @@ pub fn calculate_r_squared(values: &[f64]) -> f64 {
     let intercept = y_mean - slope * x_mean;
 
     let mut ss_res = 0.0;
-    for (i, &y) in values.iter().enumerate() {
+    for (i, &y) in finite.iter().enumerate() {
         let x = i as f64;
         let y_pred = slope * x + intercept;
         ss_res += (y - y_pred) * (y - y_pred);
@@ -734,9 +737,19 @@ pub fn strategic_drilling_analysis(history: &[HistoryEntry]) -> DrillingPhysicsR
     let wob_values: Vec<f64> = history.iter().map(|h| h.packet.wob).collect();
     let rop_values: Vec<f64> = history.iter().map(|h| h.packet.rop).collect();
 
-    // Calculate averages
-    let avg_mse = mse_values.iter().sum::<f64>() / mse_values.len() as f64;
-    let avg_pit_rate = pit_rate_values.iter().sum::<f64>() / pit_rate_values.len() as f64;
+    // Calculate averages (filter non-finite values to prevent NaN propagation from bad sensor data)
+    let finite_mse: Vec<f64> = mse_values.iter().copied().filter(|v| v.is_finite()).collect();
+    let avg_mse = if !finite_mse.is_empty() {
+        finite_mse.iter().sum::<f64>() / finite_mse.len() as f64
+    } else {
+        0.0
+    };
+    let finite_pit: Vec<f64> = pit_rate_values.iter().copied().filter(|v| v.is_finite()).collect();
+    let avg_pit_rate = if !finite_pit.is_empty() {
+        finite_pit.iter().sum::<f64>() / finite_pit.len() as f64
+    } else {
+        0.0
+    };
 
     // Calculate trends
     let mse_trend = calculate_trend(&mse_values);
@@ -749,9 +762,13 @@ pub fn strategic_drilling_analysis(history: &[HistoryEntry]) -> DrillingPhysicsR
 
     // Estimate formation hardness from MSE (0-10 scale)
     // MSE of base = soft (hardness 0), MSE of base + 10*multiplier = very hard (hardness 10)
-    let formation_hardness = ((avg_mse - cfg.physics.formation_hardness_base_psi)
-        / cfg.physics.formation_hardness_multiplier)
-        .clamp(0.0, 10.0);
+    let formation_hardness = if cfg.physics.formation_hardness_multiplier > 0.0 {
+        ((avg_mse - cfg.physics.formation_hardness_base_psi)
+            / cfg.physics.formation_hardness_multiplier)
+            .clamp(0.0, 10.0)
+    } else {
+        5.0 // safe mid-range default if misconfigured
+    };
 
     // Calculate optimal MSE and efficiency
     let optimal_mse = estimate_optimal_mse(formation_hardness);
