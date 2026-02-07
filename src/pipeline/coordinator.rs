@@ -501,6 +501,7 @@ impl PipelineCoordinator {
                 "Periodic 10-minute summary: {:.1}% anomaly rate, avg ROP {:.1} ft/hr",
                 anomaly_rate, avg_rop
             ),
+            context: None,
             depth: packet.bit_depth,
             trace_log: Vec::new(),
         };

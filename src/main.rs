@@ -21,8 +21,8 @@
 //!
 //! # Environment Variables
 //!
-//! - `TACTICAL_MODEL_PATH`: Path to tactical LLM (default: Qwen 2.5 1.5B)
 //! - `STRATEGIC_MODEL_PATH`: Path to strategic LLM (default: Qwen 7B GPU / 4B CPU)
+//! - `TACTICAL_MODEL_PATH`: Path to tactical LLM (only with `tactical_llm` feature)
 //! - `RUST_LOG`: Logging level (default: info)
 //! - `RESET_DB`: Set to "true" to wipe all persistent data on startup (for testing)
 
@@ -1292,13 +1292,12 @@ async fn main() -> Result<()> {
         let cuda_available = llm::is_cuda_available();
         if cuda_available {
             info!("🖥️  Hardware: CUDA detected - LLM inference will use GPU");
-            info!("   Tactical model: Qwen 2.5 1.5B (GPU, ~60ms)");
             info!("   Strategic model: Qwen 2.5 7B (GPU, ~800ms)");
         } else {
             info!("🖥️  Hardware: CUDA not available - LLM inference will use CPU");
-            info!("   Tactical model: Qwen 2.5 1.5B (CPU, ~2-5s)");
             info!("   Strategic model: Qwen 2.5 4B (CPU, ~10-30s)");
         }
+        info!("   Tactical routing: deterministic pattern matching (no LLM)");
         info!("");
     }
     #[cfg(not(feature = "llm"))]

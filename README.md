@@ -120,7 +120,7 @@ Hourly analysis finds optimal drilling conditions for each formation type using 
 
 ## Architecture
 
-SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agent** handles real-time anomaly detection, and a deeper **Strategic Agent** performs comprehensive drilling physics analysis only when anomalies are detected.
+SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agent** handles real-time anomaly detection via deterministic pattern-matched routing, and a deeper **Strategic Agent** performs comprehensive drilling physics analysis only when anomalies are detected. Structured `TicketContext` (all threshold breaches, pattern name, rig state, operation, campaign) travels with each ticket and is templated into the strategic LLM prompt.
 
 ```
                               SAIREN-OS Multi-Agent Pipeline
@@ -228,13 +228,16 @@ cargo build --release --features cuda
 cargo build --release
 ```
 
-**Hardware auto-detection**: When built with `llm` or `cuda`, SAIREN-OS checks for CUDA at startup and automatically selects the right models:
+**Hardware auto-detection**: When built with `llm` or `cuda`, SAIREN-OS checks for CUDA at startup and automatically selects the right model:
 
-| Hardware | Tactical Model | Strategic Model | Build Flag |
-|----------|---------------|----------------|------------|
-| **GPU** (CUDA) | Qwen 2.5 1.5B (~60ms) | Qwen 2.5 7B (~800ms) | `--features cuda` |
-| **CPU** | Qwen 2.5 1.5B (~2-5s) | Qwen 2.5 4B (~10-30s) | `--features llm` |
-| **No LLM** | Template-based | Template-based | *(default)* |
+| Hardware | Tactical Routing | Strategic Model | Build Flag |
+|----------|-----------------|----------------|------------|
+| **GPU** (CUDA) | Deterministic pattern matching | Qwen 2.5 7B (~800ms) | `--features cuda` |
+| **CPU** | Deterministic pattern matching | Qwen 2.5 4B (~10-30s) | `--features llm` |
+| **No LLM** | Deterministic pattern matching | Template-based | *(default)* |
+
+> **Note**: The tactical agent uses deterministic physics-based pattern matching (no LLM required).
+> The legacy tactical LLM (Qwen 2.5 1.5B) is available behind the `tactical_llm` feature flag.
 
 ---
 
@@ -297,8 +300,8 @@ curl -X POST http://localhost:8080/api/v1/config/validate \
 |----------|---------|-------------|
 | `SAIREN_CONFIG` | *(none)* | Path to `well_config.toml` (overrides search) |
 | `CAMPAIGN` | `production` | Campaign mode: `production` or `pa` |
-| `TACTICAL_MODEL_PATH` | `models/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Tactical LLM model (same for GPU/CPU) |
 | `STRATEGIC_MODEL_PATH` | GPU: `models/qwen2.5-7b-instruct-q4_k_m.gguf`, CPU: `models/qwen2.5-4b-instruct-q4_k_m.gguf` | Strategic LLM model (auto-selected) |
+| `TACTICAL_MODEL_PATH` | `models/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Only with `tactical_llm` feature |
 | `SAIREN_SERVER_ADDR` | `0.0.0.0:8080` | HTTP server bind address |
 | `RUST_LOG` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `ML_INTERVAL_SECS` | `3600` | ML analysis interval (seconds) |
@@ -632,19 +635,19 @@ The system estimates the optimal WOB (where ROP was highest) and provides specif
 
 ### Model not found error
 
-Download models and place in `models/` directory, or set environment variables:
+Download the strategic model and place in `models/` directory, or set the environment variable:
 ```bash
-export TACTICAL_MODEL_PATH=/path/to/tactical-model.gguf
 export STRATEGIC_MODEL_PATH=/path/to/strategic-model.gguf
 ```
 
 ### LLM inference too slow
 
 1. Check what mode SAIREN-OS detected at startup (look for "Hardware:" in logs)
-2. If on CPU, this is expected — CPU inference targets ~2-5s (tactical) and ~10-30s (strategic)
+2. If on CPU, this is expected — CPU inference targets ~10-30s for the strategic model
 3. For faster inference, build with `--features cuda` and ensure CUDA is available: `nvidia-smi`
 4. Use quantized models (Q4_K_M recommended)
 5. System works without LLM - falls back to templates
+6. Tactical routing is always fast (~0ms) — it uses deterministic pattern matching, not LLM
 
 ### Another instance already running
 
@@ -702,8 +705,8 @@ src/
                        # and data quality validation
 
   llm/
-    tactical_llm.rs    # Qwen 2.5 1.5B classification (GPU & CPU)
     strategic_llm.rs   # Qwen 2.5 7B (GPU) / 4B (CPU) advisory generation
+    tactical_llm.rs    # Legacy 1.5B classification (behind `tactical_llm` feature)
     mistral_rs.rs      # Backend with runtime CUDA detection
 
   api/
@@ -750,6 +753,23 @@ well_config.default.toml  # Reference configuration with all thresholds document
 ---
 
 ## Changelog
+
+### v0.9 - Pattern-Matched Tactical Routing
+
+**Tactical LLM replaced with deterministic pattern matching** — the tactical agent now uses physics-based routing instead of an LLM for anomaly classification:
+- `TicketContext` struct carries all threshold breaches, pattern name, rig state, operation, and campaign with every ticket
+- `ThresholdBreach` struct records exact actual vs threshold values for every exceeded limit
+- Pattern routing table maps anomaly categories to named patterns (Kick, Pack-off, MSE Inefficiency, etc.)
+- Structured context templated directly into strategic LLM prompt (`### TACTICAL CONTEXT` section)
+- Tactical LLM (Qwen 2.5 1.5B) gated behind `tactical_llm` feature flag — not loaded by default
+- **Result**: Eliminates ~60ms (GPU) / ~2-5s (CPU) tactical LLM latency, reduces VRAM by ~1.5 GB
+
+**Hardened float math:**
+- NaN/Inf guards on all averaging operations, divisors, and critical calculations
+- Division-by-zero protection for configurable divisors (MSE, formation hardness, severity)
+- WITS parser rejects NaN/Inf from sensor data at ingestion
+- Config validation sweeps for NaN/Inf via TOML serialization
+- Poisoned RwLock recovery (`.unwrap_or_else(|e| e.into_inner())`) prevents cascading panics
 
 ### v0.8 - Production Hardening
 
@@ -838,8 +858,7 @@ well_config.default.toml  # Reference configuration with all thresholds document
 
 | Metric | Target | Actual |
 |--------|--------|--------|
-| Tactical Physics | < 15ms | ~10ms |
-| Tactical LLM | < 60ms | ~50ms |
+| Tactical Physics + Routing | < 15ms | ~10ms |
 | Strategic LLM | < 800ms | ~750ms |
 | WITS Packet Rate | 1 Hz | 1 Hz |
 | History Buffer | 60 packets | 60 |
@@ -848,14 +867,14 @@ well_config.default.toml  # Reference configuration with all thresholds document
 
 | Metric | Target | Actual |
 |--------|--------|--------|
-| Tactical Physics | < 15ms | ~10ms |
-| Tactical LLM | < 5s | ~2-5s |
+| Tactical Physics + Routing | < 15ms | ~10ms |
 | Strategic LLM | < 30s | ~10-30s |
 | WITS Packet Rate | 1 Hz | 1 Hz |
 | History Buffer | 60 packets | 60 |
 
-> **Note**: Physics-based detection (MSE, d-exponent, flow balance) runs at the same speed
-> on both GPU and CPU. Only LLM advisory generation is affected by hardware.
+> **Note**: Tactical routing (pattern matching, ticket creation) is purely deterministic and
+> runs at physics speed (~10ms) on all hardware. Only the strategic LLM advisory generation
+> is affected by GPU/CPU selection.
 
 ---
 

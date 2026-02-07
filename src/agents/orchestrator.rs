@@ -486,6 +486,7 @@ mod tests {
             trigger_value: 65.0,
             threshold_value: 70.0,
             description: "MSE efficiency below optimal".to_string(),
+            context: None,
             depth: 10000.0,
             trace_log: Vec::new(),
         }

@@ -54,7 +54,7 @@ Gas: {gas} units | Pit Volume: {pit_volume} bbl
 
 ### TRIGGER
 Category: {category} | Parameter: {trigger_param} | Value: {trigger_value}
-
+{tactical_context}
 ### INSTRUCTIONS
 1. Analyze drilling parameters against operational limits.
 2. If flow imbalance > 10 bbl/hr, prioritize well control assessment.
@@ -92,7 +92,7 @@ Pit Volume: {pit_volume} bbl
 
 ### TRIGGER
 Category: {category} | Parameter: {trigger_param} | Value: {trigger_value}
-
+{tactical_context}
 ### P&A SPECIFIC INSTRUCTIONS
 1. Monitor cement returns - expect returns during cement placement.
 2. Track pressure behavior during cement setting.
@@ -275,6 +275,12 @@ impl StrategicLLM {
             _ => String::new(),
         };
 
+        // Build structured ticket context section (from deterministic pattern matcher)
+        let context_section = match &ticket.context {
+            Some(ctx) => format!("\n### TACTICAL CONTEXT\n{}", ctx.to_prompt_section()),
+            None => String::new(),
+        };
+
         // Select prompt based on campaign
         let base_prompt = match campaign {
             crate::types::Campaign::Production => DRILLING_ADVISORY_PROMPT,
@@ -306,6 +312,7 @@ impl StrategicLLM {
             .replace("{category}", &format!("{:?}", ticket.category))
             .replace("{trigger_param}", &ticket.trigger_parameter)
             .replace("{trigger_value}", &format!("{:.2}", ticket.trigger_value))
+            .replace("{tactical_context}", &context_section)
     }
 
     /// Parse LLM response into advisory
@@ -875,6 +882,7 @@ mod tests {
             trigger_value: 25.0,
             threshold_value: 20.0,
             description: "MSE efficiency below threshold".to_string(),
+            context: None,
             depth: 10000.0,
             trace_log: Vec::new(),
         }

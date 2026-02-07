@@ -2,20 +2,17 @@
 //!
 //! Provides a unified interface for LLM backends with automatic hardware detection.
 //!
-//! ## Dual-Model Architecture
+//! ## Architecture
 //!
-//! - **TacticalLLM**: Qwen 2.5 1.5B Instruct for fast anomaly classification
-//! - **StrategicLLM**: Qwen 2.5 7B (GPU) or 4B (CPU) for comprehensive diagnosis
+//! - **StrategicLLM**: Qwen 2.5 7B (GPU) or 4B (CPU) for comprehensive drilling advisory
+//! - **TacticalLLM** (feature-gated behind `tactical_llm`): Qwen 2.5 1.5B for anomaly
+//!   classification. Replaced by deterministic pattern-matched routing in the tactical agent.
 //!
 //! ## Hardware Detection
 //!
 //! On startup the system checks for CUDA availability:
-//! - **GPU mode** (requires `cuda` feature + CUDA runtime): Uses larger models on GPU
-//!   - Tactical: Qwen 2.5 1.5B (~60ms)
-//!   - Strategic: Qwen 2.5 7B (~800ms)
-//! - **CPU mode** (default `llm` feature): Uses smaller models on CPU
-//!   - Tactical: Qwen 2.5 1.5B (~2-5s)
-//!   - Strategic: Qwen 2.5 4B (~10-30s)
+//! - **GPU mode** (requires `cuda` feature + CUDA runtime): Strategic Qwen 2.5 7B (~800ms)
+//! - **CPU mode** (default `llm` feature): Strategic Qwen 2.5 4B (~10-30s)
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -35,9 +32,11 @@ pub mod scheduler;
 pub use scheduler::{LlmScheduler, SchedulerConfig, SchedulerHandle};
 
 // Dual-model specialized interfaces
+#[cfg(feature = "tactical_llm")]
 pub mod tactical_llm;
 pub mod strategic_llm;
 
+#[cfg(feature = "tactical_llm")]
 pub use tactical_llm::TacticalLLM;
 pub use strategic_llm::StrategicLLM;
 

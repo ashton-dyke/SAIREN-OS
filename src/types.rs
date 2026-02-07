@@ -1125,6 +1125,63 @@ impl TicketEvent {
 }
 
 // ============================================================================
+// Ticket Context (Structured Routing - replaces tactical LLM)
+// ============================================================================
+
+/// Structured context attached to each advisory ticket.
+///
+/// Built by the tactical agent's deterministic pattern matcher. Provides the
+/// strategic agent with precise, parseable information about which thresholds
+/// were breached, replacing the previously planned tactical LLM description.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TicketContext {
+    /// Which specific thresholds were breached (ordered by severity)
+    pub triggers: Vec<ThresholdBreach>,
+    /// Detected pattern name (e.g. "Kick Warning", "Pack-off", "MSE Inefficiency")
+    pub pattern: String,
+    /// Rig state at time of ticket (Drilling, Tripping, etc.)
+    pub rig_state: RigState,
+    /// Current operation (Production, Milling, CementDrillOut, etc.)
+    pub operation: Operation,
+    /// Current campaign (Production or P&A)
+    pub campaign: Campaign,
+}
+
+impl TicketContext {
+    /// Format as structured text for the strategic LLM prompt
+    pub fn to_prompt_section(&self) -> String {
+        let mut s = format!("TICKET: {} ({})\n", self.pattern, self.triggers.first()
+            .map(|t| t.threshold_type.as_str()).unwrap_or("INFO"));
+        s.push_str("TRIGGERS:\n");
+        for t in &self.triggers {
+            s.push_str(&format!(
+                "  - {}: {:.2} {} (threshold: {:.2} {}, {})\n",
+                t.parameter, t.actual_value, t.unit, t.threshold_value, t.unit, t.threshold_type
+            ));
+        }
+        s.push_str(&format!("RIG STATE: {:?}\n", self.rig_state));
+        s.push_str(&format!("OPERATION: {:?}\n", self.operation));
+        s.push_str(&format!("CAMPAIGN: {:?}\n", self.campaign));
+        s
+    }
+}
+
+/// A single threshold breach recorded by the tactical pattern matcher.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ThresholdBreach {
+    /// Parameter name (e.g. "flow_balance", "torque_cv", "mse_efficiency")
+    pub parameter: String,
+    /// Measured value at time of detection
+    pub actual_value: f64,
+    /// Threshold that was breached
+    pub threshold_value: f64,
+    /// "WARNING" or "CRITICAL"
+    pub threshold_type: String,
+    /// Engineering unit (e.g. "gpm", "%", "ppg", "psi")
+    pub unit: String,
+}
+
+// ============================================================================
 // Advisory Ticket System
 // ============================================================================
 
@@ -1155,6 +1212,9 @@ pub struct AdvisoryTicket {
     pub threshold_value: f64,
     /// Description of the detected issue
     pub description: String,
+    /// Structured context from deterministic pattern matcher (replaces tactical LLM)
+    #[serde(default)]
+    pub context: Option<TicketContext>,
     /// Current depth at time of detection (ft)
     pub depth: f64,
     /// Flight Recorder trace log - tracks all decision points

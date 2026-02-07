@@ -71,6 +71,7 @@ candle-core = { git = "https://github.com/huggingface/candle.git", rev = "aaf5c8
 [features]
 default = []
 llm = ["mistralrs", "candle-core"]
+tactical_llm = ["llm"]
 cuda = ["llm", "mistralrs/cuda"]
 
 [dev-dependencies]

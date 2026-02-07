@@ -27,7 +27,8 @@ use crate::baseline::{wits_metrics, ThresholdManager};
 use crate::physics_engine;
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, Campaign, DrillingMetrics,
-    HistoryEntry, Operation, RigState, TicketSeverity, TicketStage, TicketType, WitsPacket,
+    HistoryEntry, Operation, RigState, ThresholdBreach, TicketContext, TicketSeverity,
+    TicketStage, TicketType, WitsPacket,
 };
 
 // ============================================================================
@@ -610,6 +611,9 @@ impl TacticalAgent {
         // Update cooldown timer
         self.last_ticket_time = Some(Instant::now());
 
+        // Build structured context (replaces tactical LLM description)
+        let context = self.build_ticket_context(packet, metrics);
+
         // Create the ticket with trace log
         let mut ticket = AdvisoryTicket {
             timestamp: packet.timestamp,
@@ -621,6 +625,7 @@ impl TacticalAgent {
             trigger_value,
             threshold_value,
             description,
+            context: Some(context),
             depth: packet.bit_depth,
             trace_log: Vec::new(),
         };
@@ -727,6 +732,234 @@ impl TacticalAgent {
                 0.0, // No fixed threshold for formation changes
             ),
             AnomalyCategory::None => ("unknown".to_string(), 0.0, 0.0),
+        }
+    }
+
+    /// Build structured TicketContext from current metrics and packet.
+    ///
+    /// Collects ALL threshold breaches (not just the primary trigger) so the
+    /// strategic agent has a complete picture of what went wrong.
+    fn build_ticket_context(
+        &self,
+        packet: &WitsPacket,
+        metrics: &DrillingMetrics,
+    ) -> TicketContext {
+        let cfg = crate::config::get();
+        let mut triggers = Vec::new();
+
+        // --- Well Control breaches ---
+        if metrics.flow_balance.abs() > cfg.thresholds.well_control.flow_imbalance_warning_gpm {
+            let is_critical = metrics.flow_balance.abs()
+                > cfg.thresholds.well_control.flow_imbalance_critical_gpm;
+            triggers.push(ThresholdBreach {
+                parameter: "flow_balance".into(),
+                actual_value: metrics.flow_balance,
+                threshold_value: if is_critical {
+                    cfg.thresholds.well_control.flow_imbalance_critical_gpm
+                } else {
+                    cfg.thresholds.well_control.flow_imbalance_warning_gpm
+                },
+                threshold_type: if is_critical { "CRITICAL" } else { "WARNING" }.into(),
+                unit: "gpm".into(),
+            });
+        }
+        if metrics.pit_rate.abs() > cfg.thresholds.well_control.pit_rate_warning_bbl_hr {
+            let is_critical =
+                metrics.pit_rate.abs() > cfg.thresholds.well_control.pit_rate_critical_bbl_hr;
+            triggers.push(ThresholdBreach {
+                parameter: "pit_rate".into(),
+                actual_value: metrics.pit_rate,
+                threshold_value: if is_critical {
+                    cfg.thresholds.well_control.pit_rate_critical_bbl_hr
+                } else {
+                    cfg.thresholds.well_control.pit_rate_warning_bbl_hr
+                },
+                threshold_type: if is_critical { "CRITICAL" } else { "WARNING" }.into(),
+                unit: "bbl/hr".into(),
+            });
+        }
+        if packet.gas_units > cfg.thresholds.well_control.gas_units_warning {
+            let is_critical = packet.gas_units > cfg.thresholds.well_control.gas_units_critical;
+            triggers.push(ThresholdBreach {
+                parameter: "gas_units".into(),
+                actual_value: packet.gas_units,
+                threshold_value: if is_critical {
+                    cfg.thresholds.well_control.gas_units_critical
+                } else {
+                    cfg.thresholds.well_control.gas_units_warning
+                },
+                threshold_type: if is_critical { "CRITICAL" } else { "WARNING" }.into(),
+                unit: "units".into(),
+            });
+        }
+        if packet.h2s > cfg.thresholds.well_control.h2s_warning_ppm {
+            let is_critical = packet.h2s > cfg.thresholds.well_control.h2s_critical_ppm;
+            triggers.push(ThresholdBreach {
+                parameter: "h2s".into(),
+                actual_value: packet.h2s,
+                threshold_value: if is_critical {
+                    cfg.thresholds.well_control.h2s_critical_ppm
+                } else {
+                    cfg.thresholds.well_control.h2s_warning_ppm
+                },
+                threshold_type: if is_critical { "CRITICAL" } else { "WARNING" }.into(),
+                unit: "ppm".into(),
+            });
+        }
+
+        // --- Hydraulics breaches ---
+        if metrics.ecd_margin < cfg.thresholds.hydraulics.ecd_margin_warning_ppg {
+            let is_critical =
+                metrics.ecd_margin < cfg.thresholds.hydraulics.ecd_margin_critical_ppg;
+            triggers.push(ThresholdBreach {
+                parameter: "ecd_margin".into(),
+                actual_value: metrics.ecd_margin,
+                threshold_value: if is_critical {
+                    cfg.thresholds.hydraulics.ecd_margin_critical_ppg
+                } else {
+                    cfg.thresholds.hydraulics.ecd_margin_warning_ppg
+                },
+                threshold_type: if is_critical { "CRITICAL" } else { "WARNING" }.into(),
+                unit: "ppg".into(),
+            });
+        }
+        if metrics.spp_delta.abs() > cfg.thresholds.hydraulics.spp_deviation_warning_psi {
+            let is_critical = metrics.spp_delta.abs()
+                > cfg.thresholds.hydraulics.spp_deviation_critical_psi;
+            triggers.push(ThresholdBreach {
+                parameter: "spp_delta".into(),
+                actual_value: metrics.spp_delta,
+                threshold_value: if is_critical {
+                    cfg.thresholds.hydraulics.spp_deviation_critical_psi
+                } else {
+                    cfg.thresholds.hydraulics.spp_deviation_warning_psi
+                },
+                threshold_type: if is_critical { "CRITICAL" } else { "WARNING" }.into(),
+                unit: "psi".into(),
+            });
+        }
+
+        // --- Mechanical breaches ---
+        if metrics.torque_delta_percent > cfg.thresholds.mechanical.torque_increase_warning {
+            let is_critical = metrics.torque_delta_percent
+                > cfg.thresholds.mechanical.torque_increase_critical;
+            triggers.push(ThresholdBreach {
+                parameter: "torque_increase".into(),
+                actual_value: metrics.torque_delta_percent * 100.0,
+                threshold_value: if is_critical {
+                    cfg.thresholds.mechanical.torque_increase_critical * 100.0
+                } else {
+                    cfg.thresholds.mechanical.torque_increase_warning * 100.0
+                },
+                threshold_type: if is_critical { "CRITICAL" } else { "WARNING" }.into(),
+                unit: "%".into(),
+            });
+        }
+
+        // --- Efficiency breaches ---
+        if metrics.mse_efficiency < cfg.thresholds.mse.efficiency_warning_percent {
+            let is_poor =
+                metrics.mse_efficiency < cfg.thresholds.mse.efficiency_poor_percent;
+            triggers.push(ThresholdBreach {
+                parameter: "mse_efficiency".into(),
+                actual_value: metrics.mse_efficiency,
+                threshold_value: if is_poor {
+                    cfg.thresholds.mse.efficiency_poor_percent
+                } else {
+                    cfg.thresholds.mse.efficiency_warning_percent
+                },
+                threshold_type: if is_poor { "CRITICAL" } else { "WARNING" }.into(),
+                unit: "%".into(),
+            });
+        }
+
+        // Determine pattern name from anomaly category + description
+        let pattern = self.detect_pattern_name(metrics, packet);
+
+        TicketContext {
+            triggers,
+            pattern,
+            rig_state: metrics.state,
+            operation: metrics.operation,
+            campaign: self.campaign,
+        }
+    }
+
+    /// Map anomaly to a human-readable pattern name using the routing table.
+    fn detect_pattern_name(&self, metrics: &DrillingMetrics, packet: &WitsPacket) -> String {
+        let cfg = crate::config::get();
+        match metrics.anomaly_category {
+            AnomalyCategory::WellControl => {
+                if metrics.flow_balance > cfg.thresholds.well_control.flow_imbalance_critical_gpm {
+                    "Kick".into()
+                } else if metrics.flow_balance
+                    > cfg.thresholds.well_control.flow_imbalance_warning_gpm
+                {
+                    "Kick Warning".into()
+                } else if metrics.flow_balance
+                    < -cfg.thresholds.well_control.flow_imbalance_critical_gpm
+                {
+                    "Lost Circulation".into()
+                } else if metrics.flow_balance
+                    < -cfg.thresholds.well_control.flow_imbalance_warning_gpm
+                {
+                    "Loss Warning".into()
+                } else if packet.gas_units > cfg.thresholds.well_control.gas_units_critical
+                    || packet.h2s > cfg.thresholds.well_control.h2s_critical_ppm
+                {
+                    "Gas Critical".into()
+                } else if packet.gas_units > cfg.thresholds.well_control.gas_units_warning {
+                    "Gas Warning".into()
+                } else if metrics.pit_rate.abs()
+                    > cfg.thresholds.well_control.pit_rate_critical_bbl_hr
+                {
+                    "Pit Rate Critical".into()
+                } else {
+                    "Well Control Warning".into()
+                }
+            }
+            AnomalyCategory::Hydraulics => {
+                if metrics.ecd_margin < cfg.thresholds.hydraulics.ecd_margin_critical_ppg {
+                    "ECD Critical".into()
+                } else if metrics.ecd_margin < cfg.thresholds.hydraulics.ecd_margin_warning_ppg {
+                    "ECD Warning".into()
+                } else if metrics.spp_delta.abs()
+                    > cfg.thresholds.hydraulics.spp_deviation_critical_psi
+                {
+                    "SPP Critical".into()
+                } else {
+                    "SPP Warning".into()
+                }
+            }
+            AnomalyCategory::Mechanical => {
+                if metrics.torque_delta_percent
+                    > cfg.thresholds.mechanical.torque_increase_critical
+                    && metrics.spp_delta > cfg.thresholds.hydraulics.spp_deviation_warning_psi
+                {
+                    "Pack-off".into()
+                } else if metrics.torque_delta_percent
+                    > cfg.thresholds.mechanical.torque_increase_warning
+                    && metrics.spp_delta > 0.0
+                {
+                    "Pack-off Warning".into()
+                } else if metrics.torque_delta_percent
+                    > cfg.thresholds.mechanical.stick_slip_cv_warning
+                {
+                    "Stick-slip".into()
+                } else {
+                    // Default to founder if mechanical but not torque-driven
+                    "Founder".into()
+                }
+            }
+            AnomalyCategory::DrillingEfficiency => {
+                if metrics.mse_efficiency < cfg.thresholds.mse.efficiency_poor_percent {
+                    "MSE Inefficiency".into()
+                } else {
+                    "MSE Warning".into()
+                }
+            }
+            AnomalyCategory::Formation => "Formation Change".into(),
+            AnomalyCategory::None => "Unknown".into(),
         }
     }
 

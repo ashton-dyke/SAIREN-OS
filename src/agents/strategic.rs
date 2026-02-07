@@ -824,6 +824,7 @@ mod tests {
             trigger_value: 15.0,
             threshold_value: 10.0,
             description: "Test advisory".to_string(),
+            context: None,
             depth: 10000.0,
             trace_log: Vec::new(),
         }
