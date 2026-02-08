@@ -10,6 +10,7 @@ mod actor;
 mod aggregation;
 pub mod advisory;
 mod parsing;
+pub mod templates;
 
 #[cfg(feature = "llm")]
 pub use actor::{StrategicActor, StrategicActorHandle};
@@ -17,3 +18,4 @@ pub use actor::{StrategicActor, StrategicActorHandle};
 pub use aggregation::TacticalAnalysis;
 pub use advisory::{AdvisoryComposer, VotingResult};
 pub use parsing::{DailyReport, DetailsSection, HourlyReport};
+pub use templates::{template_advisory, TemplateAdvisory};

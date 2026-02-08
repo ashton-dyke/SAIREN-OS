@@ -733,7 +733,7 @@ impl PipelineCoordinator {
         context
     }
 
-    /// Phase 7: Generate explanation using LLM (if available) or template
+    /// Phase 7: Generate explanation using LLM (if available) or template fallback
     #[cfg(feature = "llm")]
     async fn generate_explanation(
         &self,
@@ -753,6 +753,7 @@ impl PipelineCoordinator {
                     info!(
                         latency_ms = elapsed.as_millis(),
                         campaign = %campaign.short_code(),
+                        source = "llm",
                         "LLM advisory generation complete"
                     );
                     return (advisory.recommendation, advisory.expected_benefit, advisory.reasoning);
@@ -763,7 +764,7 @@ impl PipelineCoordinator {
             }
         }
 
-        self.template_explanation(ticket, physics)
+        Self::template_explanation(ticket, physics, campaign)
     }
 
     /// Phase 7: Generate explanation (template-based, no LLM feature)
@@ -773,77 +774,23 @@ impl PipelineCoordinator {
         ticket: &AdvisoryTicket,
         physics: &DrillingPhysicsReport,
         _context: &[String],
-        _campaign: Campaign,
+        campaign: Campaign,
     ) -> (String, String, String) {
-        self.template_explanation(ticket, physics)
+        Self::template_explanation(ticket, physics, campaign)
     }
 
     /// Template-based explanation generator (fallback when LLM unavailable)
+    ///
+    /// Uses the dedicated template module which provides richer, campaign-aware
+    /// templates with actual metric values embedded in the text.
     fn template_explanation(
-        &self,
         ticket: &AdvisoryTicket,
         physics: &DrillingPhysicsReport,
+        campaign: Campaign,
     ) -> (String, String, String) {
-        let (recommendation, expected_benefit, reasoning) = match ticket.category {
-            AnomalyCategory::WellControl => (
-                format!(
-                    "Verify flow balance and pit levels. Current flow imbalance: {:.1} bbl/hr. Prepare for well control procedures.",
-                    ticket.current_metrics.flow_balance
-                ),
-                "Well control incident prevention, potential rig safety".to_string(),
-                format!(
-                    "Flow imbalance of {:.1} bbl/hr detected with pit rate {:.1} bbl/hr. ECD margin: {:.2} ppg.",
-                    ticket.current_metrics.flow_balance,
-                    ticket.current_metrics.pit_rate,
-                    ticket.current_metrics.ecd_margin
-                ),
-            ),
-            AnomalyCategory::DrillingEfficiency => (
-                format!(
-                    "Consider adjusting WOB/RPM to improve MSE. Current efficiency: {:.0}%. Target MSE: {:.0} psi.",
-                    physics.mse_efficiency, physics.optimal_mse
-                ),
-                "Potential 10-20% ROP improvement, reduced bit wear".to_string(),
-                format!(
-                    "MSE trending {}. Average MSE: {:.0} psi vs optimal {:.0} psi ({:.0}% efficiency).",
-                    if physics.mse_trend > 0.0 { "up (inefficient)" } else { "stable" },
-                    physics.avg_mse,
-                    physics.optimal_mse,
-                    physics.mse_efficiency
-                ),
-            ),
-            AnomalyCategory::Hydraulics => (
-                "Monitor standpipe pressure and flow rates. Check for potential washout or plugging.".to_string(),
-                "Hydraulic efficiency optimization, prevented equipment damage".to_string(),
-                format!(
-                    "Flow balance trend: {:.1} bbl/hr. ECD margin: {:.2} ppg.",
-                    physics.flow_balance_trend, ticket.current_metrics.ecd_margin
-                ),
-            ),
-            AnomalyCategory::Mechanical => (
-                "Monitor torque and drag trends. Consider backreaming if torque continues to increase.".to_string(),
-                "Pack-off prevention, reduced NPT risk".to_string(),
-                "Elevated torque/drag detected. Possible mechanical resistance or pack-off developing.".to_string(),
-            ),
-            AnomalyCategory::Formation => (
-                format!(
-                    "Formation change detected. D-exponent trend: {:.1}%. Adjust drilling parameters accordingly.",
-                    physics.dxc_trend
-                ),
-                "Optimized drilling through formation transition".to_string(),
-                format!(
-                    "D-exponent trend indicates formation change. Trend: {:.1}%.",
-                    physics.dxc_trend
-                ),
-            ),
-            AnomalyCategory::None => (
-                "Continue monitoring drilling parameters.".to_string(),
-                "Maintained operational efficiency".to_string(),
-                "Normal drilling operations.".to_string(),
-            ),
-        };
-
-        (recommendation, expected_benefit, reasoning)
+        let result = crate::strategic::templates::template_advisory(ticket, physics, campaign);
+        info!(source = result.source, confidence = result.confidence, "Template advisory generated");
+        (result.recommendation, result.expected_benefit, result.reasoning)
     }
 
     /// Get latest advisory for dashboard

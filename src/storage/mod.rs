@@ -8,9 +8,11 @@
 mod strategic;
 pub mod history;
 pub mod lockfile;
+pub mod persistence;
 
 pub use strategic::StrategicStorage;
 pub use lockfile::ProcessLock;
+pub use persistence::{PersistenceLayer, PersistenceError, InMemoryDAL};
 
 use anyhow::{Context, Result};
 use chrono::{DateTime, Duration, Utc};

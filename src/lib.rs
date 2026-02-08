@@ -21,6 +21,7 @@ pub mod llm;
 pub mod baseline;
 pub mod ml_engine;
 pub mod strategic;
+pub mod background;
 
 // Re-export well configuration
 pub use config::WellConfig;

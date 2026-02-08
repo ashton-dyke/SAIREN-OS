@@ -54,6 +54,9 @@ regex = "1.10"
 # Database
 sled = "0.34"
 
+# System (disk space checks)
+libc = "0.2"
+
 # Hashing (for digital signatures)
 md5 = "0.7"
 
