@@ -4278,6 +4278,7 @@ dependencies = [
  "clap",
  "futures",
  "hyper",
+ "libc",
  "md5",
  "mistralrs",
  "ndarray",
