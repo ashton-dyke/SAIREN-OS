@@ -10,6 +10,8 @@
 
 pub mod vector_db;
 pub mod knowledge_store;
+pub mod ram_recall;
 
 pub use vector_db::{search, search_by_category, search_with_limit, DocumentCategory};
 pub use knowledge_store::{KnowledgeStore, NoOpStore, StaticKnowledgeBase};
+pub use ram_recall::RAMRecall;

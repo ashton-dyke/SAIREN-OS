@@ -52,6 +52,8 @@ pub mod physics_engine;
 pub mod context;
 pub mod sensors;
 pub mod baseline;
+pub mod fleet;
+pub mod background;
 
 use api::{create_app, DashboardState};
 use pipeline::{AppState, PipelineCoordinator};
