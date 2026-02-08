@@ -20,6 +20,7 @@ pub mod history_storage;
 pub mod llm;
 pub mod baseline;
 pub mod ml_engine;
+pub mod strategic;
 
 // Re-export well configuration
 pub use config::WellConfig;

@@ -19,8 +19,9 @@
 
 use crate::agents::{Orchestrator, StrategicAgent, TacticalAgent};
 use crate::baseline::ThresholdManager;
-use crate::context::vector_db;
+use crate::context::KnowledgeStore;
 use crate::physics_engine;
+use crate::strategic::AdvisoryComposer;
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, Campaign, DrillingMetrics,
     DrillingPhysicsReport, HistoryEntry, RigState, StrategicAdvisory,
@@ -46,8 +47,12 @@ pub struct PipelineCoordinator {
     tactical_agent: TacticalAgent,
     /// Phase 5-7: Strategic Agent (for two-stage verification)
     strategic_agent: StrategicAgent,
-    /// Phase 8: Orchestrator
+    /// Phase 8: Orchestrator (trait-based specialist voting)
     orchestrator: Orchestrator,
+    /// Phase 9: Advisory Composer (with CRITICAL cooldown)
+    advisory_composer: AdvisoryComposer,
+    /// Phase 6: Knowledge Store (trait-based, swappable backend)
+    knowledge_store: Box<dyn KnowledgeStore>,
     /// Phase 4: History buffer (60 packets, circular)
     history_buffer: VecDeque<HistoryEntry>,
     /// Latest strategic advisory (for Phase 10 dashboard)
@@ -77,6 +82,8 @@ impl PipelineCoordinator {
             tactical_agent: TacticalAgent::new(),
             strategic_agent: StrategicAgent::new(),
             orchestrator: Orchestrator::new(),
+            advisory_composer: AdvisoryComposer::new(),
+            knowledge_store: Box::new(crate::context::StaticKnowledgeBase),
             history_buffer: VecDeque::with_capacity(HISTORY_BUFFER_SIZE),
             latest_advisory: None,
             latest_verification: None,
@@ -105,6 +112,8 @@ impl PipelineCoordinator {
             tactical_agent: TacticalAgent::new(),
             strategic_agent: StrategicAgent::new(),
             orchestrator: Orchestrator::new(),
+            advisory_composer: AdvisoryComposer::new(),
+            knowledge_store: Box::new(crate::context::StaticKnowledgeBase),
             history_buffer: VecDeque::with_capacity(HISTORY_BUFFER_SIZE),
             latest_advisory: None,
             latest_verification: None,
@@ -140,6 +149,8 @@ impl PipelineCoordinator {
                 threshold_manager,
             ),
             orchestrator: Orchestrator::new(),
+            advisory_composer: AdvisoryComposer::new(),
+            knowledge_store: Box::new(crate::context::StaticKnowledgeBase),
             history_buffer: VecDeque::with_capacity(HISTORY_BUFFER_SIZE),
             latest_advisory: None,
             latest_verification: None,
@@ -182,6 +193,8 @@ impl PipelineCoordinator {
                 threshold_manager,
             ),
             orchestrator: Orchestrator::new(),
+            advisory_composer: AdvisoryComposer::new(),
+            knowledge_store: Box::new(crate::context::StaticKnowledgeBase),
             history_buffer: VecDeque::with_capacity(HISTORY_BUFFER_SIZE),
             latest_advisory: None,
             latest_verification: None,
@@ -320,17 +333,27 @@ impl PipelineCoordinator {
             .generate_explanation(&ticket, &physics, &context, campaign)
             .await;
 
-        // PHASE 8: Orchestrator Voting
-        let advisory = self.orchestrator.vote(
+        // PHASE 8: Orchestrator Voting (trait-based specialists)
+        let voting_result = self.orchestrator.vote(&ticket, &physics);
+
+        // PHASE 9: Advisory Composition (with CRITICAL cooldown)
+        let advisory = match self.advisory_composer.compose(
             &ticket,
             &physics,
             &context,
             &recommendation,
             &expected_benefit,
             &reasoning,
-        );
+            &voting_result,
+        ) {
+            Some(adv) => adv,
+            None => {
+                debug!("Advisory suppressed by CRITICAL cooldown");
+                return None;
+            }
+        };
 
-        // PHASE 9: Storage (store in latest_advisory for Phase 10 dashboard)
+        // PHASE 10: Storage (store in latest_advisory for dashboard)
         self.latest_advisory = Some(advisory.clone());
         self.strategic_analyses += 1;
         self.last_periodic_summary_time = packet.timestamp;
@@ -520,15 +543,25 @@ impl PipelineCoordinator {
             .generate_explanation(&summary_ticket, &physics, &context, campaign)
             .await;
 
-        // Orchestrator voting
-        let advisory = self.orchestrator.vote(
+        // Orchestrator voting (trait-based specialists)
+        let voting_result = self.orchestrator.vote(&summary_ticket, &physics);
+
+        // Advisory composition (with CRITICAL cooldown)
+        let advisory = match self.advisory_composer.compose(
             &summary_ticket,
             &physics,
             &context,
             &recommendation,
             &expected_benefit,
             &reasoning,
-        );
+            &voting_result,
+        ) {
+            Some(adv) => adv,
+            None => {
+                debug!("Periodic summary suppressed by CRITICAL cooldown");
+                return None;
+            }
+        };
 
         // Store and update timing
         self.latest_advisory = Some(advisory.clone());
@@ -677,7 +710,7 @@ impl PipelineCoordinator {
         }
     }
 
-    /// Phase 6: Context lookup from drilling knowledge base
+    /// Phase 6: Context lookup from knowledge store (trait-based)
     fn lookup_context(&self, ticket: &AdvisoryTicket) -> Vec<String> {
         let query = match ticket.category {
             AnomalyCategory::WellControl => "well control kick loss circulation flow imbalance",
@@ -688,11 +721,12 @@ impl PipelineCoordinator {
             AnomalyCategory::None => "normal drilling operations",
         };
 
-        let context = vector_db::search(query);
+        let context = self.knowledge_store.query(query, 5);
 
         debug!(
             category = ?ticket.category,
             results = context.len(),
+            store = self.knowledge_store.store_name(),
             "Context lookup complete"
         );
 

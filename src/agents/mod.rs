@@ -16,7 +16,9 @@
 pub mod tactical;
 pub mod orchestrator;
 pub mod strategic;
+pub mod specialists;
 
 pub use tactical::{TacticalAgent, TacticalMode, AgentStats, DrillingBaseline};
 pub use orchestrator::Orchestrator;
 pub use strategic::StrategicAgent;
+pub use specialists::Specialist;
