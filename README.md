@@ -116,11 +116,58 @@ Hourly analysis finds optimal drilling conditions for each formation type using 
 - **Safe operating ranges** - Returns WOB/RPM/Flow min-max ranges, not just point estimates
 - **Relaxed correlations** - Proceeds even if p > 0.05 (flags as low confidence)
 
+### Trait-Based Architecture
+
+Core system boundaries are abstracted behind traits for swappable backends, testability, and graceful degradation.
+
+| Trait | Module | Implementations | Purpose |
+|-------|--------|-----------------|---------|
+| **KnowledgeStore** | `context/knowledge_store.rs` | `StaticKnowledgeBase`, `NoOpStore`, `RAMRecall` | Precedent lookup for fleet memory |
+| **Specialist** | `agents/specialists/mod.rs` | `MseSpecialist`, `HydraulicSpecialist`, `WellControlSpecialist`, `FormationSpecialist` | Domain-specific risk evaluation |
+| **HealthCheck** | `background/self_healer.rs` | `WitsHealthCheck`, `DiskHealthCheck` | Background health monitoring |
+| **PersistenceLayer** | `storage/persistence.rs` | `InMemoryDAL` | Advisory and ML report storage |
+
+### Advisory Composition
+
+The orchestrator voting and advisory generation are decoupled:
+
+1. **Orchestrator** evaluates all specialists and returns a `VotingResult` (votes, severity, risk level, efficiency score)
+2. **AdvisoryComposer** assembles the final `StrategicAdvisory` with a 30-second CRITICAL cooldown to prevent alert spam
+3. **Template fallback** provides campaign-aware advisories when LLM is unavailable (confidence: 0.70)
+
+### Fleet Preparation (Hub-and-Spoke)
+
+Event-only upload architecture for multi-rig fleet learning:
+
+| Component | Module | Function |
+|-----------|--------|----------|
+| **FleetEvent** | `fleet/types.rs` | Full advisory + history window + outcome metadata |
+| **FleetEpisode** | `fleet/types.rs` | Compact precedent for library (from_event constructor) |
+| **UploadQueue** | `fleet/queue.rs` | Disk-backed durable queue, idempotent by event ID |
+| **RAMRecall** | `context/ram_recall.rs` | In-memory episode search with metadata filtering + scoring |
+
+- Only AMBER/RED events qualify for upload (`should_upload()` filter)
+- Upload queue survives process restarts (scans directory on open)
+- RAMRecall holds up to 10,000 episodes in memory (~50MB)
+- Episodes scored by recency (40%) and outcome quality (60%)
+
+### Background Services
+
+Background services run independently of the hot packet pipeline:
+
+| Service | Module | Function |
+|---------|--------|----------|
+| **SelfHealer** | `background/self_healer.rs` | 30s health check loop with automatic healing |
+| **WitsHealthCheck** | `background/self_healer.rs` | Monitors last packet time (30s timeout) |
+| **DiskHealthCheck** | `background/self_healer.rs` | Monitors free disk space (warns at 500MB) |
+
 ---
 
 ## Architecture
 
 SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agent** handles real-time anomaly detection via deterministic pattern-matched routing, and a deeper **Strategic Agent** performs comprehensive drilling physics analysis only when anomalies are detected. Structured `TicketContext` (all threshold breaches, pattern name, rig state, operation, campaign) travels with each ticket and is templated into the strategic LLM prompt.
+
+The **Orchestrator** uses trait-based `Specialist` implementations for domain-specific evaluation, returning a `VotingResult`. The **AdvisoryComposer** then assembles the final `StrategicAdvisory` with CRITICAL cooldown (30s) to prevent alert spam. Knowledge lookup uses the `KnowledgeStore` trait, allowing swappable backends (static DB, RAMRecall, or NoOp for pilot mode).
 
 ```
                               SAIREN-OS Multi-Agent Pipeline
@@ -145,8 +192,21 @@ SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agen
                                                                 |            +---------+
                                                                 |            v
                                                                 |   +------------------+
+                                                                |   | KnowledgeStore   |
+                                                                |   | (precedent query)|
+                                                                |   +------------------+
+                                                                |            |
+                                                                |            v
+                                                                |   +------------------+
                                                                 |   |   Orchestrator   |
-                                                                |   |  4 Specialists   |
+                                                                |   | 4 Specialists    |
+                                                                |   | (trait-based)    |
+                                                                |   +------------------+
+                                                                |            |
+                                                                |            v
+                                                                |   +------------------+
+                                                                |   | AdvisoryComposer |
+                                                                |   | (CRITICAL cooldown)|
                                                                 |   +------------------+
                                                                 |            |
                                                                 |            v
@@ -166,10 +226,10 @@ SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agen
 | 3 | Decision Gate | Create AdvisoryTicket if thresholds exceeded |
 | 4 | History Buffer | Store last 60 packets for trend analysis |
 | 5 | Strategic Verification | Physics-based validation of tickets |
-| 6 | Context Lookup | Query drilling knowledge base |
-| 7 | LLM Advisory | Generate recommendations (Qwen 2.5 7B) |
-| 8 | Orchestrator Voting | 4 specialists vote on risk level |
-| 9 | Advisory Generation | Combine analysis into StrategicAdvisory |
+| 6 | Context Lookup | Query KnowledgeStore (StaticKnowledgeBase, RAMRecall, or NoOp) |
+| 7 | LLM Advisory | Generate recommendations (Qwen 2.5 7B) or template fallback |
+| 8 | Orchestrator Voting | 4 trait-based specialists vote → VotingResult |
+| 9 | Advisory Composition | AdvisoryComposer assembles StrategicAdvisory (CRITICAL cooldown) |
 | 10 | Dashboard API | REST endpoints and web dashboard |
 
 ### Specialist Weights
@@ -671,6 +731,7 @@ fuser -k 8080/tcp
 ```
 src/
   main.rs              # Entry point, CLI handling
+  lib.rs               # Library crate (shared modules for testing/reuse)
   types.rs             # Core data structures (WitsPacket, DrillingMetrics,
                        # Campaign, Operation, AdvisoryTicket, etc.)
 
@@ -681,10 +742,24 @@ src/
   agents/
     tactical.rs        # Fast anomaly detection + operation classification
     strategic.rs       # Physics verification with configurable thresholds
-    orchestrator.rs    # 4-specialist weighted voting
+    orchestrator.rs    # Trait-based specialist voting (returns VotingResult)
+    specialists/
+      mod.rs           # Specialist trait + default_specialists() factory
+      mse.rs           # MSE efficiency evaluation
+      hydraulic.rs     # ECD margin, SPP deviation evaluation
+      well_control.rs  # Flow imbalance, pit rate, CRITICAL override
+      formation.rs     # D-exponent trends, formation hardness
+
+  strategic/
+    mod.rs             # Strategic analysis module
+    advisory.rs        # AdvisoryComposer + VotingResult + CRITICAL cooldown
+    templates.rs       # Campaign-aware template fallback per AnomalyCategory
+    aggregation.rs     # Report aggregation helpers
+    parsing.rs         # Structured output parsing
+    actor.rs           # Strategic actor
 
   pipeline/
-    coordinator.rs     # 10-phase pipeline coordinator
+    coordinator.rs     # 10-phase pipeline coordinator (uses KnowledgeStore + AdvisoryComposer)
     processor.rs       # AppState, system status
 
   baseline/
@@ -694,24 +769,62 @@ src/
     analyzer.rs        # Core ML analysis
     correlations.rs    # Pearson correlation with p-value testing
     optimal_finder.rs  # Campaign-aware composite scoring
+    dysfunction_filter.rs  # Stick-slip, pack-off, founder sample rejection
+    formation_segmenter.rs # D-exponent shift detection
+    quality_filter.rs  # Sensor glitch / out-of-range rejection
     scheduler.rs       # Configurable interval scheduler
+    storage.rs         # ML report storage
 
   physics_engine/
     mod.rs             # Anomaly detection with configurable thresholds
     drilling_models.rs # MSE, d-exponent, kick/loss/founder detection
+    metrics.rs         # Metric calculations
+    models.rs          # Physics models
+
+  context/
+    mod.rs             # Knowledge base module
+    vector_db.rs       # Static drilling knowledge base (keyword search)
+    knowledge_store.rs # KnowledgeStore trait + NoOpStore + StaticKnowledgeBase
+    ram_recall.rs      # RAMRecall: in-memory fleet episode search (metadata filter + scoring)
+
+  fleet/
+    mod.rs             # Fleet hub-and-spoke module (design docs)
+    types.rs           # FleetEvent, FleetEpisode, EventOutcome, HistorySnapshot
+    queue.rs           # UploadQueue: disk-backed durable queue for fleet uploads
+
+  background/
+    mod.rs             # Background services module
+    self_healer.rs     # HealthCheck trait + SelfHealer + WITS/Disk health checks
+
+  storage/
+    mod.rs             # Storage module
+    persistence.rs     # PersistenceLayer trait + InMemoryDAL
+    history.rs         # Advisory history storage
+    strategic.rs       # Strategic report storage
+    lockfile.rs        # Process lock file management
 
   acquisition/
     wits_parser.rs     # WITS Level 0 TCP with reconnection, timeouts,
                        # and data quality validation
+    sensors.rs         # Sensor abstractions
+    stdin_source.rs    # Stdin data source
 
   llm/
     strategic_llm.rs   # Qwen 2.5 7B (GPU) / 4B (CPU) advisory generation
     tactical_llm.rs    # Legacy 1.5B classification (behind `tactical_llm` feature)
     mistral_rs.rs      # Backend with runtime CUDA detection
+    scheduler.rs       # LLM scheduling
 
   api/
     routes.rs          # HTTP route definitions
     handlers.rs        # Request handlers (config, advisory ack, shift summary)
+
+  processing/
+    fft.rs             # FFT spectrum analysis
+    health_scoring.rs  # Health score calculations
+
+  director/
+    llm_director.rs    # LLM orchestration director
 
 static/
   index.html           # Dashboard UI
@@ -753,6 +866,24 @@ well_config.default.toml  # Reference configuration with all thresholds document
 ---
 
 ## Changelog
+
+### v1.0 - Trait Architecture & Fleet Preparation
+
+**Phase 1: Trait Formalization**
+- **KnowledgeStore trait** (`context/knowledge_store.rs`) — swappable knowledge backends with `query()`, `store_name()`, `is_healthy()` methods; includes `StaticKnowledgeBase` (wraps existing vector_db) and `NoOpStore` for pilot mode
+- **Specialist trait** (`agents/specialists/`) — extracted 4 domain specialists (MSE, Hydraulic, WellControl, Formation) from inline orchestrator methods into trait-based implementations with `default_specialists()` factory
+- **VotingResult decoupling** — orchestrator now returns `VotingResult` (votes, severity, risk level, efficiency score) instead of directly composing advisories
+- **AdvisoryComposer** (`strategic/advisory.rs`) — separate component that assembles `StrategicAdvisory` from `VotingResult` with 30-second CRITICAL cooldown to prevent alert spam
+
+**Phase 2: Resilience Hardening**
+- **Template fallback system** (`strategic/templates.rs`) — campaign-aware template advisories per `AnomalyCategory` with actual metric values; confidence 0.70, source "template"; P&A-specific notes for well control
+- **Background self-healer** (`background/self_healer.rs`) — `HealthCheck` trait with `SelfHealer` running 30s check loop; `WitsHealthCheck` (30s packet timeout) and `DiskHealthCheck` (500MB free space warning via `libc::statvfs`)
+- **PersistenceLayer trait** (`storage/persistence.rs`) — `InMemoryDAL` with configurable limits for advisories and ML reports; `PersistenceError` enum with Serialization, Storage, NotFound variants
+
+**Phase 3: Fleet Preparation**
+- **Fleet types** (`fleet/types.rs`) — `FleetEvent` (full advisory + history window + outcome), `FleetEpisode` (compact precedent with `from_event` constructor), `EventOutcome` (Pending/Resolved/Escalated/FalsePositive), `HistorySnapshot`, `should_upload()` filter (AMBER/RED only)
+- **Upload queue** (`fleet/queue.rs`) — disk-backed durable queue using JSON files named by event ID for idempotent retry; survives process restarts; auto-evicts oldest when full (default 1000 events)
+- **RAMRecall** (`context/ram_recall.rs`) — in-memory fleet episode search implementing `KnowledgeStore`; metadata-filtered linear scan with recency + outcome scoring; max 10,000 episodes (~50MB); keyword-based category parsing from query strings
 
 ### v0.9 - Pattern-Matched Tactical Routing
 
