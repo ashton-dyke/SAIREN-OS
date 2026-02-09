@@ -11,16 +11,17 @@ Real-time drilling advisory system using WITS Level 0 data and a multi-agent AI 
 3. [Features](#features)
 4. [Architecture](#architecture)
 5. [Running the System](#running-the-system)
-6. [Configuration](#configuration)
-7. [Deployment](#deployment)
-8. [WITS Simulator](#wits-simulator)
-9. [API Reference](#api-reference)
-10. [Understanding Advisories](#understanding-advisories)
-11. [Thresholds Reference](#thresholds-reference)
-12. [Troubleshooting](#troubleshooting)
-13. [Project Structure](#project-structure)
-14. [Glossary](#glossary)
-15. [Changelog](#changelog)
+6. [Fleet Hub](#fleet-hub)
+7. [Configuration](#configuration)
+8. [Deployment](#deployment)
+9. [WITS Simulator](#wits-simulator)
+10. [API Reference](#api-reference)
+11. [Understanding Advisories](#understanding-advisories)
+12. [Thresholds Reference](#thresholds-reference)
+13. [Troubleshooting](#troubleshooting)
+14. [Project Structure](#project-structure)
+15. [Glossary](#glossary)
+16. [Changelog](#changelog)
 
 ---
 
@@ -135,21 +136,41 @@ The orchestrator voting and advisory generation are decoupled:
 2. **AdvisoryComposer** assembles the final `StrategicAdvisory` with a 30-second CRITICAL cooldown to prevent alert spam
 3. **Template fallback** provides campaign-aware advisories when LLM is unavailable (confidence: 0.70)
 
-### Fleet Preparation (Hub-and-Spoke)
+### Fleet Hub (Hub-and-Spoke)
 
-Event-only upload architecture for multi-rig fleet learning:
+Complete multi-rig fleet learning system with a central hub server and spoke-side clients on each rig.
+
+**Rig-side (Spoke) components:**
 
 | Component | Module | Function |
 |-----------|--------|----------|
 | **FleetEvent** | `fleet/types.rs` | Full advisory + history window + outcome metadata |
 | **FleetEpisode** | `fleet/types.rs` | Compact precedent for library (from_event constructor) |
 | **UploadQueue** | `fleet/queue.rs` | Disk-backed durable queue, idempotent by event ID |
+| **FleetClient** | `fleet/client.rs` | HTTP client for hub communication (upload, sync, outcome forwarding) |
+| **Uploader** | `fleet/uploader.rs` | Background task draining queue to hub with retry |
+| **LibrarySync** | `fleet/sync.rs` | Periodic library pull from hub with jitter |
 | **RAMRecall** | `context/ram_recall.rs` | In-memory episode search with metadata filtering + scoring |
 
+**Hub-side (Central Server) components:**
+
+| Component | Module | Function |
+|-----------|--------|----------|
+| **Fleet Hub Binary** | `bin/fleet_hub.rs` | Standalone Axum server with PostgreSQL backend |
+| **Event Ingestion** | `hub/api/events.rs` | Validates, decompresses, and stores uploaded events |
+| **Library Curator** | `hub/curator/` | Scores, deduplicates, and prunes episodes on a configurable schedule |
+| **Library Sync API** | `hub/api/library.rs` | Delta sync with zstd compression and version tracking |
+| **Rig Registry** | `hub/api/registry.rs` | API key management with bcrypt hashing and cache |
+| **Auth Middleware** | `hub/auth/` | Bearer token extractors (RigAuth, AdminAuth) with 5-min cache |
+| **Fleet Dashboard** | `hub/api/dashboard.rs` | Real-time fleet overview with Chart.js visualizations |
+
+**Key design principles:**
 - Only AMBER/RED events qualify for upload (`should_upload()` filter)
 - Upload queue survives process restarts (scans directory on open)
+- Rigs operate independently when hub is unreachable (local autonomy)
+- Bandwidth-conscious: zstd compression, delta sync, configurable cadence
 - RAMRecall holds up to 10,000 episodes in memory (~50MB)
-- Episodes scored by recency (40%) and outcome quality (60%)
+- Hub episodes scored by outcome (50%), recency (25%), detail (15%), diversity (10%)
 
 ### Background Services
 
@@ -168,6 +189,25 @@ Background services run independently of the hot packet pipeline:
 SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agent** handles real-time anomaly detection via deterministic pattern-matched routing, and a deeper **Strategic Agent** performs comprehensive drilling physics analysis only when anomalies are detected. Structured `TicketContext` (all threshold breaches, pattern name, rig state, operation, campaign) travels with each ticket and is templated into the strategic LLM prompt.
 
 The **Orchestrator** uses trait-based `Specialist` implementations for domain-specific evaluation, returning a `VotingResult`. The **AdvisoryComposer** then assembles the final `StrategicAdvisory` with CRITICAL cooldown (30s) to prevent alert spam. Knowledge lookup uses the `KnowledgeStore` trait, allowing swappable backends (static DB, RAMRecall, or NoOp for pilot mode).
+
+**Fleet topology**: A central **Fleet Hub** collects AMBER/RED events from all rigs, curates them into a scored episode library, and syncs the library back so every rig benefits from fleet-wide precedents.
+
+```
+                           Fleet Hub-and-Spoke Topology
+    ===============================================================================
+
+    +----------+                                               +----------+
+    |  RIG-001 |---upload events--->  +------------------+  <--| RIG-003  |
+    | (spoke)  |<--sync library----  |   FLEET HUB      |  -->| (spoke)  |
+    +----------+                     |  (PostgreSQL)     |     +----------+
+                                     |                   |
+    +----------+                     |  - Event Store    |     +----------+
+    |  RIG-002 |---upload events-->  |  - Curator        |  <--| RIG-004  |
+    | (spoke)  |<--sync library----  |  - Episode Library|  -->| (spoke)  |
+    +----------+                     |  - Dashboard      |     +----------+
+                                     +------------------+
+    ===============================================================================
+```
 
 ```
                               SAIREN-OS Multi-Agent Pipeline
@@ -286,6 +326,12 @@ cargo build --release --features cuda
 
 # Without LLM (template-based advisories only)
 cargo build --release
+
+# Fleet Hub server (requires PostgreSQL)
+cargo build --release --bin fleet-hub --features fleet-hub
+
+# Rig with fleet connectivity (upload events, sync library)
+cargo build --release --features fleet-client
 ```
 
 **Hardware auto-detection**: When built with `llm` or `cuda`, SAIREN-OS checks for CUDA at startup and automatically selects the right model:
@@ -296,8 +342,98 @@ cargo build --release
 | **CPU** | Deterministic pattern matching | Qwen 2.5 4B (~10-30s) | `--features llm` |
 | **No LLM** | Deterministic pattern matching | Template-based | *(default)* |
 
+**Feature flags:**
+
+| Feature | Flag | Description |
+|---------|------|-------------|
+| **LLM (CPU)** | `--features llm` | Qwen 2.5 strategic advisory generation |
+| **LLM (GPU)** | `--features cuda` | CUDA-accelerated LLM inference |
+| **Fleet Hub** | `--features fleet-hub` | Central hub server binary (PostgreSQL, API, curator) |
+| **Fleet Client** | `--features fleet-client` | Spoke-side HTTP client (upload, sync, outcome forwarding) |
+| **Tactical LLM** | `--features tactical_llm` | Legacy LLM-based tactical routing (not recommended) |
+
 > **Note**: The tactical agent uses deterministic physics-based pattern matching (no LLM required).
-> The legacy tactical LLM (Qwen 2.5 1.5B) is available behind the `tactical_llm` feature flag.
+> Feature flags are additive and can be combined (e.g., `--features "llm,fleet-client"`).
+
+---
+
+## Fleet Hub
+
+The Fleet Hub is an optional central server that enables fleet-wide learning across multiple rigs. Each rig operates autonomously and uploads significant events to the hub. The hub curates events into a scored episode library that is synced back to all rigs.
+
+### Running the Fleet Hub
+
+```bash
+# 1. Ensure PostgreSQL is running
+# 2. Set DATABASE_URL
+export DATABASE_URL=postgres://sairen:password@localhost/sairen_fleet
+export FLEET_ADMIN_KEY=your-admin-key
+
+# 3. Start the hub (migrations run automatically)
+./target/release/fleet-hub --port 8080
+
+# 4. View the fleet dashboard
+open http://localhost:8080
+```
+
+### Registering a Rig
+
+```bash
+# Register a new rig (returns a one-time API key)
+curl -X POST http://hub:8080/api/fleet/rigs/register \
+  -H "Authorization: Bearer $FLEET_ADMIN_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"rig_id": "RIG-001", "well_id": "WELL-A1", "field": "North Sea"}'
+```
+
+### Hub Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DATABASE_URL` | *(required)* | PostgreSQL connection URL |
+| `FLEET_ADMIN_KEY` | `admin-dev-key` | Admin API key for rig registration and dashboard |
+| `FLEET_MAX_PAYLOAD_SIZE` | `1048576` | Max event upload size in bytes (1 MB) |
+| `FLEET_CURATION_INTERVAL` | `3600` | Curation cycle interval in seconds |
+| `FLEET_LIBRARY_MAX_EPISODES` | `50000` | Maximum episodes before pruning |
+
+### Hub CLI Arguments
+
+| Argument | Description |
+|----------|-------------|
+| `--database-url <url>` | PostgreSQL connection URL (overrides env) |
+| `--port <N>` | Port to listen on (default: 8080) |
+| `--bind-address <addr>` | Full bind address (overrides --port) |
+
+### Curator Rules
+
+The background curator runs hourly (configurable) and applies these rules:
+
+| Rule | Condition | Action |
+|------|-----------|--------|
+| Age limit | Episode > 12 months | Archive |
+| False positive cleanup | FalsePositive + age > 3 months | Archive |
+| Stale pending | Pending + age > 30 days | Downgrade score to 0.05 |
+| Capacity limit | Total > 50,000 | Prune lowest-scored |
+
+### Episode Scoring
+
+Episodes are scored for library ranking based on four factors:
+
+| Factor | Weight | Description |
+|--------|--------|-------------|
+| Outcome quality | 50% | Resolved (1.0), Escalated (0.7), Pending (0.2), FalsePositive (0.1) |
+| Recency | 25% | Exponential decay (half-life ~180 days) |
+| Detail completeness | 15% | Resolution notes, action taken, metrics present |
+| Category diversity | 10% | Underrepresented categories score higher |
+
+### Network Architecture
+
+The hub communicates with rigs over a WireGuard VPN tunnel. Configuration templates are provided in `deploy/wireguard/`.
+
+```
+Rig (10.0.1.X) ──── WireGuard Tunnel ──── Hub (10.0.0.1:8080)
+                     (port 51820)
+```
 
 ---
 
@@ -424,6 +560,36 @@ sudo journalctl -u sairen-os -f
 - Read-write access only to `/opt/sairen-os/data` and `/var/log/sairen-os`
 - Automatic restart on failure (5s delay, max 5 retries per 5 minutes)
 
+### Fleet Hub Deployment
+
+The Fleet Hub runs as a separate binary on a central server with PostgreSQL.
+
+```bash
+# 1. Build the release binary
+cargo build --release --bin fleet-hub --features fleet-hub
+
+# 2. Run the installer (as root, on the hub server)
+sudo deploy/install_hub.sh
+```
+
+This creates:
+
+| Path | Purpose |
+|------|---------|
+| `/usr/local/bin/fleet-hub` | Hub binary |
+| `/etc/systemd/system/fleet-hub.service` | systemd service unit |
+| PostgreSQL `sairen_fleet` database | Event store and episode library |
+
+```bash
+# Monitor the hub
+sudo journalctl -u fleet-hub -f
+
+# View dashboard
+open http://hub-ip:8080/
+```
+
+WireGuard configuration templates for hub and rig VPN tunnels are in `deploy/wireguard/`.
+
 ### Baseline Persistence
 
 Baseline learning state (locked thresholds) is automatically saved to `data/baseline_state.json` after each metric locks. On restart, the system reloads locked thresholds so it doesn't need to re-learn from scratch. In-progress learning accumulators are intentionally not persisted — learning restarts cleanly.
@@ -547,6 +713,44 @@ Base URL: `http://localhost:8080`
 | `/api/v1/strategic/hourly` | GET | Hourly strategic reports |
 | `/api/v1/strategic/daily` | GET | Daily strategic reports |
 | `/api/v1/report/:timestamp` | GET | Specific report by timestamp |
+
+### Fleet Hub Endpoints
+
+Base URL: `http://hub:8080` (requires `fleet-hub` feature)
+
+**Event Ingestion** (authenticated with rig API key):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/fleet/events` | POST | Upload a fleet event (supports zstd compression) |
+| `/api/fleet/events/{id}` | GET | Retrieve an event by ID |
+| `/api/fleet/events/{id}/outcome` | PATCH | Update event outcome (Resolved/Escalated/FalsePositive) |
+
+**Library Sync** (authenticated with rig API key):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/fleet/library` | GET | Sync library (delta via `If-Modified-Since` header, supports zstd) |
+| `/api/fleet/library/stats` | GET | Library statistics (category/outcome breakdown) |
+
+**Rig Registry** (authenticated with admin API key):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/fleet/rigs/register` | POST | Register a new rig (returns one-time API key) |
+| `/api/fleet/rigs` | GET | List all registered rigs |
+| `/api/fleet/rigs/{id}` | GET | Get rig details |
+| `/api/fleet/rigs/{id}/revoke` | POST | Revoke a rig's API key |
+
+**Dashboard** (authenticated with admin API key):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/fleet/dashboard/summary` | GET | Fleet overview (active rigs, events, episodes) |
+| `/api/fleet/dashboard/trends` | GET | Event trends over time (`?days=30`) |
+| `/api/fleet/dashboard/outcomes` | GET | Outcome analytics (resolution rates by category) |
+| `/api/fleet/health` | GET | Hub health check (DB connectivity, library version) |
+| `/` | GET | Fleet dashboard HTML page |
 
 ### Example: Switch Campaign
 
@@ -735,6 +939,10 @@ src/
   types.rs             # Core data structures (WitsPacket, DrillingMetrics,
                        # Campaign, Operation, AdvisoryTicket, etc.)
 
+  bin/
+    simulation.rs      # WITS Level 0 data simulator for testing
+    fleet_hub.rs       # Fleet Hub server binary (fleet-hub feature)
+
   config/
     mod.rs             # OnceLock global config access (init/get/is_initialized)
     well_config.rs     # WellConfig TOML loader, all threshold structs, validation
@@ -788,9 +996,32 @@ src/
     ram_recall.rs      # RAMRecall: in-memory fleet episode search (metadata filter + scoring)
 
   fleet/
-    mod.rs             # Fleet hub-and-spoke module (design docs)
+    mod.rs             # Fleet hub-and-spoke module
     types.rs           # FleetEvent, FleetEpisode, EventOutcome, HistorySnapshot
     queue.rs           # UploadQueue: disk-backed durable queue for fleet uploads
+    client.rs          # FleetClient: HTTP client for hub communication (fleet-client)
+    uploader.rs        # Background upload task draining queue to hub (fleet-client)
+    sync.rs            # Periodic library sync from hub with jitter (fleet-client)
+
+  hub/                   # Fleet Hub server (fleet-hub feature)
+    mod.rs             # HubState, module exports
+    config.rs          # HubConfig from env vars and CLI args
+    db.rs              # PostgreSQL pool and migration runner
+    api/
+      mod.rs           # Router builder with all fleet routes
+      events.rs        # Event ingestion (POST), retrieval (GET), outcome update (PATCH)
+      library.rs       # Library sync with delta support and zstd compression
+      registry.rs      # Rig registration, listing, revocation
+      dashboard.rs     # Fleet dashboard API endpoints and HTML serving
+      health.rs        # Health check endpoint
+    auth/
+      mod.rs           # Auth module exports
+      api_key.rs       # API key generation, bcrypt hashing, RigAuth/AdminAuth extractors
+    curator/
+      mod.rs           # Curation background task runner
+      scoring.rs       # Episode scoring (outcome, recency, detail, diversity)
+      dedup.rs         # Episode deduplication (rig + category + depth + time)
+      pruning.rs       # Archival rules (age, false positive, capacity)
 
   background/
     mod.rs             # Background services module
@@ -827,11 +1058,23 @@ src/
     llm_director.rs    # LLM orchestration director
 
 static/
-  index.html           # Dashboard UI
+  index.html           # Rig dashboard UI
+  fleet_dashboard.html # Fleet Hub dashboard UI (Chart.js visualizations)
+
+migrations/
+  001_initial_schema.sql  # PostgreSQL schema (rigs, events, episodes, sync_log)
 
 deploy/
-  sairen-os.service    # systemd service unit (hardened)
-  install.sh           # Production install script
+  sairen-os.service    # systemd service unit for rig (hardened)
+  install.sh           # Rig production install script
+  fleet-hub.service    # systemd service unit for Fleet Hub
+  install_hub.sh       # Fleet Hub install script (PostgreSQL + binary + systemd)
+  wireguard/
+    hub_wg0.conf.template   # WireGuard config template for hub server
+    rig_wg0.conf.template   # WireGuard config template for rig
+
+tests/
+  fleet_integration.rs # Fleet Hub integration tests (11 tests)
 
 well_config.default.toml  # Reference configuration with all thresholds documented
 ```
@@ -862,10 +1105,47 @@ well_config.default.toml  # Reference configuration with all thresholds document
 | **Operation** | Activity classification: Production Drilling, Milling, Cement Drill-Out, Circulating, Static |
 | **Milling** | P&A operation: cutting through casing; high torque, very low ROP |
 | **Cement Drill-Out** | P&A operation: drilling cement plugs; high WOB, moderate torque, low ROP |
+| **Fleet Hub** | Central server that collects events from all rigs and curates a shared episode library |
+| **Spoke** | Individual rig running SAIREN-OS, uploading events to and syncing from the hub |
+| **FleetEvent** | An AMBER/RED advisory with history window and outcome, uploaded to the hub |
+| **FleetEpisode** | Compact precedent extracted from a FleetEvent, scored and stored in the library |
+| **Curator** | Background process on the hub that scores, deduplicates, and prunes episodes |
+| **RAMRecall** | In-memory episode search on each rig, populated by library syncs from the hub |
 
 ---
 
 ## Changelog
+
+### v1.1 - Fleet Hub Implementation
+
+**Fleet Hub Server** (`src/hub/`, `src/bin/fleet_hub.rs`):
+- **Axum HTTP server** with PostgreSQL backend (sqlx) — standalone `fleet-hub` binary behind `fleet-hub` feature flag
+- **Event ingestion** (`hub/api/events.rs`) — POST endpoint with zstd decompression, validation (risk level, timestamp range, history window), dedup by event ID, rig_id/auth cross-check
+- **Library curator** (`hub/curator/`) — hourly background task: episode scoring (outcome 50%, recency 25%, detail 15%, diversity 10%), deduplication (rig + category + depth + time window), pruning (age limit, false positive cleanup, capacity cap)
+- **Library sync** (`hub/api/library.rs`) — delta sync via `If-Modified-Since`, zstd-compressed responses, version tracking via PostgreSQL sequence, excludes requesting rig's own episodes
+- **Rig registry** (`hub/api/registry.rs`) — admin-only registration returning one-time API key, bcrypt-hashed storage, revocation support
+- **Auth middleware** (`hub/auth/api_key.rs`) — `RigAuth` and `AdminAuth` extractors with 5-minute verification cache, Bearer token authentication
+- **Dashboard API** (`hub/api/dashboard.rs`) — summary, trends, outcome analytics endpoints + embedded HTML dashboard with Chart.js visualizations
+- **Health endpoint** (`hub/api/health.rs`) — DB connectivity, library version
+
+**Spoke-Side Clients** (`src/fleet/client.rs`, `uploader.rs`, `sync.rs`):
+- **FleetClient** — HTTP client with zstd-compressed uploads, outcome forwarding (PATCH), delta library sync
+- **Uploader** — background task draining UploadQueue to hub with per-event retry
+- **LibrarySync** — periodic library pull with configurable jitter to prevent thundering herd
+- **RAMRecall.remove_episodes()** — pruned episode cleanup on sync
+
+**Database** (`migrations/001_initial_schema.sql`):
+- PostgreSQL schema: `rigs`, `events`, `episodes`, `sync_log` tables
+- Indexes on rig_id, timestamp, needs_curation, category, score, updated_at
+- Auto-updated `updated_at` triggers, `library_version_seq` sequence
+
+**Infrastructure** (`deploy/`):
+- WireGuard configuration templates for hub and rig VPN tunnels
+- systemd service unit for Fleet Hub
+- Install script with PostgreSQL setup, admin key generation, systemd integration
+
+**Testing** (`tests/fleet_integration.rs`):
+- 11 integration tests covering episode creation, event validation, serialization round-trips, API key hash/verify, config loading, RAMRecall operations
 
 ### v1.0 - Trait Architecture & Fleet Preparation
 
