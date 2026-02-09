@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAIREN Fleet Hub — Dashboard</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0e17; color: #e0e0e0; }
+        .header { background: linear-gradient(135deg, #1a1f2e, #0d1117); padding: 20px 30px; border-bottom: 1px solid #30363d; display: flex; justify-content: space-between; align-items: center; }
+        .header h1 { font-size: 24px; color: #58a6ff; }
+        .header .status { font-size: 14px; color: #8b949e; }
+        .header .status .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; margin-right: 6px; }
+        .header .status .dot.healthy { background: #3fb950; }
+        .header .status .dot.degraded { background: #d29922; }
+        .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; padding: 20px 30px; }
+        .card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+        .card h3 { color: #8b949e; font-size: 13px; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 8px; }
+        .card .value { font-size: 36px; font-weight: 700; color: #58a6ff; }
+        .card .sub { font-size: 13px; color: #8b949e; margin-top: 4px; }
+        .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; padding: 0 30px 30px; }
+        .chart-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 20px; }
+        .chart-card h3 { color: #c9d1d9; font-size: 16px; margin-bottom: 16px; }
+        .chart-card canvas { max-height: 300px; }
+        .rigs-table { padding: 0 30px 30px; }
+        .rigs-table table { width: 100%; border-collapse: collapse; background: #161b22; border: 1px solid #30363d; border-radius: 8px; overflow: hidden; }
+        .rigs-table th { background: #1a1f2e; color: #8b949e; font-size: 12px; text-transform: uppercase; padding: 12px 16px; text-align: left; }
+        .rigs-table td { padding: 10px 16px; border-top: 1px solid #21262d; font-size: 14px; }
+        .rigs-table tr:hover { background: #1a1f2e; }
+        .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .badge.active { background: #0d2818; color: #3fb950; }
+        .badge.inactive { background: #2d1a00; color: #d29922; }
+        .badge.revoked { background: #3d0f0f; color: #f85149; }
+        @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>SAIREN Fleet Hub</h1>
+        <div class="status">
+            <span class="dot healthy" id="healthDot"></span>
+            <span id="healthText">Connecting...</span>
+            &nbsp;&middot;&nbsp; Library v<span id="libVersion">0</span>
+            &nbsp;&middot;&nbsp; Last refresh: <span id="lastRefresh">-</span>
+        </div>
+    </div>
+
+    <div class="grid" id="summaryGrid">
+        <div class="card"><h3>Active Rigs</h3><div class="value" id="activeRigs">-</div><div class="sub" id="totalRigs">- total</div></div>
+        <div class="card"><h3>Events Today</h3><div class="value" id="eventsToday">-</div><div class="sub" id="totalEvents">- total</div></div>
+        <div class="card"><h3>Library Episodes</h3><div class="value" id="totalEpisodes">-</div><div class="sub">Curated precedents</div></div>
+        <div class="card"><h3>Resolution Rate</h3><div class="value" id="resolutionRate">-</div><div class="sub" id="outcomeBreakdown">-</div></div>
+    </div>
+
+    <div class="charts">
+        <div class="chart-card">
+            <h3>Events Per Day (Last 30 Days)</h3>
+            <canvas id="trendsChart"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Category Distribution</h3>
+            <canvas id="categoryChart"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Outcome Distribution</h3>
+            <canvas id="outcomeChart"></canvas>
+        </div>
+        <div class="chart-card">
+            <h3>Top Categories by Event Count</h3>
+            <canvas id="topCatChart"></canvas>
+        </div>
+    </div>
+
+    <div class="rigs-table">
+        <h3 style="color: #c9d1d9; margin-bottom: 12px;">Fleet Rigs</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Rig ID</th><th>Well</th><th>Field</th><th>Status</th>
+                    <th>Events</th><th>Last Seen</th><th>Last Sync</th>
+                </tr>
+            </thead>
+            <tbody id="rigsBody"><tr><td colspan="7" style="text-align:center;color:#8b949e;">Loading...</td></tr></tbody>
+        </table>
+    </div>
+
+    <script>
+        const API_KEY = localStorage.getItem('fleet_admin_key') || prompt('Enter Fleet Admin API Key:');
+        if (API_KEY) localStorage.setItem('fleet_admin_key', API_KEY);
+        const headers = { 'Authorization': 'Bearer ' + API_KEY, 'Content-Type': 'application/json' };
+
+        let trendsChart, categoryChart, outcomeChart, topCatChart;
+        const chartColors = ['#58a6ff', '#3fb950', '#d29922', '#f85149', '#bc8cff', '#79c0ff'];
+
+        async function fetchJSON(url) {
+            const res = await fetch(url, { headers });
+            if (!res.ok) throw new Error(res.status);
+            return res.json();
+        }
+
+        function timeAgo(iso) {
+            if (!iso) return '-';
+            const d = new Date(iso);
+            const s = Math.floor((Date.now() - d) / 1000);
+            if (s < 60) return s + 's ago';
+            if (s < 3600) return Math.floor(s/60) + 'm ago';
+            if (s < 86400) return Math.floor(s/3600) + 'h ago';
+            return Math.floor(s/86400) + 'd ago';
+        }
+
+        async function refreshDashboard() {
+            try {
+                const [summary, outcomes, trends, rigs] = await Promise.all([
+                    fetchJSON('/api/fleet/dashboard/summary'),
+                    fetchJSON('/api/fleet/dashboard/outcomes'),
+                    fetchJSON('/api/fleet/dashboard/trends?days=30'),
+                    fetchJSON('/api/fleet/rigs').catch(() => []),
+                ]);
+
+                document.getElementById('activeRigs').textContent = summary.active_rigs;
+                document.getElementById('totalRigs').textContent = summary.total_rigs + ' total';
+                document.getElementById('eventsToday').textContent = summary.events_today;
+                document.getElementById('totalEvents').textContent = summary.total_events + ' total';
+                document.getElementById('totalEpisodes').textContent = summary.total_episodes;
+                document.getElementById('libVersion').textContent = summary.library_version;
+                document.getElementById('resolutionRate').textContent = (outcomes.resolution_rate * 100).toFixed(1) + '%';
+                document.getElementById('outcomeBreakdown').textContent =
+                    outcomes.resolved_count + ' resolved, ' + outcomes.escalated_count + ' escalated, ' + outcomes.pending_count + ' pending';
+
+                // Health check
+                const health = await fetchJSON('/api/fleet/health').catch(() => ({status:'error'}));
+                const dot = document.getElementById('healthDot');
+                const text = document.getElementById('healthText');
+                dot.className = 'dot ' + (health.status === 'healthy' ? 'healthy' : 'degraded');
+                text.textContent = health.status || 'error';
+
+                document.getElementById('lastRefresh').textContent = new Date().toLocaleTimeString();
+
+                // Trends chart
+                const dates = [...new Set(trends.map(t => t.date))].sort();
+                const categories = [...new Set(trends.map(t => t.category))];
+                const datasets = categories.map((cat, i) => ({
+                    label: cat || 'Unknown', borderColor: chartColors[i % chartColors.length],
+                    backgroundColor: chartColors[i % chartColors.length] + '33', tension: 0.3, fill: true,
+                    data: dates.map(d => { const m = trends.find(t => t.date === d && t.category === cat); return m ? m.count : 0; }),
+                }));
+                if (trendsChart) trendsChart.destroy();
+                trendsChart = new Chart(document.getElementById('trendsChart'), {
+                    type: 'line', data: { labels: dates, datasets },
+                    options: { responsive: true, scales: { x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } }, y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } } }, plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+                });
+
+                // Category pie
+                const catLabels = summary.top_categories.map(c => c.category || 'Unknown');
+                const catData = summary.top_categories.map(c => c.count);
+                if (categoryChart) categoryChart.destroy();
+                categoryChart = new Chart(document.getElementById('categoryChart'), {
+                    type: 'doughnut', data: { labels: catLabels, datasets: [{ data: catData, backgroundColor: chartColors }] },
+                    options: { responsive: true, plugins: { legend: { labels: { color: '#c9d1d9' } } } }
+                });
+
+                // Outcome bar
+                if (outcomeChart) outcomeChart.destroy();
+                outcomeChart = new Chart(document.getElementById('outcomeChart'), {
+                    type: 'bar', data: { labels: ['Resolved', 'Escalated', 'Pending', 'False Positive'],
+                        datasets: [{ data: [outcomes.resolved_count, outcomes.escalated_count, outcomes.pending_count, outcomes.false_positive_count],
+                            backgroundColor: ['#3fb950', '#d29922', '#8b949e', '#f85149'] }] },
+                    options: { responsive: true, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } }, y: { ticks: { color: '#c9d1d9' }, grid: { color: '#21262d' } } } }
+                });
+
+                // Top categories bar
+                if (topCatChart) topCatChart.destroy();
+                topCatChart = new Chart(document.getElementById('topCatChart'), {
+                    type: 'bar', data: { labels: catLabels, datasets: [{ data: catData, backgroundColor: chartColors }] },
+                    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: '#c9d1d9' }, grid: { color: '#21262d' } }, y: { ticks: { color: '#8b949e' }, grid: { color: '#21262d' } } } }
+                });
+
+                // Rigs table
+                const tbody = document.getElementById('rigsBody');
+                if (rigs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:#8b949e;">No rigs registered</td></tr>';
+                } else {
+                    tbody.innerHTML = rigs.map(r => '<tr>' +
+                        '<td><strong>' + r.rig_id + '</strong></td>' +
+                        '<td>' + (r.well_id || '-') + '</td>' +
+                        '<td>' + (r.field || '-') + '</td>' +
+                        '<td><span class="badge ' + r.status + '">' + r.status + '</span></td>' +
+                        '<td>' + r.event_count + '</td>' +
+                        '<td>' + timeAgo(r.last_seen) + '</td>' +
+                        '<td>' + timeAgo(r.last_sync) + '</td>' +
+                    '</tr>').join('');
+                }
+            } catch (e) {
+                console.error('Dashboard refresh failed:', e);
+            }
+        }
+
+        refreshDashboard();
+        setInterval(refreshDashboard, 60000);
+    </script>
+</body>
+</html>

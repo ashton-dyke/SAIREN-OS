@@ -80,6 +80,12 @@ impl RAMRecall {
         Vec::new() // Use query() via KnowledgeStore trait instead
     }
 
+    /// Remove episodes by ID (e.g., pruned by the hub)
+    pub fn remove_episodes(&self, ids: &[String]) {
+        let mut store = self.episodes.write().expect("RAMRecall lock poisoned");
+        store.retain(|ep| !ids.contains(&ep.id));
+    }
+
     /// Get total episode count
     pub fn episode_count(&self) -> usize {
         self.episodes.read().expect("RAMRecall lock poisoned").len()

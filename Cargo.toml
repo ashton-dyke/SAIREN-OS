@@ -19,7 +19,7 @@ socket2 = "0.5"
 # Web framework
 axum = { version = "0.7", features = ["macros", "ws"] }
 tower = { version = "0.4", features = ["util", "timeout", "limit"] }
-tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "fs", "limit"] }
 hyper = { version = "1.1", features = ["full"] }
 
 # Serialization
@@ -65,17 +65,28 @@ rand = "0.8"
 rand_distr = "0.4"
 
 # CLI argument parsing
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.4", features = ["derive", "env"] }
 
 # LLM Inference (mistral.rs - CPU by default, CUDA optional)
 mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true }
 candle-core = { git = "https://github.com/huggingface/candle.git", rev = "aaf5c86", optional = true }
+
+# Fleet Hub dependencies (optional, behind feature flags)
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "json"], optional = true }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], optional = true }
+zstd = { version = "0.13", optional = true }
+bcrypt = { version = "0.15", optional = true }
+uuid = { version = "1.0", features = ["v4"], optional = true }
+base64 = { version = "0.22", optional = true }
+dotenvy = { version = "0.15", optional = true }
 
 [features]
 default = []
 llm = ["mistralrs", "candle-core"]
 tactical_llm = ["llm"]
 cuda = ["llm", "mistralrs/cuda"]
+fleet-hub = ["sqlx", "bcrypt", "uuid", "base64", "dotenvy", "zstd"]
+fleet-client = ["reqwest", "zstd"]
 
 [dev-dependencies]
 tokio-test = "0.4"
@@ -97,6 +108,11 @@ opt-level = 3
 [[bin]]
 name = "simulation"
 path = "src/bin/simulation.rs"
+
+[[bin]]
+name = "fleet-hub"
+path = "src/bin/fleet_hub.rs"
+required-features = ["fleet-hub"]
 
 [lib]
 name = "sairen_os"

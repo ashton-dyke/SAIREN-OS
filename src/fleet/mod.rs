@@ -7,8 +7,9 @@
 //! - **FleetEvent**: Confirmed AMBER/RED advisory with history window + outcome
 //! - **FleetEpisode**: Compact precedent extracted from a FleetEvent (for library)
 //! - **UploadQueue**: Disk-backed queue for reliable event upload to hub
-//! - **FleetClient** (future): HTTP client for hub communication
-//! - **LibrarySync** (future): Periodic precedent library synchronization
+//! - **FleetClient**: HTTP client for hub communication
+//! - **LibrarySync**: Periodic precedent library synchronization
+//! - **OutcomeForwarder**: Forwards driller acknowledgments to the hub
 //!
 //! ## Design Principles
 //!
@@ -19,6 +20,14 @@
 
 pub mod types;
 pub mod queue;
+#[cfg(feature = "fleet-client")]
+pub mod client;
+#[cfg(feature = "fleet-client")]
+pub mod uploader;
+#[cfg(feature = "fleet-client")]
+pub mod sync;
 
 pub use types::{FleetEvent, FleetEpisode, EventOutcome};
 pub use queue::UploadQueue;
+#[cfg(feature = "fleet-client")]
+pub use client::FleetClient;

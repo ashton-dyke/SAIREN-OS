@@ -23,6 +23,8 @@ pub mod ml_engine;
 pub mod strategic;
 pub mod background;
 pub mod fleet;
+#[cfg(feature = "fleet-hub")]
+pub mod hub;
 
 // Re-export well configuration
 pub use config::WellConfig;
