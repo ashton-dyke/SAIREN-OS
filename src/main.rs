@@ -57,6 +57,7 @@ pub mod cfc;
 pub mod fleet;
 pub mod background;
 
+use axum::Router;
 use api::{create_app, DashboardState};
 use pipeline::{AppState, PipelineCoordinator};
 use types::{Campaign, WitsPacket};
@@ -382,18 +383,26 @@ impl std::fmt::Display for TaskName {
     }
 }
 
-/// Run the pipeline with stdin input
-async fn run_pipeline_stdin(
-    _speed: u64,
-    server_addr: String,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
+// ============================================================================
+// Shared Pipeline Initialization
+// ============================================================================
+
+/// Common pipeline infrastructure shared between stdin and TCP modes.
+#[allow(dead_code)]
+struct PipelineCore {
+    app_state: Arc<RwLock<AppState>>,
+    _process_lock: storage::ProcessLock,
+    coordinator: PipelineCoordinator,
+    listener: tokio::net::TcpListener,
+    app: Router,
+    equipment_id: String,
+}
+
+/// Initialize the shared pipeline: AppState, storage, thresholds, coordinator,
+/// dashboard, and HTTP listener. Only `equipment_id` varies between modes.
+async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<PipelineCore> {
     use baseline::ThresholdManager;
     use std::path::Path;
-
-    info!("⏱️  Stdin mode: processing packets as they arrive");
-    info!("");
 
     // Initialize shared application state for dashboard
     let app_state = Arc::new(RwLock::new(AppState::default()));
@@ -407,11 +416,11 @@ async fn run_pipeline_stdin(
 
     // Initialize analysis storage
     info!("💾 Initializing analysis storage...");
-    let storage = storage::AnalysisStorage::open("./data/sairen.db")
+    let analysis_storage = storage::AnalysisStorage::open("./data/sairen.db")
         .context("Failed to open analysis storage")?;
 
     // Clean up old data (keep last 7 days)
-    match storage.cleanup_old(7) {
+    match analysis_storage.cleanup_old(7) {
         Ok(deleted) if deleted > 0 => {
             info!("🗑️  Cleaned up {} old analysis records", deleted);
         }
@@ -431,7 +440,6 @@ async fn run_pipeline_stdin(
     }
 
     // Initialize ThresholdManager for dynamic baselines
-    let equipment_id = "WITS".to_string();
     info!("📊 Initializing dynamic threshold system for: {}", equipment_id);
 
     let thresholds_path = Path::new(baseline::DEFAULT_STATE_PATH);
@@ -445,7 +453,7 @@ async fn run_pipeline_stdin(
             None => {
                 info!("📝 No existing thresholds found, starting fresh baseline learning");
                 let mut mgr = ThresholdManager::new();
-                mgr.start_wits_learning(&equipment_id, 0);
+                mgr.start_wits_learning(equipment_id, 0);
                 info!("   Started learning for WITS drilling metrics");
                 mgr
             }
@@ -469,11 +477,11 @@ async fn run_pipeline_stdin(
 
     // Initialize pipeline coordinator
     #[cfg(feature = "llm")]
-    let mut coordinator = {
+    let coordinator = {
         info!("🧠 Initializing LLM-enabled pipeline with dynamic thresholds...");
         match PipelineCoordinator::init_with_llm_and_thresholds(
             threshold_manager.clone(),
-            equipment_id.clone(),
+            equipment_id.to_string(),
             start_in_learning_mode,
         ).await {
             Ok(c) => {
@@ -484,7 +492,7 @@ async fn run_pipeline_stdin(
                 warn!("⚠️  LLM initialization failed: {}. Using template mode.", e);
                 PipelineCoordinator::new_with_thresholds(
                     threshold_manager.clone(),
-                    equipment_id.clone(),
+                    equipment_id.to_string(),
                     start_in_learning_mode,
                 )
             }
@@ -492,9 +500,9 @@ async fn run_pipeline_stdin(
     };
 
     #[cfg(not(feature = "llm"))]
-    let mut coordinator = PipelineCoordinator::new_with_thresholds(
+    let coordinator = PipelineCoordinator::new_with_thresholds(
         threshold_manager.clone(),
-        equipment_id.clone(),
+        equipment_id.to_string(),
         start_in_learning_mode,
     );
 
@@ -502,13 +510,13 @@ async fn run_pipeline_stdin(
     info!("🌐 Starting HTTP server on {}...", server_addr);
     let dashboard_state = DashboardState::new_with_storage_and_thresholds(
         Arc::clone(&app_state),
-        storage,
+        analysis_storage,
         threshold_manager.clone(),
-        &equipment_id,
+        equipment_id,
     );
     let app = create_app(dashboard_state);
 
-    let listener = tokio::net::TcpListener::bind(&server_addr)
+    let listener = tokio::net::TcpListener::bind(server_addr)
         .await
         .with_context(|| format!("Failed to bind to {}", server_addr))?;
 
@@ -517,21 +525,29 @@ async fn run_pipeline_stdin(
     info!("🎯 Dashboard available at: http://{}", server_addr);
     info!("");
 
-    // JoinSet Supervisor Pattern
-    info!("🔒 Supervisor: Initializing task monitoring");
-    let mut task_set: JoinSet<Result<TaskName>> = JoinSet::new();
+    Ok(PipelineCore {
+        app_state,
+        _process_lock,
+        coordinator,
+        listener,
+        app,
+        equipment_id: equipment_id.to_string(),
+    })
+}
 
-    // Create channel for passing packets from ingestion to processor
-    let (packet_tx, packet_rx) = mpsc::channel::<WitsPacket>(1000);
-
-    // Task 1: HTTP Server
-    let http_cancel = cancel_token.clone();
+/// Spawn the HTTP server task into the JoinSet.
+fn spawn_http_server(
+    task_set: &mut JoinSet<Result<TaskName>>,
+    listener: tokio::net::TcpListener,
+    app: Router,
+    cancel_token: CancellationToken,
+) {
     task_set.spawn(async move {
         info!("[HttpServer] Task starting");
 
         let result = axum::serve(listener, app)
             .with_graceful_shutdown(async move {
-                http_cancel.cancelled().await;
+                cancel_token.cancelled().await;
                 info!("[HttpServer] Received shutdown signal");
             })
             .await;
@@ -547,6 +563,73 @@ async fn run_pipeline_stdin(
             }
         }
     });
+}
+
+/// Run the supervisor loop: monitor tasks, cancel on failure.
+async fn run_supervisor(
+    task_set: &mut JoinSet<Result<TaskName>>,
+    cancel_token: CancellationToken,
+) -> Result<()> {
+    info!("🔒 Supervisor: All tasks spawned, monitoring...");
+
+    loop {
+        tokio::select! {
+            _ = cancel_token.cancelled() => {
+                info!("🛑 Supervisor: Shutdown signal received");
+                break;
+            }
+            result = task_set.join_next() => {
+                match result {
+                    Some(Ok(Ok(task_name))) => {
+                        info!("🔒 Supervisor: Task {} completed normally", task_name);
+                    }
+                    Some(Ok(Err(e))) => {
+                        error!("🔒 Supervisor: Task failed with error: {}", e);
+                        cancel_token.cancel();
+                        return Err(e);
+                    }
+                    Some(Err(e)) => {
+                        error!("🔒 Supervisor: Task panicked: {}", e);
+                        cancel_token.cancel();
+                        return Err(anyhow::anyhow!("Task panicked: {}", e));
+                    }
+                    None => {
+                        info!("🔒 Supervisor: All tasks completed");
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Run the pipeline with stdin input
+async fn run_pipeline_stdin(
+    _speed: u64,
+    server_addr: String,
+    cancel_token: CancellationToken,
+) -> Result<()> {
+    use tokio::io::{AsyncBufReadExt, BufReader};
+
+    info!("⏱️  Stdin mode: processing packets as they arrive");
+    info!("");
+
+    let core = init_pipeline("WITS", &server_addr).await?;
+    let app_state = core.app_state;
+    let _process_lock = core._process_lock;
+    let mut coordinator = core.coordinator;
+
+    // JoinSet Supervisor Pattern
+    info!("🔒 Supervisor: Initializing task monitoring");
+    let mut task_set: JoinSet<Result<TaskName>> = JoinSet::new();
+
+    // Create channel for passing packets from ingestion to processor
+    let (packet_tx, packet_rx) = mpsc::channel::<WitsPacket>(1000);
+
+    // Task 1: HTTP Server
+    spawn_http_server(&mut task_set, core.listener, core.app, cancel_token.clone());
 
     // Task 2: WITS Ingestion (stdin reader)
     let ingestion_cancel = cancel_token.clone();
@@ -711,40 +794,7 @@ async fn run_pipeline_stdin(
         Ok(TaskName::PacketProcessor)
     });
 
-    // Supervisor loop
-    info!("🔒 Supervisor: All tasks spawned, monitoring...");
-
-    loop {
-        tokio::select! {
-            _ = cancel_token.cancelled() => {
-                info!("🛑 Supervisor: Shutdown signal received");
-                break;
-            }
-            result = task_set.join_next() => {
-                match result {
-                    Some(Ok(Ok(task_name))) => {
-                        info!("🔒 Supervisor: Task {} completed normally", task_name);
-                    }
-                    Some(Ok(Err(e))) => {
-                        error!("🔒 Supervisor: Task failed with error: {}", e);
-                        cancel_token.cancel();
-                        return Err(e);
-                    }
-                    Some(Err(e)) => {
-                        error!("🔒 Supervisor: Task panicked: {}", e);
-                        cancel_token.cancel();
-                        return Err(anyhow::anyhow!("Task panicked: {}", e));
-                    }
-                    None => {
-                        info!("🔒 Supervisor: All tasks completed");
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
+    run_supervisor(&mut task_set, cancel_token).await
 }
 
 /// Run the pipeline with WITS Level 0 TCP input
@@ -753,8 +803,6 @@ async fn run_pipeline_wits_tcp(
     server_addr: String,
     cancel_token: CancellationToken,
 ) -> Result<()> {
-    use baseline::ThresholdManager;
-    use std::path::Path;
     use acquisition::WitsClient;
 
     info!("⏱️  WITS TCP mode: connecting to {} for Level 0 data", wits_addr);
@@ -771,121 +819,10 @@ async fn run_pipeline_wits_tcp(
         (parts[0].to_string(), port)
     };
 
-    // Initialize shared application state for dashboard
-    let app_state = Arc::new(RwLock::new(AppState::default()));
-    info!("✓ Application state initialized");
-
-    // Acquire process lock to prevent multiple instances
-    info!("🔒 Acquiring process lock...");
-    let _process_lock = storage::ProcessLock::acquire("./data")
-        .context("Failed to acquire process lock")?;
-    info!("✓ Process lock acquired");
-
-    // Initialize analysis storage
-    info!("💾 Initializing analysis storage...");
-    let storage = storage::AnalysisStorage::open("./data/sairen.db")
-        .context("Failed to open analysis storage")?;
-
-    // Clean up old data (keep last 7 days)
-    match storage.cleanup_old(7) {
-        Ok(deleted) if deleted > 0 => {
-            info!("🗑️  Cleaned up {} old analysis records", deleted);
-        }
-        Ok(_) => {}
-        Err(e) => {
-            warn!("Failed to clean up old data: {}", e);
-        }
-    }
-    info!("✓ Analysis storage initialized");
-
-    // Initialize history storage for strategic reports (ignore if already initialized)
-    let _ = storage::history::init("./data/strategic_history.db");
-
-    // Initialize ThresholdManager for dynamic baselines
-    let equipment_id = "WITS-TCP".to_string();
-    info!("📊 Initializing dynamic threshold system for: {}", equipment_id);
-
-    let thresholds_path = Path::new(baseline::DEFAULT_STATE_PATH);
-    let threshold_manager = Arc::new(std::sync::RwLock::new({
-        match ThresholdManager::load_from_file(thresholds_path) {
-            Some(mgr) => {
-                let locked_count = mgr.locked_count();
-                info!("✓ Loaded {} locked baselines from {:?}", locked_count, thresholds_path);
-                mgr
-            }
-            None => {
-                info!("📝 No existing thresholds found, starting fresh baseline learning");
-                let mut mgr = ThresholdManager::new();
-                mgr.start_wits_learning(&equipment_id, 0);
-                info!("   Started learning for WITS drilling metrics");
-                mgr
-            }
-        }
-    }));
-
-    // Determine if we should start in learning mode
-    let start_in_learning_mode = {
-        let mgr = threshold_manager.read().unwrap_or_else(|e| {
-            warn!("RwLock poisoned on ThresholdManager read, recovering");
-            e.into_inner()
-        });
-        if mgr.locked_count() > 0 {
-            info!("🎯 Mode: DynamicThresholds (using learned baselines)");
-            false
-        } else {
-            info!("📚 Mode: BaselineLearning (accumulating samples)");
-            true
-        }
-    };
-
-    // Initialize pipeline coordinator
-    #[cfg(feature = "llm")]
-    let coordinator = {
-        info!("🧠 Initializing LLM-enabled pipeline with dynamic thresholds...");
-        match PipelineCoordinator::init_with_llm_and_thresholds(
-            threshold_manager.clone(),
-            equipment_id.clone(),
-            start_in_learning_mode,
-        ).await {
-            Ok(c) => {
-                info!("✓ LLM and dynamic thresholds loaded successfully");
-                c
-            }
-            Err(e) => {
-                warn!("⚠️  LLM initialization failed: {}. Using template mode.", e);
-                PipelineCoordinator::new_with_thresholds(
-                    threshold_manager.clone(),
-                    equipment_id.clone(),
-                    start_in_learning_mode,
-                )
-            }
-        }
-    };
-
-    #[cfg(not(feature = "llm"))]
-    let coordinator = PipelineCoordinator::new_with_thresholds(
-        threshold_manager.clone(),
-        equipment_id.clone(),
-        start_in_learning_mode,
-    );
-
-    // Create dashboard state for HTTP server
-    let dashboard_state = DashboardState::new_with_storage_and_thresholds(
-        app_state.clone(),
-        storage,
-        threshold_manager.clone(),
-        &equipment_id,
-    );
-    let app = create_app(dashboard_state);
-
-    let listener = tokio::net::TcpListener::bind(&server_addr)
-        .await
-        .with_context(|| format!("Failed to bind to {}", server_addr))?;
-
-    info!("✓ HTTP server listening on {}", server_addr);
-    info!("");
-    info!("🎯 Dashboard available at: http://{}", server_addr);
-    info!("");
+    let core = init_pipeline("WITS-TCP", &server_addr).await?;
+    let app_state = core.app_state;
+    let _process_lock = core._process_lock;
+    let coordinator = core.coordinator;
 
     // JoinSet Supervisor Pattern
     info!("🔒 Supervisor: Initializing task monitoring");
@@ -895,28 +832,7 @@ async fn run_pipeline_wits_tcp(
     let (packet_tx, packet_rx) = mpsc::channel::<WitsPacket>(1000);
 
     // Task 1: HTTP Server
-    let http_cancel = cancel_token.clone();
-    task_set.spawn(async move {
-        info!("[HttpServer] Task starting");
-
-        let result = axum::serve(listener, app)
-            .with_graceful_shutdown(async move {
-                http_cancel.cancelled().await;
-                info!("[HttpServer] Received shutdown signal");
-            })
-            .await;
-
-        match result {
-            Ok(()) => {
-                info!("[HttpServer] Graceful shutdown complete");
-                Ok(TaskName::HttpServer)
-            }
-            Err(e) => {
-                error!("[HttpServer] Server error: {}", e);
-                Err(anyhow::anyhow!("HTTP server error: {}", e))
-            }
-        }
-    });
+    spawn_http_server(&mut task_set, core.listener, core.app, cancel_token.clone());
 
     // Task 2: WITS TCP Ingestion
     let ingestion_cancel = cancel_token.clone();
@@ -1214,40 +1130,7 @@ async fn run_pipeline_wits_tcp(
         }
     });
 
-    // Supervisor loop
-    info!("🔒 Supervisor: All tasks spawned, monitoring...");
-
-    loop {
-        tokio::select! {
-            _ = cancel_token.cancelled() => {
-                info!("🛑 Supervisor: Shutdown signal received");
-                break;
-            }
-            result = task_set.join_next() => {
-                match result {
-                    Some(Ok(Ok(task_name))) => {
-                        info!("🔒 Supervisor: Task {} completed normally", task_name);
-                    }
-                    Some(Ok(Err(e))) => {
-                        error!("🔒 Supervisor: Task failed with error: {}", e);
-                        cancel_token.cancel();
-                        return Err(e);
-                    }
-                    Some(Err(e)) => {
-                        error!("🔒 Supervisor: Task panicked: {}", e);
-                        cancel_token.cancel();
-                        return Err(anyhow::anyhow!("Task panicked: {}", e));
-                    }
-                    None => {
-                        info!("🔒 Supervisor: All tasks completed");
-                        break;
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(())
+    run_supervisor(&mut task_set, cancel_token).await
 }
 
 // ============================================================================
