@@ -1,0 +1,21 @@
+# Rust build artifacts
+/target/
+
+# Runtime data (baseline state, databases, ML insights)
+/data/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment files with secrets
+.env
+
+# Log files
+*.log

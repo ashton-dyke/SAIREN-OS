@@ -1,0 +1,145 @@
+[package]
+name = "sairen-os"
+version = "0.1.0"
+edition = "2021"
+authors = ["SAIREN-OS Team"]
+description = "Strategic AI Rig ENgine - Drilling Operational Intelligence System"
+license = "Proprietary"
+readme = "README.md"
+repository = ""
+keywords = ["drilling", "wits", "mse", "operational-intelligence", "industrial"]
+categories = ["science", "embedded"]
+
+[dependencies]
+# Async runtime
+tokio = { version = "1.35", features = ["full", "tracing"] }
+tokio-util = { version = "0.7", features = ["rt"] }
+socket2 = "0.5"
+
+# Web framework
+axum = { version = "0.7", features = ["macros", "ws"] }
+tower = { version = "0.4", features = ["util", "timeout", "limit"] }
+tower-http = { version = "0.5", features = ["cors", "trace", "compression-gzip", "fs", "limit"] }
+hyper = { version = "1.1", features = ["full"] }
+
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+
+# Error handling
+anyhow = "1.0"
+thiserror = "1.0"
+
+# Signal processing
+rustfft = "6.2"
+num-complex = "0.4"
+ndarray = "0.15"
+
+# ML Engine statistics
+statrs = "0.16"
+
+# Time handling
+chrono = { version = "0.4.41", features = ["serde"] }
+
+# Logging & Tracing
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+# Utilities
+futures = "0.3"
+async-trait = "0.1"
+regex = "1.10"
+
+# Database
+sled = "0.34"
+
+# System (disk space checks)
+libc = "0.2"
+
+# Hashing (for digital signatures)
+md5 = "0.7"
+
+# Random number generation (for simulation)
+rand = "0.8"
+rand_distr = "0.4"
+
+# CLI argument parsing
+clap = { version = "4.4", features = ["derive", "env"] }
+
+# XML parsing (for WITSML adapter)
+quick-xml = "0.31"
+
+# Zip archive reading (for Volve dataset)
+zip = "0.6"
+
+# LLM Inference (mistral.rs - CPU by default, CUDA optional)
+mistralrs = { git = "https://github.com/EricLBuehler/mistral.rs.git", optional = true }
+candle-core = { git = "https://github.com/huggingface/candle.git", rev = "aaf5c86", optional = true }
+
+# Fleet Hub dependencies (optional, behind feature flags)
+sqlx = { version = "0.8", features = ["runtime-tokio", "tls-rustls", "postgres", "chrono", "json"], optional = true }
+reqwest = { version = "0.12", features = ["json", "rustls-tls"], optional = true }
+zstd = { version = "0.13", optional = true }
+bcrypt = { version = "0.15", optional = true }
+uuid = { version = "1.0", features = ["v4"], optional = true }
+base64 = { version = "0.22", optional = true }
+dotenvy = { version = "0.15", optional = true }
+
+[features]
+default = []
+llm = ["mistralrs", "candle-core"]
+tactical_llm = ["llm"]
+cuda = ["llm", "mistralrs/cuda"]
+fleet-hub = ["sqlx", "bcrypt", "uuid", "base64", "dotenvy", "zstd"]
+fleet-client = ["reqwest", "zstd"]
+
+[dev-dependencies]
+tokio-test = "0.4"
+tempfile = "3.10"
+
+[profile.release]
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+opt-level = 3
+
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[[bin]]
+name = "simulation"
+path = "src/bin/simulation.rs"
+
+[[bin]]
+name = "volve-replay"
+path = "src/bin/volve_replay.rs"
+
+[[bin]]
+name = "witsml-to-csv"
+path = "src/bin/witsml_to_csv.rs"
+
+[[bin]]
+name = "fleet-hub"
+path = "src/bin/fleet_hub.rs"
+required-features = ["fleet-hub"]
+
+[lib]
+name = "sairen_os"
+path = "src/lib.rs"
+
+[lints.rust]
+# Allow unsafe in dependencies (mistralrs uses unsafe internally for GPU/CPU bindings)
+unsafe_code = "warn"
+
+[lints.clippy]
+all = "warn"
+pedantic = "warn"
+nursery = "warn"
+unwrap_used = "deny"
+expect_used = "warn"
+panic = "warn"

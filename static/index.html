@@ -1,0 +1,2127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAIREN-OS - Drilling Operational Intelligence</title>
+    <style>
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-tertiary: #21262d;
+            --border-color: #30363d;
+            --text-primary: #e6edf3;
+            --text-secondary: #8b949e;
+            --accent-green: #3fb950;
+            --accent-yellow: #d29922;
+            --accent-orange: #db6d28;
+            --accent-red: #f85149;
+            --accent-blue: #58a6ff;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 30px;
+            padding-bottom: 20px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header-content {
+            flex: 1;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            font-size: 0.95rem;
+        }
+
+        .history-nav-btn {
+            padding: 12px 24px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            text-decoration: none;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .history-nav-btn:hover {
+            background: #1168d8;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(22, 120, 232, 0.3);
+        }
+
+        .history-nav-btn svg {
+            width: 20px;
+            height: 20px;
+        }
+
+        /* Campaign Selector */
+        .campaign-selector {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            margin-right: 20px;
+        }
+
+        .campaign-selector label {
+            color: var(--text-secondary);
+            font-size: 13px;
+            font-weight: 500;
+        }
+
+        .campaign-select {
+            padding: 10px 16px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 180px;
+        }
+
+        .campaign-select:hover {
+            border-color: var(--accent-blue);
+        }
+
+        .campaign-select:focus {
+            outline: none;
+            border-color: var(--accent-blue);
+            box-shadow: 0 0 0 3px rgba(88, 166, 255, 0.2);
+        }
+
+        .campaign-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .campaign-badge.production {
+            background: rgba(63, 185, 80, 0.15);
+            color: var(--accent-green);
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }
+
+        .campaign-badge.pa {
+            background: rgba(210, 153, 34, 0.15);
+            color: var(--accent-yellow);
+            border: 1px solid rgba(210, 153, 34, 0.3);
+        }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 16px;
+        }
+
+        /* View Toggle Buttons */
+        .view-toggle {
+            display: flex;
+            justify-content: center;
+            gap: 0;
+            margin: 20px auto 30px;
+            max-width: 600px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 4px;
+        }
+
+        .view-toggle-btn {
+            flex: 1;
+            padding: 10px 20px;
+            background: transparent;
+            color: var(--text-secondary);
+            border: none;
+            border-radius: 6px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+        }
+
+        .view-toggle-btn:hover {
+            color: var(--text-primary);
+            background: var(--bg-tertiary);
+        }
+
+        .view-toggle-btn.active {
+            background: var(--accent-blue);
+            color: white;
+        }
+
+        .view-toggle-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* View containers */
+        .view-container {
+            display: none;
+        }
+
+        .view-container.active {
+            display: block;
+        }
+
+        .dashboard {
+            display: grid;
+            grid-template-columns: 350px 1fr 400px;
+            gap: 20px;
+            max-width: 1900px;
+            margin: 0 auto;
+        }
+        
+        .card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+        }
+        
+        .card-title {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            color: var(--text-secondary);
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .card-title::before {
+            content: '';
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-blue);
+        }
+        
+        /* Health Gauge */
+        .health-gauge-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        
+        .gauge-wrapper {
+            position: relative;
+            width: 200px;
+            height: 200px;
+        }
+        
+        .gauge-svg {
+            transform: rotate(-90deg);
+        }
+        
+        .gauge-bg {
+            fill: none;
+            stroke: var(--bg-tertiary);
+            stroke-width: 12;
+        }
+        
+        .gauge-fill {
+            fill: none;
+            stroke: var(--accent-green);
+            stroke-width: 12;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.5s ease, stroke 0.3s ease;
+        }
+        
+        .gauge-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+        }
+        
+        .gauge-value {
+            font-size: 3rem;
+            font-weight: 700;
+            line-height: 1;
+        }
+        
+        .gauge-label {
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            margin-top: 4px;
+        }
+        
+        .severity-badge {
+            display: inline-block;
+            padding: 6px 16px;
+            border-radius: 20px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            margin-top: 16px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+        
+        .severity-healthy { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .severity-watch { background: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+        .severity-warning { background: rgba(219, 109, 40, 0.2); color: var(--accent-orange); }
+        .severity-critical { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+        
+        /* Status Card */
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        
+        .status-item {
+            background: var(--bg-tertiary);
+            padding: 12px;
+            border-radius: 8px;
+            text-align: center;
+            min-height: 126px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+
+        .status-item-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+            margin-bottom: 8px;
+        }
+
+        .status-item-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+        }
+        
+        .status-item-unit {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            margin-left: 4px;
+        }
+        
+        /* Progress Bar */
+        .progress-container {
+            margin-top: 16px;
+        }
+        
+        .progress-label {
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            margin-bottom: 8px;
+        }
+        
+        .progress-bar {
+            height: 8px;
+            background: var(--bg-tertiary);
+            border-radius: 4px;
+            overflow: hidden;
+        }
+        
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-blue), var(--accent-green));
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }
+        
+        /* Diagnosis Panel */
+        .diagnosis-panel {
+            grid-column: 2;
+            grid-row: 1;
+        }
+        
+        .diagnosis-text {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            font-family: 'SF Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 0.9rem;
+            line-height: 1.6;
+            min-height: 120px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }
+        
+        .diagnosis-text::-webkit-scrollbar {
+            width: 8px;
+        }
+        
+        .diagnosis-text::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+        
+        .diagnosis-text::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 4px;
+        }
+        
+        .action-box {
+            margin-top: 16px;
+            padding: 12px 16px;
+            background: rgba(88, 166, 255, 0.1);
+            border-left: 3px solid var(--accent-blue);
+            border-radius: 0 8px 8px 0;
+            font-size: 0.9rem;
+        }
+        
+        .action-label {
+            font-weight: 600;
+            color: var(--accent-blue);
+            margin-bottom: 4px;
+        }
+        
+        /* Vertical line chart - right side, aligns with Well Control */
+        .spectrum-panel {
+            grid-column: 3;
+            grid-row: 1 / 3;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+
+        .spectrum-panel .card-title {
+            flex-shrink: 0;
+        }
+
+        .chart-container {
+            position: relative;
+            flex: 1;
+            min-height: 0;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        #flowTrendCanvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        .chart-legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 16px;
+            margin-top: 12px;
+            font-size: 0.85rem;
+            flex-shrink: 0;
+        }
+        
+        .legend-item {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }
+        
+        .legend-color {
+            width: 12px;
+            height: 12px;
+            border-radius: 2px;
+        }
+        
+        .legend-spectrum { background: var(--accent-blue); }
+        .legend-bpfo { background: var(--accent-red); }
+        .legend-bpfi { background: var(--accent-orange); }
+        .legend-1x { background: var(--accent-green); }
+        .legend-2x { background: var(--accent-yellow); }
+        
+        /* Update indicator */
+        .update-indicator {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .update-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent-green);
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.4; }
+        }
+        
+        /* Status and Temperature Row - spans columns 1-2 only (not chart column) */
+        .status-temp-row {
+            grid-column: 1 / 3;
+            grid-row: 2;
+            display: flex;
+            gap: 20px;
+        }
+        
+        .status-temp-row .card {
+            flex: 1;
+            min-width: 0;
+        }
+        
+        /* Temperature Panel */
+        .temp-panel {
+            /* Handled by flex parent */
+        }
+        
+        /* Responsive */
+        @media (max-width: 1400px) {
+            .dashboard {
+                grid-template-columns: 350px 1fr;
+            }
+
+            .spectrum-panel {
+                grid-column: 1 / -1;
+                grid-row: auto;
+            }
+        }
+
+        @media (max-width: 1024px) {
+            .dashboard {
+                grid-template-columns: 1fr;
+            }
+
+            .diagnosis-panel {
+                grid-column: 1;
+                grid-row: auto;
+            }
+
+            .spectrum-panel {
+                grid-column: 1;
+                grid-row: auto;
+            }
+
+            .status-temp-row {
+                grid-column: 1;
+                flex-direction: column;
+            }
+
+            .status-temp-row .card {
+                width: 100%;
+            }
+
+            .temp-panel {
+                grid-column: 1;
+            }
+        }
+        
+        .temp-grid {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 12px;
+        }
+        
+        .temp-gauge {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 12px;
+            text-align: center;
+        }
+        
+        .temp-gauge-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            margin-bottom: 8px;
+            text-transform: uppercase;
+            letter-spacing: 0.3px;
+        }
+        
+        .temp-gauge-value {
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+        
+        .temp-gauge-unit {
+            font-size: 0.9rem;
+            font-weight: 400;
+            color: var(--text-secondary);
+        }
+        
+        .temp-sparkline {
+            height: 24px;
+            margin-top: 8px;
+        }
+        
+        .temp-sparkline canvas {
+            width: 100%;
+            height: 100%;
+        }
+        
+        /* Temperature color zones */
+        .temp-normal { color: var(--accent-green); }
+        .temp-warm { color: var(--accent-yellow); }
+        .temp-hot { color: var(--accent-orange); }
+        .temp-critical { color: var(--accent-red); }
+        
+        .temp-bar {
+            height: 4px;
+            background: var(--bg-primary);
+            border-radius: 2px;
+            margin-top: 8px;
+            overflow: hidden;
+        }
+        
+        .temp-bar-fill {
+            height: 100%;
+            border-radius: 2px;
+            transition: width 0.3s ease, background 0.3s ease;
+        }
+
+        /* TTF (Time to Failure) Section Styles */
+        .ttf-panel {
+            grid-column: 1 / -1;
+            margin-top: 20px;
+        }
+
+        .ttf-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 16px;
+        }
+
+        @media (max-width: 1024px) {
+            .ttf-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 600px) {
+            .ttf-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .ttf-metric {
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 16px;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .ttf-metric::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--accent-blue);
+        }
+
+        .ttf-metric.warning::before {
+            background: var(--accent-orange);
+        }
+
+        .ttf-metric.critical::before {
+            background: var(--accent-red);
+        }
+
+        .ttf-metric-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .ttf-metric-value {
+            font-size: 2rem;
+            font-weight: 700;
+            margin-bottom: 4px;
+        }
+
+        .ttf-metric-unit {
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+        }
+
+        .ttf-status-badge {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-top: 8px;
+        }
+
+        .ttf-status-healthy { background: rgba(63, 185, 80, 0.2); color: var(--accent-green); }
+        .ttf-status-watch { background: rgba(210, 153, 34, 0.2); color: var(--accent-yellow); }
+        .ttf-status-warning { background: rgba(219, 109, 40, 0.2); color: var(--accent-orange); }
+        .ttf-status-critical { background: rgba(248, 81, 73, 0.2); color: var(--accent-red); }
+
+        .ttf-progress-container {
+            margin-top: 12px;
+        }
+
+        .ttf-progress-bar {
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            overflow: hidden;
+        }
+
+        .ttf-progress-fill {
+            height: 100%;
+            border-radius: 3px;
+            transition: width 0.5s ease, background 0.3s ease;
+        }
+
+        /* Historical Analysis Styles */
+        .history-panel {
+            grid-column: 1 / -1;
+            margin-top: 20px;
+        }
+
+        .card-title {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .refresh-btn {
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 6px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            gap: 5px;
+            font-size: 14px;
+            transition: all 0.2s ease;
+        }
+
+        .refresh-btn:hover {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border-color: var(--accent-color);
+        }
+
+        .history-controls {
+            margin-bottom: 15px;
+            padding: 10px;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+        }
+
+        .history-info {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+
+        .history-table-container {
+            overflow-x: auto;
+            max-height: 600px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+        }
+
+        .history-table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+        }
+
+        .history-table thead {
+            background: var(--bg-secondary);
+            position: sticky;
+            top: 0;
+            z-index: 10;
+        }
+
+        .history-table th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            border-bottom: 2px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        .history-table td {
+            padding: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .history-table tbody tr:hover {
+            background: var(--bg-secondary);
+        }
+
+        .history-table tbody tr.loading-row {
+            text-align: center;
+            color: var(--text-secondary);
+        }
+
+        .severity-cell {
+            display: inline-block;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .severity-healthy {
+            background: rgba(63, 185, 80, 0.15);
+            color: #3fb950;
+        }
+
+        .severity-watch {
+            background: rgba(210, 153, 34, 0.15);
+            color: #d29922;
+        }
+
+        .severity-warning {
+            background: rgba(219, 109, 40, 0.15);
+            color: #db6d28;
+        }
+
+        .severity-critical {
+            background: rgba(218, 54, 51, 0.15);
+            color: #da3633;
+        }
+
+        .view-report-btn {
+            padding: 6px 12px;
+            background: var(--accent-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        .view-report-btn:hover {
+            background: #1168d8;
+            transform: translateY(-1px);
+        }
+
+        .diagnosis-summary {
+            max-width: 400px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 1000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.7);
+        }
+
+        .modal-content {
+            position: relative;
+            background-color: var(--bg-primary);
+            margin: 2% auto;
+            padding: 0;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            width: 90%;
+            max-width: 1200px;
+            height: 90vh;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+
+        .modal-close {
+            position: absolute;
+            right: 15px;
+            top: 10px;
+            color: var(--text-secondary);
+            font-size: 32px;
+            font-weight: bold;
+            cursor: pointer;
+            z-index: 1001;
+        }
+
+        .modal-close:hover,
+        .modal-close:focus {
+            color: var(--text-primary);
+        }
+
+        /* Strategic Reports */
+        .strategic-container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        .strategic-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .strategic-card {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 12px;
+            padding: 20px;
+            transition: all 0.2s ease;
+        }
+
+        .strategic-card:hover {
+            border-color: var(--accent-blue);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(88, 166, 255, 0.1);
+        }
+
+        .strategic-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 16px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .strategic-score {
+            font-size: 2.5rem;
+            font-weight: 700;
+            margin-right: 12px;
+        }
+
+        .strategic-severity {
+            padding: 6px 12px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .strategic-details {
+            margin-top: 12px;
+        }
+
+        .strategic-field {
+            margin-bottom: 12px;
+        }
+
+        .strategic-field-label {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 4px;
+        }
+
+        .strategic-field-value {
+            color: var(--text-primary);
+            font-size: 0.95rem;
+            line-height: 1.5;
+        }
+
+        .strategic-details-section {
+            margin-top: 16px;
+            padding-top: 16px;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .strategic-details-title {
+            font-size: 0.85rem;
+            color: var(--accent-blue);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 12px;
+            font-weight: 600;
+        }
+
+        .strategic-empty {
+            text-align: center;
+            padding: 60px 20px;
+            color: var(--text-secondary);
+        }
+
+        .strategic-empty svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 16px;
+            opacity: 0.5;
+        }
+
+        .strategic-loading {
+            text-align: center;
+            padding: 40px;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            border: 3px solid var(--bg-tertiary);
+            border-top: 3px solid var(--accent-blue);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <div class="campaign-selector">
+            <label for="campaignSelect">Campaign:</label>
+            <select id="campaignSelect" class="campaign-select" onchange="switchCampaign(this.value)">
+                <option value="Production">Production Drilling</option>
+                <option value="PlugAbandonment">Plug & Abandonment</option>
+            </select>
+        </div>
+        <div class="header-content">
+            <h1>SAIREN-OS</h1>
+            <p>Drilling Operational Intelligence • WITS Real-time Advisory System</p>
+        </div>
+        <div class="header-right">
+            <span id="campaignBadge" class="campaign-badge production">PROD</span>
+            <a href="/reports.html" class="history-nav-btn">
+                <svg fill="currentColor" viewBox="0 0 16 16">
+                    <path d="M14 4.5V14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V2a2 2 0 0 1 2-2h5.5L14 4.5zm-3 0A1.5 1.5 0 0 1 9.5 3V1H4a1 1 0 0 0-1 1v12a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1V4.5h-2z"/>
+                    <path d="M4.5 12.5A.5.5 0 0 1 5 12h3a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm0-2A.5.5 0 0 1 5 10h6a.5.5 0 0 1 0 1H5a.5.5 0 0 1-.5-.5zm1.639-3.708 1.33.886 1.854-1.855a.25.25 0 0 1 .289-.047l1.888.974V8.5a.5.5 0 0 1-.5.5H5a.5.5 0 0 1-.5-.5V8.146l1.639.354z"/>
+                </svg>
+                Critical Reports
+            </a>
+        </div>
+    </div>
+
+    <!-- View Toggle -->
+    <div class="view-toggle">
+        <button class="view-toggle-btn active" data-view="live" onclick="switchView('live')">
+            <svg fill="currentColor" viewBox="0 0 16 16">
+                <circle cx="8" cy="8" r="3"/>
+                <path d="M8 1v2m0 10v2M1 8h2m10 0h2M3.05 3.05l1.42 1.42m7.07 7.07l1.42 1.42M12.95 3.05l-1.42 1.42M4.93 12.95l-1.42 1.42"/>
+            </svg>
+            LIVE
+        </button>
+        <button class="view-toggle-btn" data-view="hourly" onclick="switchView('hourly')">
+            <svg fill="currentColor" viewBox="0 0 16 16">
+                <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+                <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
+            </svg>
+            HOURLY
+        </button>
+        <button class="view-toggle-btn" data-view="daily" onclick="switchView('daily')">
+            <svg fill="currentColor" viewBox="0 0 16 16">
+                <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
+            </svg>
+            DAILY
+        </button>
+    </div>
+
+    <!-- Live View (existing dashboard) -->
+    <div id="liveView" class="view-container active">
+    <div class="dashboard">
+        <!-- Operational Score Gauge -->
+        <div class="card">
+            <div class="card-title">Operational Score</div>
+            <div class="health-gauge-container">
+                <div class="gauge-wrapper">
+                    <svg class="gauge-svg" width="200" height="200" viewBox="0 0 200 200">
+                        <circle class="gauge-bg" cx="100" cy="100" r="85"></circle>
+                        <circle class="gauge-fill" id="gaugeFill" cx="100" cy="100" r="85"
+                                stroke-dasharray="534" stroke-dashoffset="534"></circle>
+                    </svg>
+                    <div class="gauge-center">
+                        <div class="gauge-value" id="healthScore">--</div>
+                        <div class="gauge-label">Efficiency + Risk</div>
+                    </div>
+                </div>
+                <div class="severity-badge severity-healthy" id="severityBadge">INITIALIZING</div>
+                <div class="gauge-sub-scores" style="display: flex; gap: 20px; margin-top: 12px;">
+                    <div style="text-align: center;">
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">MSE Efficiency</div>
+                        <div id="mseScore" style="font-size: 1.2rem; font-weight: 600;">--%</div>
+                    </div>
+                    <div style="text-align: center;">
+                        <div style="font-size: 0.75rem; color: var(--text-secondary); text-transform: uppercase;">Risk Level</div>
+                        <div id="riskLevel" style="font-size: 1.2rem; font-weight: 600;">--</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Drilling Parameters Row -->
+        <div class="status-temp-row">
+            <!-- Core Drilling Parameters -->
+            <div class="card">
+                <div class="card-title">Drilling Parameters</div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-item-label">Bit Depth</div>
+                        <div class="status-item-value"><span id="bitDepth">--</span><span class="status-item-unit">ft</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">ROP</div>
+                        <div class="status-item-value"><span id="rop">--</span><span class="status-item-unit">ft/hr</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">WOB</div>
+                        <div class="status-item-value"><span id="wob">--</span><span class="status-item-unit">klbs</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">RPM</div>
+                        <div class="status-item-value"><span id="currentRpm">--</span><span class="status-item-unit">rpm</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">Torque</div>
+                        <div class="status-item-value"><span id="torque">--</span><span class="status-item-unit">kft-lb</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">SPP</div>
+                        <div class="status-item-value"><span id="spp">--</span><span class="status-item-unit">psi</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">Hook Load</div>
+                        <div class="status-item-value"><span id="hookLoad">--</span><span class="status-item-unit">klbs</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">Rig State</div>
+                        <div class="status-item-value" id="rigState">--</div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">Uptime</div>
+                        <div class="status-item-value" id="uptime">0s</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Well Control Parameters -->
+            <div class="card">
+                <div class="card-title">Well Control</div>
+                <div class="status-grid">
+                    <div class="status-item">
+                        <div class="status-item-label">Flow In</div>
+                        <div class="status-item-value"><span id="flowIn">--</span><span class="status-item-unit">gpm</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">Flow Out</div>
+                        <div class="status-item-value"><span id="flowOut">--</span><span class="status-item-unit">gpm</span></div>
+                    </div>
+                    <div class="status-item" id="flowBalanceItem">
+                        <div class="status-item-label">Flow Balance</div>
+                        <div class="status-item-value"><span id="flowBalance">--</span><span class="status-item-unit">gpm</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">Pit Volume</div>
+                        <div class="status-item-value"><span id="pitVolume">--</span><span class="status-item-unit">bbl</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">Mud Weight</div>
+                        <div class="status-item-value"><span id="mudWeight">--</span><span class="status-item-unit">ppg</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">ECD</div>
+                        <div class="status-item-value"><span id="ecd">--</span><span class="status-item-unit">ppg</span></div>
+                    </div>
+                    <div class="status-item" id="gasUnitsItem">
+                        <div class="status-item-label">Gas Units</div>
+                        <div class="status-item-value"><span id="gasUnits">--</span><span class="status-item-unit">units</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">ECD Margin</div>
+                        <div class="status-item-value"><span id="ecdMargin">--</span><span class="status-item-unit">ppg</span></div>
+                    </div>
+                    <div class="status-item">
+                        <div class="status-item-label">Analyses</div>
+                        <div class="status-item-value" id="totalAnalyses">0</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Strategic Advisory Panel -->
+        <div class="card diagnosis-panel">
+            <div class="card-title">Strategic Advisory</div>
+            <div class="diagnosis-text" id="diagnosisText">Waiting for WITS data...</div>
+            <div class="action-box">
+                <div class="action-label">Recommended Action</div>
+                <div id="recommendedAction">System initializing, awaiting WITS stream...</div>
+            </div>
+        </div>
+
+        <!-- Flow Balance Waterfall Chart (Right Side) -->
+        <div class="card spectrum-panel">
+            <div class="card-title">Flow Balance Trend</div>
+            <div class="chart-container">
+                <canvas id="flowTrendCanvas"></canvas>
+            </div>
+            <div class="chart-legend">
+                <div class="legend-item"><div class="legend-color" style="background: var(--accent-green);"></div> Normal</div>
+                <div class="legend-item"><div class="legend-color" style="background: var(--accent-yellow);"></div> Warning (±10)</div>
+                <div class="legend-item"><div class="legend-color" style="background: var(--accent-red);"></div> Critical (±20)</div>
+            </div>
+        </div>
+
+        <!-- MSE Efficiency Metrics -->
+        <div class="card ttf-panel">
+            <div class="card-title">MSE Efficiency Analysis</div>
+            <div class="ttf-grid">
+                <div class="ttf-metric" id="mseMetric">
+                    <div class="ttf-metric-label">Current MSE</div>
+                    <div class="ttf-metric-value" id="mseValue">--</div>
+                    <div class="ttf-metric-unit">psi</div>
+                    <div class="ttf-progress-container">
+                        <div class="ttf-progress-bar">
+                            <div class="ttf-progress-fill" id="mseProgress" style="width: 50%; background: var(--accent-green);"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="ttf-metric" id="mseEfficiencyMetric">
+                    <div class="ttf-metric-label">MSE Efficiency</div>
+                    <div class="ttf-metric-value" id="mseEfficiencyValue">--</div>
+                    <div class="ttf-metric-unit">%</div>
+                    <span class="ttf-status-badge ttf-status-healthy" id="mseBadge">OPTIMAL</span>
+                </div>
+                <div class="ttf-metric" id="mseBaselineMetric">
+                    <div class="ttf-metric-label">Baseline MSE</div>
+                    <div class="ttf-metric-value" id="mseBaselineValue">--</div>
+                    <div class="ttf-metric-unit">psi</div>
+                    <div class="ttf-progress-container">
+                        <div class="ttf-progress-bar">
+                            <div class="ttf-progress-fill" id="mseDeviationProgress" style="width: 0%; background: var(--accent-green);"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="ttf-metric" id="mseDeviationMetric">
+                    <div class="ttf-metric-label">MSE Deviation</div>
+                    <div class="ttf-metric-value" id="mseDeviationValue">0</div>
+                    <div class="ttf-metric-unit">%</div>
+                    <span class="ttf-status-badge ttf-status-healthy" id="mseDeviationBadge">NORMAL</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Formation Analysis -->
+        <div class="card ttf-panel">
+            <div class="card-title">Formation Analysis</div>
+            <div class="ttf-grid">
+                <div class="ttf-metric" id="dExpMetric">
+                    <div class="ttf-metric-label">D-Exponent</div>
+                    <div class="ttf-metric-value" id="dExpValue">--</div>
+                    <div class="ttf-metric-unit">d</div>
+                    <div class="ttf-progress-container">
+                        <div class="ttf-progress-bar">
+                            <div class="ttf-progress-fill" id="dExpProgress" style="width: 50%; background: var(--accent-blue);"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="ttf-metric" id="dxcMetric">
+                    <div class="ttf-metric-label">Corrected Dxc</div>
+                    <div class="ttf-metric-value" id="dxcValue">--</div>
+                    <div class="ttf-metric-unit">dxc</div>
+                    <span class="ttf-status-badge ttf-status-healthy" id="dxcBadge">NORMAL</span>
+                </div>
+                <div class="ttf-metric" id="formationMetric">
+                    <div class="ttf-metric-label">Formation Type</div>
+                    <div class="ttf-metric-value" id="formationType" style="font-size: 1.2rem;">--</div>
+                    <div class="ttf-metric-unit">detected</div>
+                    <span class="ttf-status-badge ttf-status-healthy" id="formationBadge">STABLE</span>
+                </div>
+                <div class="ttf-metric" id="trendMetric">
+                    <div class="ttf-metric-label">Trend</div>
+                    <div class="ttf-metric-value" id="formationTrend" style="font-size: 1.2rem;">--</div>
+                    <div class="ttf-metric-unit">analysis</div>
+                    <span class="ttf-status-badge ttf-status-healthy" id="trendBadge">STABLE</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report Modal -->
+    <div id="reportModal" class="modal">
+        <div class="modal-content">
+            <span class="modal-close">&times;</span>
+            <iframe id="reportFrame" style="width:100%; height:80vh; border:none;"></iframe>
+        </div>
+    </div>
+    </div> <!-- End Live View -->
+
+    <!-- Hourly View -->
+    <div id="hourlyView" class="view-container">
+        <div class="strategic-container">
+            <h2 style="margin-bottom: 20px; color: var(--text-primary); display: flex; align-items: center; gap: 12px;">
+                <svg fill="currentColor" viewBox="0 0 16 16" style="width: 24px; height: 24px;">
+                    <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+                    <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
+                </svg>
+                Hourly Strategic Reports
+            </h2>
+            <div id="hourlyReports" class="strategic-grid">
+                <div class="strategic-loading">
+                    <div class="spinner"></div>
+                    <p>Loading hourly reports...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Daily View -->
+    <div id="dailyView" class="view-container">
+        <div class="strategic-container">
+            <h2 style="margin-bottom: 20px; color: var(--text-primary); display: flex; align-items: center; gap: 12px;">
+                <svg fill="currentColor" viewBox="0 0 16 16" style="width: 24px; height: 24px;">
+                    <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
+                </svg>
+                Daily Strategic Reports
+            </h2>
+            <div id="dailyReports" class="strategic-grid">
+                <div class="strategic-loading">
+                    <div class="spinner"></div>
+                    <p>Loading daily reports...</p>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="update-indicator">
+        <div class="update-dot"></div>
+        <span id="updateIndicatorText">Live Updates</span>
+    </div>
+
+    <script>
+        // Configuration
+        const API_BASE = '/api/v1';
+        const HEALTH_INTERVAL = 2000;
+        const STATUS_INTERVAL = 3000;
+        const FLOW_TREND_INTERVAL = 5000;
+        const DRILLING_INTERVAL = 3000;
+
+        // Campaign Management
+        let currentCampaign = 'Production';
+
+        async function switchCampaign(campaign) {
+            try {
+                const response = await fetch(`${API_BASE}/campaign`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({ campaign: campaign })
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    currentCampaign = data.campaign;
+                    updateCampaignBadge(data.campaign);
+                    console.log(`Campaign switched to: ${data.campaign}`);
+                } else {
+                    console.error('Failed to switch campaign');
+                    // Revert the dropdown
+                    document.getElementById('campaignSelect').value = currentCampaign;
+                }
+            } catch (error) {
+                console.error('Error switching campaign:', error);
+                document.getElementById('campaignSelect').value = currentCampaign;
+            }
+        }
+
+        function updateCampaignBadge(campaign) {
+            const badge = document.getElementById('campaignBadge');
+            if (badge) {
+                if (campaign === 'Production') {
+                    badge.className = 'campaign-badge production';
+                    badge.textContent = 'PROD';
+                } else if (campaign === 'PlugAbandonment') {
+                    badge.className = 'campaign-badge pa';
+                    badge.textContent = 'P&A';
+                }
+            }
+        }
+
+        async function fetchCurrentCampaign() {
+            try {
+                const response = await fetch(`${API_BASE}/campaign`);
+                if (response.ok) {
+                    const data = await response.json();
+                    currentCampaign = data.campaign;
+                    document.getElementById('campaignSelect').value = data.campaign;
+                    updateCampaignBadge(data.campaign);
+                }
+            } catch (error) {
+                console.error('Error fetching campaign:', error);
+            }
+        }
+
+        // Core Elements
+        const healthScore = document.getElementById('healthScore');
+        const gaugeFill = document.getElementById('gaugeFill');
+        const severityBadge = document.getElementById('severityBadge');
+        const mseScoreEl = document.getElementById('mseScore');
+        const riskLevelEl = document.getElementById('riskLevel');
+        const diagnosisText = document.getElementById('diagnosisText');
+        const recommendedAction = document.getElementById('recommendedAction');
+
+        // Drilling Parameters Elements
+        const bitDepthEl = document.getElementById('bitDepth');
+        const ropEl = document.getElementById('rop');
+        const wobEl = document.getElementById('wob');
+        const currentRpm = document.getElementById('currentRpm');
+        const torqueEl = document.getElementById('torque');
+        const sppEl = document.getElementById('spp');
+        const hookLoad = document.getElementById('hookLoad');
+        const rigStateEl = document.getElementById('rigState');
+        const uptime = document.getElementById('uptime');
+
+        // Well Control Elements
+        const flowInEl = document.getElementById('flowIn');
+        const flowOutEl = document.getElementById('flowOut');
+        const flowBalanceEl = document.getElementById('flowBalance');
+        const pitVolumeEl = document.getElementById('pitVolume');
+        const mudWeightEl = document.getElementById('mudWeight');
+        const ecdEl = document.getElementById('ecd');
+        const gasUnitsEl = document.getElementById('gasUnits');
+        const ecdMarginEl = document.getElementById('ecdMargin');
+        const totalAnalyses = document.getElementById('totalAnalyses');
+
+        // Specialist Vote Elements
+        const voteMseEl = document.getElementById('voteMse');
+        const voteHydraulicEl = document.getElementById('voteHydraulic');
+        const voteWellControlEl = document.getElementById('voteWellControl');
+        const voteFormationEl = document.getElementById('voteFormation');
+
+        // Flow Trend Chart
+        const flowTrendCanvas = document.getElementById('flowTrendCanvas');
+        const flowTrendCtx = flowTrendCanvas ? flowTrendCanvas.getContext('2d') : null;
+        
+        // Gauge configuration
+        const GAUGE_CIRCUMFERENCE = 534; // 2 * PI * 85
+        
+        // Colors based on score
+        function getScoreColor(score) {
+            if (score >= 70) return '#3fb950';
+            if (score >= 50) return '#d29922';
+            if (score >= 30) return '#db6d28';
+            return '#f85149';
+        }
+        
+        function getSeverityClass(severity) {
+            const s = severity.toLowerCase();
+            if (s === 'healthy') return 'severity-healthy';
+            if (s === 'watch') return 'severity-watch';
+            if (s === 'warning') return 'severity-warning';
+            return 'severity-critical';
+        }
+        
+        function formatUptime(seconds) {
+            if (seconds < 60) return `${seconds}s`;
+            if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+            const hours = Math.floor(seconds / 3600);
+            const mins = Math.floor((seconds % 3600) / 60);
+            return `${hours}h ${mins}m`;
+        }
+        
+        // Fetch health data
+        async function fetchHealth() {
+            try {
+                const response = await fetch(`${API_BASE}/health`);
+                const data = await response.json();
+
+                // Update gauge (combined efficiency + risk score)
+                const score = Math.round(data.health_score);
+                healthScore.textContent = score;
+                const offset = GAUGE_CIRCUMFERENCE - (GAUGE_CIRCUMFERENCE * score / 100);
+                gaugeFill.style.strokeDashoffset = offset;
+                gaugeFill.style.stroke = getScoreColor(score);
+
+                // Update severity badge
+                severityBadge.textContent = data.severity.toUpperCase();
+                severityBadge.className = 'severity-badge ' + getSeverityClass(data.severity);
+
+                // Update MSE efficiency and risk level sub-scores
+                if (mseScoreEl && data.mse_efficiency !== undefined) {
+                    mseScoreEl.textContent = Math.round(data.mse_efficiency) + '%';
+                    mseScoreEl.style.color = data.mse_efficiency >= 70 ? 'var(--accent-green)' :
+                                              data.mse_efficiency >= 50 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                }
+                if (riskLevelEl && data.risk_level !== undefined) {
+                    riskLevelEl.textContent = data.risk_level;
+                    const riskColors = { 'Low': 'var(--accent-green)', 'Elevated': 'var(--accent-yellow)',
+                                         'High': 'var(--accent-orange)', 'Critical': 'var(--accent-red)' };
+                    riskLevelEl.style.color = riskColors[data.risk_level] || 'var(--text-secondary)';
+                }
+
+                // Update diagnosis
+                diagnosisText.textContent = data.diagnosis;
+                recommendedAction.textContent = data.recommended_action;
+
+                // Auto-scroll diagnosis
+                diagnosisText.scrollTop = diagnosisText.scrollHeight;
+            } catch (error) {
+                console.error('Failed to fetch health:', error);
+            }
+        }
+        
+        // Fetch status data (WITS drilling parameters)
+        async function fetchStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/status`);
+                const data = await response.json();
+
+                // Update uptime and analyses count
+                if (totalAnalyses) totalAnalyses.textContent = data.total_analyses || 0;
+                if (uptime) uptime.textContent = formatUptime(data.uptime_secs || 0);
+
+                // Update drilling parameters
+                if (bitDepthEl) bitDepthEl.textContent = (data.bit_depth || 0).toFixed(0);
+                if (ropEl) ropEl.textContent = (data.rop || 0).toFixed(1);
+                if (wobEl) wobEl.textContent = (data.wob || 0).toFixed(1);
+                if (currentRpm) currentRpm.textContent = (data.rpm || data.current_rpm || 0).toFixed(0);
+                if (torqueEl) torqueEl.textContent = (data.torque || 0).toFixed(1);
+                if (sppEl) sppEl.textContent = (data.spp || 0).toFixed(0);
+                if (hookLoad) hookLoad.textContent = (data.hook_load || data.hookload || 0).toFixed(1);
+                if (rigStateEl) rigStateEl.textContent = data.rig_state || data.system_status || '--';
+
+                // Update well control parameters
+                if (flowInEl) flowInEl.textContent = (data.flow_in || 0).toFixed(0);
+                if (flowOutEl) flowOutEl.textContent = (data.flow_out || 0).toFixed(0);
+
+                // Flow balance with color coding (critical for kick/loss detection)
+                const flowBalance = (data.flow_out || 0) - (data.flow_in || 0);
+                if (flowBalanceEl) {
+                    flowBalanceEl.textContent = flowBalance.toFixed(1);
+                    const flowBalanceItem = document.getElementById('flowBalanceItem');
+                    if (flowBalanceItem) {
+                        if (Math.abs(flowBalance) > 20) {
+                            flowBalanceItem.style.background = 'rgba(248, 81, 73, 0.2)';
+                            flowBalanceEl.style.color = 'var(--accent-red)';
+                        } else if (Math.abs(flowBalance) > 10) {
+                            flowBalanceItem.style.background = 'rgba(219, 109, 40, 0.2)';
+                            flowBalanceEl.style.color = 'var(--accent-orange)';
+                        } else {
+                            flowBalanceItem.style.background = '';
+                            flowBalanceEl.style.color = '';
+                        }
+                    }
+                }
+
+                if (pitVolumeEl) pitVolumeEl.textContent = (data.pit_volume || 0).toFixed(1);
+                if (mudWeightEl) mudWeightEl.textContent = (data.mud_weight || 0).toFixed(2);
+                if (ecdEl) ecdEl.textContent = (data.ecd || 0).toFixed(2);
+
+                // Gas units with color coding
+                const gas = data.gas_units || 0;
+                if (gasUnitsEl) {
+                    gasUnitsEl.textContent = gas.toFixed(0);
+                    const gasItem = document.getElementById('gasUnitsItem');
+                    if (gasItem) {
+                        if (gas > 200) {
+                            gasItem.style.background = 'rgba(248, 81, 73, 0.2)';
+                            gasUnitsEl.style.color = 'var(--accent-red)';
+                        } else if (gas > 100) {
+                            gasItem.style.background = 'rgba(219, 109, 40, 0.2)';
+                            gasUnitsEl.style.color = 'var(--accent-orange)';
+                        } else {
+                            gasItem.style.background = '';
+                            gasUnitsEl.style.color = '';
+                        }
+                    }
+                }
+
+                if (ecdMarginEl) {
+                    const margin = data.ecd_margin || 0;
+                    // Handle f64::MAX (no fracture gradient data) or unreasonable values
+                    if (margin > 100 || margin < -100) {
+                        ecdMarginEl.textContent = '--';
+                    } else {
+                        ecdMarginEl.textContent = margin.toFixed(2);
+                    }
+                }
+
+                // Update flow trend history
+                updateFlowTrendHistory(data);
+
+            } catch (error) {
+                console.error('Failed to fetch status:', error);
+            }
+        }
+        
+        // Flow trend data storage
+        const FLOW_TREND_SIZE = 60; // 60 data points (5 minutes at 5s intervals)
+        let flowBalanceHistory = [];
+        let pitVolumeHistory = [];
+        let flowTrendTimestamps = [];
+
+        // Update flow trend history
+        function updateFlowTrendHistory(data) {
+            const now = Date.now();
+            const flowBalance = (data.flow_out || 0) - (data.flow_in || 0);
+            const pitVolume = data.pit_volume || 0;
+
+            flowBalanceHistory.push(flowBalance);
+            pitVolumeHistory.push(pitVolume);
+            flowTrendTimestamps.push(now);
+
+            // Keep only last FLOW_TREND_SIZE points
+            if (flowBalanceHistory.length > FLOW_TREND_SIZE) {
+                flowBalanceHistory.shift();
+                pitVolumeHistory.shift();
+                flowTrendTimestamps.shift();
+            }
+
+            drawFlowTrend();
+        }
+
+        // Draw flow balance waterfall chart
+        function drawFlowTrend() {
+            if (!flowTrendCanvas || !flowTrendCtx) return;
+
+            resizeFlowCanvas();
+            const ctx = flowTrendCtx;
+
+            if (flowBalanceHistory.length < 2) {
+                ctx.fillStyle = '#8b949e';
+                ctx.font = '14px -apple-system, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillText('Collecting flow data...', flowTrendCanvas.width / 2, flowTrendCanvas.height / 2);
+                return;
+            }
+
+            const padding = { top: 30, right: 20, bottom: 30, left: 50 };
+            const chartWidth = flowTrendCanvas.width - padding.left - padding.right;
+            const chartHeight = flowTrendCanvas.height - padding.top - padding.bottom;
+
+            // Clear canvas
+            ctx.fillStyle = '#21262d';
+            ctx.fillRect(0, 0, flowTrendCanvas.width, flowTrendCanvas.height);
+
+            // Use last 30 data points
+            const dataPoints = flowBalanceHistory.slice(-30);
+            const numPoints = dataPoints.length;
+
+            // Find max value for horizontal scale
+            const maxVal = Math.max(Math.abs(Math.min(...dataPoints)), Math.abs(Math.max(...dataPoints)), 25);
+
+            // Center X position (zero line)
+            const centerX = padding.left + chartWidth / 2;
+
+            // Helper functions
+            const valueToX = (val) => centerX + (val / maxVal) * (chartWidth / 2);
+            const indexToY = (i) => padding.top + (i / (numPoints - 1)) * chartHeight;
+
+            // Draw vertical grid lines
+            ctx.strokeStyle = '#30363d';
+            ctx.lineWidth = 1;
+            for (let i = -2; i <= 2; i++) {
+                const x = centerX + (i / 2) * (chartWidth / 2);
+                ctx.beginPath();
+                ctx.moveTo(x, padding.top);
+                ctx.lineTo(x, padding.top + chartHeight);
+                ctx.stroke();
+            }
+
+            // Draw warning threshold lines (±10 gpm)
+            ctx.strokeStyle = '#d29922';
+            ctx.setLineDash([5, 5]);
+            ctx.beginPath();
+            ctx.moveTo(valueToX(10), padding.top);
+            ctx.lineTo(valueToX(10), padding.top + chartHeight);
+            ctx.moveTo(valueToX(-10), padding.top);
+            ctx.lineTo(valueToX(-10), padding.top + chartHeight);
+            ctx.stroke();
+
+            // Draw critical threshold lines (±20 gpm)
+            ctx.strokeStyle = '#f85149';
+            ctx.beginPath();
+            ctx.moveTo(valueToX(20), padding.top);
+            ctx.lineTo(valueToX(20), padding.top + chartHeight);
+            ctx.moveTo(valueToX(-20), padding.top);
+            ctx.lineTo(valueToX(-20), padding.top + chartHeight);
+            ctx.stroke();
+            ctx.setLineDash([]);
+
+            // Draw center zero line
+            ctx.strokeStyle = '#8b949e';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(centerX, padding.top);
+            ctx.lineTo(centerX, padding.top + chartHeight);
+            ctx.stroke();
+
+            // Draw the line (top to bottom)
+            ctx.strokeStyle = '#58a6ff';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            for (let i = 0; i < dataPoints.length; i++) {
+                const x = valueToX(dataPoints[i]);
+                const y = indexToY(i);
+                if (i === 0) ctx.moveTo(x, y);
+                else ctx.lineTo(x, y);
+            }
+            ctx.stroke();
+
+            // Draw points
+            for (let i = 0; i < dataPoints.length; i++) {
+                const x = valueToX(dataPoints[i]);
+                const y = indexToY(i);
+                const value = dataPoints[i];
+
+                // Color based on value
+                if (Math.abs(value) >= 20) {
+                    ctx.fillStyle = '#f85149';
+                } else if (Math.abs(value) >= 10) {
+                    ctx.fillStyle = '#d29922';
+                } else {
+                    ctx.fillStyle = '#3fb950';
+                }
+
+                ctx.beginPath();
+                ctx.arc(x, y, 4, 0, Math.PI * 2);
+                ctx.fill();
+            }
+
+            // X-axis labels (top)
+            ctx.fillStyle = '#8b949e';
+            ctx.font = '10px -apple-system, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`-${maxVal.toFixed(0)}`, padding.left, padding.top - 10);
+            ctx.fillText('0', centerX, padding.top - 10);
+            ctx.fillText(`+${maxVal.toFixed(0)}`, padding.left + chartWidth, padding.top - 10);
+
+            // Title with current value
+            ctx.fillStyle = '#e6edf3';
+            ctx.font = 'bold 11px -apple-system, sans-serif';
+            ctx.textAlign = 'left';
+            const currentFlow = dataPoints[dataPoints.length - 1];
+            ctx.fillText(`Flow Balance (gpm)`, padding.left, 14);
+            ctx.fillStyle = currentFlow >= 0 ? '#3fb950' : '#f85149';
+            ctx.fillText(`${currentFlow >= 0 ? '+' : ''}${currentFlow.toFixed(1)}`, padding.left + 110, 14);
+        }
+
+        // Resize flow canvas
+        function resizeFlowCanvas() {
+            if (!flowTrendCanvas) return;
+            const container = flowTrendCanvas.parentElement;
+            flowTrendCanvas.width = container.clientWidth;
+            flowTrendCanvas.height = container.clientHeight;
+        }
+        
+        // ========================================
+        // MSE Efficiency Panel Functions
+        // ========================================
+
+        async function fetchDrillingMetrics() {
+            try {
+                const response = await fetch(`${API_BASE}/drilling`);
+                if (!response.ok) return;
+                const data = await response.json();
+
+                // Update MSE metrics
+                const mseValue = document.getElementById('mseValue');
+                const mseEfficiencyValue = document.getElementById('mseEfficiencyValue');
+                const mseBaselineValue = document.getElementById('mseBaselineValue');
+                const mseDeviationValue = document.getElementById('mseDeviationValue');
+                const mseProgress = document.getElementById('mseProgress');
+                const mseBadge = document.getElementById('mseBadge');
+                const mseDeviationBadge = document.getElementById('mseDeviationBadge');
+
+                if (mseValue) mseValue.textContent = (data.mse || 0).toFixed(0);
+                if (mseEfficiencyValue) {
+                    const eff = data.mse_efficiency || 0;
+                    mseEfficiencyValue.textContent = eff.toFixed(0);
+                    if (mseBadge) {
+                        mseBadge.textContent = eff >= 70 ? 'OPTIMAL' : eff >= 50 ? 'FAIR' : 'POOR';
+                        mseBadge.className = 'ttf-status-badge ' +
+                            (eff >= 70 ? 'ttf-status-healthy' : eff >= 50 ? 'ttf-status-watch' : 'ttf-status-warning');
+                    }
+                }
+                if (mseBaselineValue) mseBaselineValue.textContent = (data.mse_baseline || 0).toFixed(0);
+                if (mseDeviationValue) {
+                    const dev = data.mse_deviation || 0;
+                    mseDeviationValue.textContent = dev.toFixed(0);
+                    if (mseDeviationBadge) {
+                        mseDeviationBadge.textContent = Math.abs(dev) <= 10 ? 'NORMAL' : Math.abs(dev) <= 25 ? 'ELEVATED' : 'HIGH';
+                        mseDeviationBadge.className = 'ttf-status-badge ' +
+                            (Math.abs(dev) <= 10 ? 'ttf-status-healthy' : Math.abs(dev) <= 25 ? 'ttf-status-watch' : 'ttf-status-warning');
+                    }
+                }
+                if (mseProgress) {
+                    const efficiency = data.mse_efficiency || 50;
+                    mseProgress.style.width = `${efficiency}%`;
+                    mseProgress.style.background = efficiency >= 70 ? 'var(--accent-green)' :
+                                                   efficiency >= 50 ? 'var(--accent-yellow)' : 'var(--accent-red)';
+                }
+
+                // Update Formation Analysis
+                const dExpValue = document.getElementById('dExpValue');
+                const dxcValue = document.getElementById('dxcValue');
+                const formationType = document.getElementById('formationType');
+                const formationTrend = document.getElementById('formationTrend');
+                const dxcBadge = document.getElementById('dxcBadge');
+                const formationBadge = document.getElementById('formationBadge');
+                const trendBadge = document.getElementById('trendBadge');
+
+                if (dExpValue) dExpValue.textContent = (data.d_exponent || 0).toFixed(2);
+                if (dxcValue) dxcValue.textContent = (data.dxc || 0).toFixed(2);
+                if (formationType) formationType.textContent = data.formation_type || 'Normal';
+                if (formationTrend) formationTrend.textContent = data.trend || 'Stable';
+
+                if (dxcBadge) {
+                    const dxc = data.dxc || 1.0;
+                    dxcBadge.textContent = dxc > 1.5 ? 'HIGH' : dxc < 0.5 ? 'LOW' : 'NORMAL';
+                    dxcBadge.className = 'ttf-status-badge ttf-status-healthy';
+                }
+
+                if (formationBadge && data.formation_type) {
+                    formationBadge.textContent = data.formation_change ? 'CHANGE' : 'STABLE';
+                    formationBadge.className = 'ttf-status-badge ' +
+                        (data.formation_change ? 'ttf-status-watch' : 'ttf-status-healthy');
+                }
+
+                if (trendBadge && data.trend) {
+                    const trend = data.trend.toLowerCase();
+                    trendBadge.textContent = trend === 'stable' ? 'STABLE' :
+                                            trend === 'increasing' ? 'INCREASING' : 'DECREASING';
+                    trendBadge.className = 'ttf-status-badge ' +
+                        (trend === 'stable' ? 'ttf-status-healthy' : 'ttf-status-watch');
+                }
+
+                // Update specialist votes if available
+                if (data.votes) {
+                    if (voteMseEl) {
+                        voteMseEl.textContent = data.votes.mse || '--';
+                        voteMseEl.style.color = getVoteColor(data.votes.mse);
+                    }
+                    if (voteHydraulicEl) {
+                        voteHydraulicEl.textContent = data.votes.hydraulic || '--';
+                        voteHydraulicEl.style.color = getVoteColor(data.votes.hydraulic);
+                    }
+                    if (voteWellControlEl) {
+                        voteWellControlEl.textContent = data.votes.well_control || '--';
+                        voteWellControlEl.style.color = getVoteColor(data.votes.well_control);
+                    }
+                    if (voteFormationEl) {
+                        voteFormationEl.textContent = data.votes.formation || '--';
+                        voteFormationEl.style.color = getVoteColor(data.votes.formation);
+                    }
+                }
+
+            } catch (error) {
+                console.error('Failed to fetch drilling metrics:', error);
+            }
+        }
+
+        function getVoteColor(vote) {
+            if (!vote) return 'var(--text-secondary)';
+            const v = vote.toLowerCase();
+            if (v === 'confirm' || v === 'optimal') return 'var(--accent-green)';
+            if (v === 'reject' || v === 'poor') return 'var(--accent-red)';
+            if (v === 'uncertain' || v === 'fair') return 'var(--accent-yellow)';
+            return 'var(--text-primary)';
+        }
+
+        // Initialize
+        window.addEventListener('resize', () => {
+            drawFlowTrend();
+        });
+
+        // Start fetching
+        fetchHealth();
+        fetchStatus();
+        fetchDrillingMetrics();
+        fetchCurrentCampaign();
+
+        setInterval(fetchHealth, HEALTH_INTERVAL);
+        setInterval(fetchStatus, STATUS_INTERVAL);
+        setInterval(fetchDrillingMetrics, DRILLING_INTERVAL);
+
+        // ========================================
+        // Modal Functions
+        // ========================================
+
+        const reportModal = document.getElementById('reportModal');
+        const reportFrame = document.getElementById('reportFrame');
+        const modalClose = document.querySelector('.modal-close');
+
+        // Open report in modal
+        function openReport(timestamp) {
+            const reportUrl = `${API_BASE}/report/${timestamp}`;
+            reportFrame.src = reportUrl;
+            reportModal.style.display = 'block';
+        }
+
+        // Close modal
+        function closeModal() {
+            reportModal.style.display = 'none';
+            reportFrame.src = '';
+        }
+
+        // Modal event listeners
+        if (modalClose) modalClose.onclick = closeModal;
+        window.onclick = function(event) {
+            if (event.target === reportModal) {
+                closeModal();
+            }
+        };
+
+        // ============================================================================
+        // Strategic Views (LIVE / HOURLY / DAILY)
+        // ============================================================================
+
+        let currentView = 'live';
+        let hourlyInterval = null;
+        let dailyInterval = null;
+
+        function switchView(view) {
+            // Update active button
+            document.querySelectorAll('.view-toggle-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            document.querySelector(`[data-view="${view}"]`).classList.add('active');
+
+            // Hide all views
+            document.getElementById('liveView').classList.remove('active');
+            document.getElementById('hourlyView').classList.remove('active');
+            document.getElementById('dailyView').classList.remove('active');
+
+            // Show selected view
+            document.getElementById(`${view}View`).classList.add('active');
+
+            // Update indicator text
+            const indicator = document.getElementById('updateIndicatorText');
+            if (view === 'live') {
+                indicator.textContent = 'Live Updates';
+            } else if (view === 'hourly') {
+                indicator.textContent = 'Hourly Reports';
+            } else if (view === 'daily') {
+                indicator.textContent = 'Daily Reports';
+            }
+
+            // Clear intervals
+            if (hourlyInterval) clearInterval(hourlyInterval);
+            if (dailyInterval) clearInterval(dailyInterval);
+
+            // Fetch data and set up auto-refresh
+            if (view === 'hourly') {
+                fetchHourlyReports();
+                hourlyInterval = setInterval(fetchHourlyReports, 60000); // Refresh every minute
+            } else if (view === 'daily') {
+                fetchDailyReports();
+                dailyInterval = setInterval(fetchDailyReports, 300000); // Refresh every 5 minutes
+            }
+
+            currentView = view;
+        }
+
+        function fetchHourlyReports() {
+            const container = document.getElementById('hourlyReports');
+
+            fetch(`${API_BASE}/strategic/hourly?limit=24`)
+                .then(response => response.json())
+                .then(reports => {
+                    if (reports.length === 0) {
+                        container.innerHTML = `
+                            <div class="strategic-empty">
+                                <svg fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M8 3.5a.5.5 0 0 0-1 0V9a.5.5 0 0 0 .252.434l3.5 2a.5.5 0 0 0 .496-.868L8 8.71V3.5z"/>
+                                    <path d="M8 16A8 8 0 1 0 8 0a8 8 0 0 0 0 16zm7-8A7 7 0 1 1 1 8a7 7 0 0 1 14 0z"/>
+                                </svg>
+                                <h3>No Hourly Reports Available</h3>
+                                <p>Hourly reports are generated after 60 tactical analyses (approximately 1 hour of operation).</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    container.innerHTML = reports.map(report => renderHourlyCard(report)).join('');
+                })
+                .catch(error => {
+                    console.error('Error fetching hourly reports:', error);
+                    container.innerHTML = `
+                        <div class="strategic-empty">
+                            <h3>Error Loading Reports</h3>
+                            <p>Failed to fetch hourly reports. Please try again.</p>
+                        </div>
+                    `;
+                });
+        }
+
+        function fetchDailyReports() {
+            const container = document.getElementById('dailyReports');
+
+            fetch(`${API_BASE}/strategic/daily?limit=7`)
+                .then(response => response.json())
+                .then(reports => {
+                    if (reports.length === 0) {
+                        container.innerHTML = `
+                            <div class="strategic-empty">
+                                <svg fill="currentColor" viewBox="0 0 16 16">
+                                    <path d="M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM1 4v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V4H1z"/>
+                                </svg>
+                                <h3>No Daily Reports Available</h3>
+                                <p>Daily reports are generated after 24 hourly reports (approximately 24 hours of operation).</p>
+                            </div>
+                        `;
+                        return;
+                    }
+
+                    container.innerHTML = reports.map(report => renderDailyCard(report)).join('');
+                })
+                .catch(error => {
+                    console.error('Error fetching daily reports:', error);
+                    container.innerHTML = `
+                        <div class="strategic-empty">
+                            <h3>Error Loading Reports</h3>
+                            <p>Failed to fetch daily reports. Please try again.</p>
+                        </div>
+                    `;
+                });
+        }
+
+        function renderHourlyCard(report) {
+            const severityClass = report.severity.toLowerCase();
+            const severityColor = getSeverityColor(report.severity);
+
+            return `
+                <div class="strategic-card">
+                    <div class="strategic-header">
+                        <div class="strategic-score" style="color: ${severityColor}">${Math.round(report.health_score)}</div>
+                        <div class="strategic-severity severity-${severityClass}">${report.severity}</div>
+                    </div>
+                    <div class="strategic-details">
+                        <div class="strategic-field">
+                            <div class="strategic-field-label">Diagnosis</div>
+                            <div class="strategic-field-value">${report.diagnosis}</div>
+                        </div>
+                        <div class="strategic-field">
+                            <div class="strategic-field-label">Recommended Action</div>
+                            <div class="strategic-field-value">${report.action}</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderDailyCard(report) {
+            const severityClass = report.severity.toLowerCase();
+            const severityColor = getSeverityColor(report.severity);
+
+            let detailsHtml = '';
+            if (report.details) {
+                detailsHtml = `
+                    <div class="strategic-details-section">
+                        <div class="strategic-details-title">Additional Details</div>
+                        <div class="strategic-field">
+                            <div class="strategic-field-label">Trend</div>
+                            <div class="strategic-field-value">${report.details.trend}</div>
+                        </div>
+                        <div class="strategic-field">
+                            <div class="strategic-field-label">Top Drivers</div>
+                            <div class="strategic-field-value">${report.details.top_drivers}</div>
+                        </div>
+                        <div class="strategic-field">
+                            <div class="strategic-field-label">Confidence</div>
+                            <div class="strategic-field-value">${report.details.confidence}</div>
+                        </div>
+                        <div class="strategic-field">
+                            <div class="strategic-field-label">Next Check</div>
+                            <div class="strategic-field-value">${report.details.next_check}</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            return `
+                <div class="strategic-card">
+                    <div class="strategic-header">
+                        <div class="strategic-score" style="color: ${severityColor}">${Math.round(report.health_score)}</div>
+                        <div class="strategic-severity severity-${severityClass}">${report.severity}</div>
+                    </div>
+                    <div class="strategic-details">
+                        <div class="strategic-field">
+                            <div class="strategic-field-label">Diagnosis</div>
+                            <div class="strategic-field-value">${report.diagnosis}</div>
+                        </div>
+                        <div class="strategic-field">
+                            <div class="strategic-field-label">Recommended Action</div>
+                            <div class="strategic-field-value">${report.action}</div>
+                        </div>
+                    </div>
+                    ${detailsHtml}
+                </div>
+            `;
+        }
+
+        function getSeverityColor(severity) {
+            const severityMap = {
+                'Healthy': 'var(--accent-green)',
+                'Watch': 'var(--accent-yellow)',
+                'Warning': 'var(--accent-orange)',
+                'Critical': 'var(--accent-red)'
+            };
+            return severityMap[severity] || 'var(--text-secondary)';
+        }
+    </script>
+</body>
+</html>

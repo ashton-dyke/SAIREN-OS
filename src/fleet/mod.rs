@@ -1,0 +1,33 @@
+//! Fleet Network — hub-and-spoke multi-rig learning
+//!
+//! Enables rigs to share anomaly events and learn from fleet-wide precedents.
+//!
+//! ## Architecture
+//!
+//! - **FleetEvent**: Confirmed AMBER/RED advisory with history window + outcome
+//! - **FleetEpisode**: Compact precedent extracted from a FleetEvent (for library)
+//! - **UploadQueue**: Disk-backed queue for reliable event upload to hub
+//! - **FleetClient**: HTTP client for hub communication
+//! - **LibrarySync**: Periodic precedent library synchronization
+//! - **OutcomeForwarder**: Forwards driller acknowledgments to the hub
+//!
+//! ## Design Principles
+//!
+//! - Local autonomy: rig operates independently when hub is unreachable
+//! - Event-only upload: only confirmed AMBER/RED events, not raw WITS data
+//! - Idempotent: events keyed by advisory ID prevent duplicate uploads
+//! - Bandwidth-conscious: zstd compression, delta sync, 6-hour cadence
+
+pub mod types;
+pub mod queue;
+#[cfg(feature = "fleet-client")]
+pub mod client;
+#[cfg(feature = "fleet-client")]
+pub mod uploader;
+#[cfg(feature = "fleet-client")]
+pub mod sync;
+
+pub use types::{FleetEvent, FleetEpisode, EventOutcome};
+pub use queue::UploadQueue;
+#[cfg(feature = "fleet-client")]
+pub use client::FleetClient;
