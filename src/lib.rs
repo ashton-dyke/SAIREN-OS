@@ -16,7 +16,12 @@ pub mod agents;
 pub mod physics_engine;
 pub mod context;
 pub mod sensors;
-pub mod history_storage;
+// Only expose the history sub-module from the library crate.
+// The full storage module (AnalysisStorage, ProcessLock, etc.) is only
+// available in the binary crate which declares its own `mod storage;`.
+pub mod storage {
+    pub mod history;
+}
 pub mod llm;
 pub mod baseline;
 pub mod aci;
@@ -49,7 +54,7 @@ pub use types::{
 pub use agents::{TacticalAgent, StrategicAgent};
 
 // Re-export storage
-pub use history_storage::{HistoryStorage, StorageError, StorageStats};
+pub use storage::history::{HistoryStorage, StorageError, StorageStats};
 
 // Re-export LLM components
 pub use llm::StrategicLLM;
