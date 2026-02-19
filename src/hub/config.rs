@@ -1,5 +1,7 @@
 //! Hub configuration — environment variables, CLI args, defaults
 
+use tracing::{error, warn};
+
 /// Fleet Hub configuration
 #[derive(Debug, Clone)]
 pub struct HubConfig {
@@ -56,7 +58,14 @@ impl HubConfig {
 
         // Admin key from env
         config.admin_key = std::env::var("FLEET_ADMIN_KEY")
-            .unwrap_or_else(|_| "admin-dev-key".to_string());
+            .unwrap_or_else(|_| {
+                if cfg!(debug_assertions) {
+                    warn!("FLEET_ADMIN_KEY not set, using default dev key — do NOT use in production");
+                } else {
+                    error!("FLEET_ADMIN_KEY not set — falling back to insecure default; set FLEET_ADMIN_KEY env var");
+                }
+                "admin-dev-key".to_string()
+            });
 
         // Optional overrides from env
         if let Ok(v) = std::env::var("FLEET_MAX_PAYLOAD_SIZE") {
