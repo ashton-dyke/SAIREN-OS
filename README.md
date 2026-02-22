@@ -1,6 +1,6 @@
 # SAIREN-OS - Drilling Operational Intelligence System
 
-Real-time drilling advisory system using WITS Level 0 data and a multi-agent AI pipeline for drilling optimization and risk prevention.
+Real-time drilling advisory system using WITS Level 0 data and an 11-phase multi-agent AI pipeline for drilling optimization and risk prevention.
 
 ---
 
@@ -212,6 +212,76 @@ Complete multi-rig fleet learning system with a central hub server and spoke-sid
 - RAMRecall holds up to 10,000 episodes in memory (~50MB)
 - Hub episodes scored by outcome (50%), recency (25%), detail (15%), diversity (10%)
 
+### Structured Knowledge Base
+
+Per-well directory-based knowledge base that separates geologist-authored geology from ML-generated performance data and auto-populates offset well performance across the fleet.
+
+**Directory layout:**
+```
+{SAIREN_KB}/
+  {field}/
+    geology.toml                              # Field-level geological data
+    wells/
+      {well}/
+        pre-spud/
+          prognosis.toml                      # Engineering ranges, casings
+        mid-well/
+          snapshot_{timestamp}.toml            # Recent ML snapshots (plain)
+          snapshot_{timestamp}.toml.zst        # Older snapshots (compressed)
+        post-well/
+          summary.toml                        # Overall well summary
+          performance_{formation}.toml         # Per-formation offset data
+```
+
+**Key capabilities:**
+
+| Component | Module | Function |
+|-----------|--------|----------|
+| **Assembler** | `knowledge_base/assembler.rs` | Merges geology + pre-spud + N offset wells into `FormationPrognosis` at runtime |
+| **Mid-Well Writer** | `knowledge_base/mid_well.rs` | Writes hourly ML snapshots during drilling, enforces cap (168 hot, then compress, then delete) |
+| **Post-Well Generator** | `knowledge_base/post_well.rs` | Aggregates snapshots into per-formation performance files on well completion |
+| **Watcher** | `knowledge_base/watcher.rs` | Polls directories for changes, hot-reloads assembled prognosis |
+| **Fleet Bridge** | `knowledge_base/fleet_bridge.rs` | Uploads post-well data to hub, downloads offset data from hub |
+| **Migration** | `knowledge_base/migration.rs` | Converts flat `well_prognosis.toml` into KB directory structure |
+| **Compressor** | `knowledge_base/compressor.rs` | Transparent zstd read/write for `.toml` and `.toml.zst` files |
+
+**Assembly algorithm:**
+1. Load field geology (formations, depths, lithology, hazards)
+2. Load well-specific pre-spud engineering parameters
+3. Scan sibling wells for post-well performance files
+4. Aggregate offset data (weighted average by snapshot count)
+5. Merge into `FormationPrognosis` — geologist sets safety envelope, offset wells set target within it
+
+**Legacy fallback:** When `SAIREN_KB` is not set, the system falls back to `FormationPrognosis::load()` from a flat `well_prognosis.toml` file.
+
+### Causal Inference on Edge
+
+Detects which drilling parameters causally precede MSE spikes in the real-time history buffer using lightweight Granger-style cross-correlation. No external crates — pure Rust, < 1 ms per packet.
+
+| Property | Value |
+|----------|-------|
+| **Method** | Pearson cross-correlation at lags 1–20 seconds |
+| **Target series** | MSE (the efficiency metric being predicted) |
+| **Candidate inputs** | WOB, RPM, Torque, SPP, ROP |
+| **Threshold** | \|r\| ≥ 0.45 to report a causal lead |
+| **Output** | Up to 3 `CausalLead` results, sorted by \|r\| descending |
+| **Min history** | 20 packets required before analysis runs |
+
+Causal leads are attached to every `AdvisoryTicket` as `causal_leads: Vec<CausalLead>` and surfaced in advisory text: *"increase WOB precedes MSE by 12s (r=+0.73); decrease SPP precedes MSE by 4s (r=−0.61)"*. This gives operators leading-indicator context — not just that MSE is elevated, but which parameter is driving it and how far ahead the signal appears.
+
+### Regime-Aware Orchestrator Weighting
+
+Specialist voting weights are dynamically adjusted based on the current drilling regime (0–3) detected by the CfC k-means clusterer (`src/cfc/regime_clusterer.rs`). This tilts expert attention toward the most relevant specialist for the current operating condition while preserving the operator-configured baseline.
+
+| Regime | Label | MSE mult | Hydraulic mult | WellControl mult | Formation mult |
+|--------|-------|----------|----------------|------------------|----------------|
+| 0 | baseline | ×1.0 | ×1.0 | ×1.0 | ×1.0 |
+| 1 | hydraulic-stress | ×0.8 | ×1.4 | ×1.0 | ×0.8 |
+| 2 | high-wob | ×1.4 | ×0.8 | ×0.9 | ×1.1 |
+| 3 | unstable | ×0.7 | ×1.0 | ×1.5 | ×0.8 |
+
+Multipliers are applied on top of `[ensemble_weights]` from `well_config.toml`, then re-normalised so the total always sums to 1.0. Advisory reasoning includes the active regime label (e.g., `[regime 1:hydraulic-stress]`). The WellControl CRITICAL severity override is applied after re-normalisation and is unaffected by regime weighting.
+
 ### Background Services
 
 Background services run independently of the hot packet pipeline:
@@ -297,30 +367,33 @@ The **Orchestrator** uses trait-based `Specialist` implementations for domain-sp
     ===============================================================================
 ```
 
-### 10-Phase Processing Pipeline
+### 11-Phase Processing Pipeline
 
 | Phase | Component | Function |
 |-------|-----------|----------|
 | 1 | WITS Ingestion | Receive 40+ channel WITS Level 0 packets, classify rig state |
 | 2 | Tactical Physics | Calculate MSE, d-exponent, flow balance, pit rate (<15ms) |
-| 2.8 | CfC Network | Self-supervised neural network: predict, compare, train, score, modulate severity |
+| 2.8 | CfC Network | Self-supervised neural network: predict, compare, train, score, modulate severity; stamp `regime_id` via k-means clusterer |
 | 3 | Decision Gate | Create AdvisoryTicket if thresholds exceeded |
 | 4 | History Buffer | Store last 60 packets for trend analysis |
-| 5 | Strategic Verification | Physics-based validation of tickets (CfC tiebreaker on Uncertain) |
+| 4.5 | Causal Inference | Cross-correlate WOB/RPM/Torque/SPP/ROP against MSE at lags 1–20s; attach `CausalLead` results to ticket |
+| 5 | Advanced Physics | Strategic verification of tickets (CfC tiebreaker on Uncertain) |
 | 6 | Context Lookup | Query KnowledgeStore (StaticKnowledgeBase, RAMRecall, or NoOp) |
-| 7 | LLM Advisory | Generate recommendations (Qwen 2.5 7B) or template fallback |
-| 8 | Orchestrator Voting | 4 trait-based specialists vote → VotingResult |
+| 7 | LLM Advisory | Generate recommendations (Qwen 2.5 7B) or template fallback (causal leads appended) |
+| 8 | Orchestrator Voting | 4 trait-based specialists vote with regime-adjusted weights → VotingResult |
 | 9 | Advisory Composition | AdvisoryComposer assembles StrategicAdvisory (CRITICAL cooldown) |
 | 10 | Dashboard API | REST endpoints and web dashboard |
 
 ### Specialist Weights
 
-| Specialist | Weight | Evaluates |
-|------------|--------|-----------|
+| Specialist | Baseline Weight | Evaluates |
+|------------|-----------------|-----------|
 | **MSE** | 25% | Drilling efficiency, ROP optimization |
 | **Hydraulic** | 25% | SPP, ECD margin, flow rates |
 | **WellControl** | 30% | Kick/loss indicators, gas, pit volume |
 | **Formation** | 20% | D-exponent trends, formation changes |
+
+> **Regime adjustment**: Phase 4.5 stamps `regime_id` (0–3) on each packet via the CfC motor-output k-means clusterer. Phase 8 applies regime-specific multipliers to the baseline weights above and re-normalises to 1.0 before voting. See the [Regime-Aware Orchestrator Weighting](#regime-aware-orchestrator-weighting) feature section for the multiplier table.
 
 ---
 
@@ -408,6 +481,7 @@ cargo build --release --features fleet-client
 | **LLM (GPU)** | `--features cuda` | CUDA-accelerated LLM inference |
 | **Fleet Hub** | `--features fleet-hub` | Central hub server binary (PostgreSQL, API, curator) |
 | **Fleet Client** | `--features fleet-client` | Spoke-side HTTP client (upload, sync, outcome forwarding) |
+| **Knowledge Base** | `--features knowledge-base` | Structured per-well knowledge base with auto-assembly (enabled by default) |
 | **Tactical LLM** | `--features tactical_llm` | Legacy LLM-based tactical routing (not recommended) |
 
 > **Note**: The tactical agent uses deterministic physics-based pattern matching (no LLM required).
@@ -521,8 +595,8 @@ vi well_config.toml
 | `[thresholds.mse]` | MSE efficiency bands | `efficiency_poor_percent = 50.0` |
 | `[thresholds.hydraulics]` | ECD margin, SPP deviation | `ecd_margin_warning_ppg = 0.3` |
 | `[thresholds.mechanical]` | Torque, pack-off detection | `torque_increase_warning_pct = 15.0` |
-| `[thresholds.founder]` | Founder point detection sensitivity | `wob_increase_pct = 5.0` |
-| `[baseline_learning]` | Sigma thresholds, min samples | `min_samples = 100` |
+| `[thresholds.founder]` | Founder point detection sensitivity | `quick_wob_delta_percent = 0.05` |
+| `[baseline_learning]` | Sigma thresholds, min samples | `min_samples_for_lock = 100` |
 | `[ensemble_weights]` | Specialist voting weights (must sum to ~1.0) | `well_control = 0.30` |
 | `[physics]` | Mud weight, formation constants | `normal_mud_weight_ppg = 10.0` |
 | `[campaign.*]` | Per-campaign threshold overrides | `[campaign.plug_abandonment]` |
@@ -556,6 +630,12 @@ curl -X POST http://localhost:8080/api/v1/config/validate \
 | `CAMPAIGN` | `production` | Campaign mode: `production` or `pa` |
 | `STRATEGIC_MODEL_PATH` | GPU: `models/qwen2.5-7b-instruct-q4_k_m.gguf`, CPU: `models/qwen2.5-4b-instruct-q4_k_m.gguf` | Strategic LLM model (auto-selected) |
 | `TACTICAL_MODEL_PATH` | `models/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Only with `tactical_llm` feature |
+| `SAIREN_KB` | *(none)* | Root directory of the structured knowledge base |
+| `SAIREN_KB_FIELD` | *(none)* | Field name for knowledge base assembly |
+| `SAIREN_KB_WELL` | `unknown` | Well name override for knowledge base (defaults to well config) |
+| `SAIREN_KB_MAX_SNAPSHOTS` | `168` | Max hot mid-well snapshots before compression |
+| `SAIREN_KB_RETENTION_DAYS` | `30` | Days to retain compressed snapshots before deletion |
+| `RESET_DB` | *(none)* | Set to `true` to wipe all persistent data on startup |
 | `SAIREN_SERVER_ADDR` | `0.0.0.0:8080` | HTTP server bind address |
 | `RUST_LOG` | `info` | Log level: `debug`, `info`, `warn`, `error` |
 | `ML_INTERVAL_SECS` | `3600` | ML analysis interval (seconds) |
@@ -572,6 +652,7 @@ curl -X POST http://localhost:8080/api/v1/config/validate \
 | `--addr <host:port>` | Override HTTP server address |
 | `--speed <N>` | Simulation speed multiplier (default: 1) |
 | `--reset-db` | Wipe all persistent data on startup |
+| `migrate-kb --from <path> --to <path>` | Migrate a flat `well_prognosis.toml` into the KB directory structure |
 
 ---
 
@@ -755,6 +836,7 @@ Base URL: `http://localhost:8080`
 | `/api/v1/advisory/acknowledgments` | GET | List all advisory acknowledgments |
 | `/api/v1/shift/summary` | GET | Shift summary with `?hours=12` or `?from=&to=` |
 | `/api/v1/reports/critical` | GET | Critical advisory reports |
+| `/api/v1/reports/test` | POST | Create a test critical report (for UI testing) |
 
 ### ML Engine Endpoints
 
@@ -799,6 +881,13 @@ Base URL: `http://hub:8080` (requires `fleet-hub` feature)
 | `/api/fleet/rigs` | GET | List all registered rigs |
 | `/api/fleet/rigs/{id}` | GET | Get rig details |
 | `/api/fleet/rigs/{id}/revoke` | POST | Revoke a rig's API key |
+
+**Performance Data** (authenticated with rig API key):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/fleet/performance` | POST | Upload post-well performance data (supports zstd compression) |
+| `/api/fleet/performance` | GET | Query performance data by field (`?field=&since=&exclude_rig=`) |
 
 **Dashboard** (authenticated with admin API key):
 
@@ -994,22 +1083,39 @@ fuser -k 8080/tcp
 src/
   main.rs              # Entry point, CLI handling
   lib.rs               # Library crate (shared modules for testing/reuse)
-  types.rs             # Core data structures (WitsPacket, DrillingMetrics,
-                       # Campaign, Operation, AdvisoryTicket, etc.)
+  types/
+    mod.rs             # Re-exports from sub-modules
+    advisory.rs        # StrategicAdvisory, DrillingPhysicsReport, TraceEntry
+    ticket.rs          # AdvisoryTicket, CfcFeatureSurpriseInfo, ThresholdBreach, CausalLead
+    wits.rs            # WitsPacket, DrillingMetrics
+    state.rs           # Campaign, RigState, Operation
+    formation.rs       # FormationInterval, OffsetPerformance, FormationPrognosis
+    knowledge_base.rs  # FieldGeology, PreSpudPrognosis, MidWellSnapshot,
+                       # PostWellFormationPerformance, PostWellSummary, KnowledgeBaseConfig
+    ml.rs              # MLInsightsReport, OptimalParams, ConfidenceLevel
+    optimization.rs    # OptimizationAdvisory, ConfidenceBreakdown
+    tactical.rs        # TacticalAnalysis types
+    thresholds.rs      # AnomalyCategory, FinalSeverity, RiskLevel
 
   bin/
     simulation.rs      # WITS Level 0 data simulator for testing
     fleet_hub.rs       # Fleet Hub server binary (fleet-hub feature)
     volve_replay.rs    # Volve field data replay with ACI + CfC shadow logging
+    witsml_to_csv.rs   # WITSML XML to CSV converter (Rust binary)
 
   config/
     mod.rs             # OnceLock global config access (init/get/is_initialized)
     well_config.rs     # WellConfig TOML loader, all threshold structs, validation
+    formation.rs       # FormationPrognosis loader (SAIREN_PROGNOSIS env var)
+
+  causal/
+    mod.rs             # Causal inference: Granger-style cross-correlation over 60-packet history;
+                       # detect_leads() → Vec<CausalLead>; pearson_r() pure-std, no deps, < 1 ms
 
   agents/
     tactical.rs        # Fast anomaly detection + operation classification
     strategic.rs       # Physics verification with configurable thresholds
-    orchestrator.rs    # Trait-based specialist voting (returns VotingResult)
+    orchestrator.rs    # Trait-based specialist voting with regime-adjusted weights (VotingResult)
     specialists/
       mod.rs           # Specialist trait + default_specialists() factory
       mse.rs           # MSE efficiency evaluation
@@ -1020,17 +1126,18 @@ src/
   strategic/
     mod.rs             # Strategic analysis module
     advisory.rs        # AdvisoryComposer + VotingResult + CRITICAL cooldown
-    templates.rs       # Campaign-aware template fallback per AnomalyCategory
+    templates.rs       # Campaign-aware template fallback per AnomalyCategory; appends causal leads
     aggregation.rs     # Report aggregation helpers
     parsing.rs         # Structured output parsing
     actor.rs           # Strategic actor
 
   pipeline/
-    coordinator.rs     # 10-phase pipeline coordinator (uses KnowledgeStore + AdvisoryComposer)
+    coordinator.rs     # 11-phase pipeline coordinator (uses KnowledgeStore + AdvisoryComposer)
     processor.rs       # AppState, system status
 
   volve.rs             # Volve field dataset replay adapter (Kaggle + Tunkiel CSV formats, auto-detect)
   aci.rs               # Adaptive Conformal Inference tracker (online conformal intervals)
+  sensors.rs           # Sensor abstractions and health tracking
 
   cfc/
     mod.rs             # CfC public API, CfcDrillingResult, feature extraction
@@ -1039,6 +1146,8 @@ src/
     cell.rs            # CfC cell forward pass, gate equations, ForwardCache
     training.rs        # Manual BPTT (depth=4), Adam optimizer, gradient norm clipping
     network.rs         # CfcNetwork: process(), anomaly scoring, calibration
+    regime_clusterer.rs # K-means clustering of 8 motor outputs → regime_id (0–3); stamps packet
+    formation_detector.rs # CfC-based formation boundary detection from motor output patterns
 
   baseline/
     mod.rs             # Adaptive threshold learning with crash-safe persistence
@@ -1065,6 +1174,25 @@ src/
     knowledge_store.rs # KnowledgeStore trait + NoOpStore + StaticKnowledgeBase
     ram_recall.rs      # RAMRecall: in-memory fleet episode search (metadata filter + scoring)
 
+  optimization/
+    mod.rs             # ParameterOptimizer: real-time drilling parameter optimization
+    optimizer.rs       # Core evaluate() logic, formation context, offset well blending
+    confidence.rs      # ConfidenceBreakdown: multi-factor confidence scoring
+    look_ahead.rs      # LookAheadAdvisory: pre-emptive advice for upcoming formations
+    rate_limiter.rs    # Advisory rate limiting (cooldown between optimization advisories)
+    templates.rs       # Human-readable recommendation text generation
+
+  knowledge_base/        # Structured per-well knowledge base (knowledge-base feature)
+    mod.rs             # KnowledgeBase struct, init, hot-reload prognosis
+    assembler.rs       # Merge geology + pre-spud + offset wells → FormationPrognosis
+    compressor.rs      # Transparent zstd read/write for .toml and .toml.zst
+    layout.rs          # Directory path helpers, file enumeration
+    mid_well.rs        # ML snapshot writer + cap enforcement (compress old, delete expired)
+    post_well.rs       # Post-well summary generator from mid-well snapshots
+    watcher.rs         # Polling directory watcher, triggers reassembly on changes
+    fleet_bridge.rs    # Upload post-well data to hub, download offset data from hub
+    migration.rs       # Flat well_prognosis.toml → KB directory migration
+
   fleet/
     mod.rs             # Fleet hub-and-spoke module
     types.rs           # FleetEvent, FleetEpisode, EventOutcome, HistorySnapshot
@@ -1081,6 +1209,7 @@ src/
       mod.rs           # Router builder with all fleet routes
       events.rs        # Event ingestion (POST), retrieval (GET), outcome update (PATCH)
       library.rs       # Library sync with delta support and zstd compression
+      performance.rs   # Post-well performance data upload and query endpoints
       registry.rs      # Rig registration, listing, revocation
       dashboard.rs     # Fleet dashboard API endpoints and HTML serving
       health.rs        # Health check endpoint
@@ -1129,10 +1258,12 @@ src/
 
 static/
   index.html           # Rig dashboard UI
+  reports.html         # Strategic reports viewer
   fleet_dashboard.html # Fleet Hub dashboard UI (Chart.js visualizations)
 
 migrations/
   001_initial_schema.sql  # PostgreSQL schema (rigs, events, episodes, sync_log)
+  002_fleet_performance.sql # Fleet performance table for offset well sharing
 
 deploy/
   sairen-os.service    # systemd service unit for rig (hardened)
@@ -1144,7 +1275,8 @@ deploy/
     rig_wg0.conf.template   # WireGuard config template for rig
 
 tests/
-  fleet_integration.rs # Fleet Hub integration tests (11 tests)
+  fleet_integration.rs           # Fleet Hub integration tests (11 tests)
+  knowledge_base_integration.rs  # KB lifecycle tests (migrate, assemble, offset wells)
 
 scripts/
   witsml_to_csv.py       # WITSML 1.4.1 XML → Kaggle CSV converter (extracts from Volve zip)
@@ -1174,7 +1306,7 @@ well_config.default.toml  # Reference configuration with all thresholds document
 | **Founder Point** | The WOB at which ROP peaks; beyond this point, additional weight reduces efficiency |
 | **Flow Balance** | flow_out - flow_in (gpm); positive = potential kick |
 | **Pit Volume** | Mud volume in surface pits (bbl) |
-| **Rig State** | Operational mode: Drilling, Circulating, Connection, Tripping, Idle |
+| **Rig State** | Operational mode: Drilling, Reaming, Circulating, Connection, TrippingIn, TrippingOut, Idle |
 | **Operation** | Activity classification: Production Drilling, Milling, Cement Drill-Out, Circulating, Static |
 | **Milling** | P&A operation: cutting through casing; high torque, very low ROP |
 | **Cement Drill-Out** | P&A operation: drilling cement plugs; high WOB, moderate torque, low ROP |
@@ -1192,17 +1324,83 @@ well_config.default.toml  # Reference configuration with all thresholds document
 | **Tiebreaker** | CfC resolves Uncertain strategic verifications: score ≥ 0.7 → Confirmed, < 0.2 → Rejected |
 | **WITSML** | Wellsite Information Transfer Standard Markup Language; XML-based format for well data exchange (1.4.1 series supported) |
 | **ACI** | Adaptive Conformal Inference; online conformal intervals for distribution-free anomaly detection |
+| **Knowledge Base** | Structured per-well directory of geology, engineering, and performance files that replaces the flat `well_prognosis.toml` |
+| **Offset Well** | A previously drilled well in the same field whose performance data informs drilling parameters for the current well |
+| **Pre-Spud Prognosis** | Well-specific engineering plan authored before drilling begins, setting parameter ranges and casing points |
+| **Mid-Well Snapshot** | Hourly ML performance snapshot written during drilling, capturing optimal parameters and confidence |
+| **Post-Well Summary** | Aggregated performance data generated after well completion, shared across the fleet as offset data |
+| **CausalLead** | A detected leading indicator: a drilling parameter whose change precedes an MSE shift by `lag_seconds`, quantified by Pearson r and labeled with a direction ("increase" or "decrease") |
+| **Regime ID** | 0–3 integer stamped on each packet by the CfC k-means clusterer based on motor neuron output patterns; 0=baseline, 1=hydraulic-stress, 2=high-wob, 3=unstable |
+| **RegimeProfile** | Multiplicative weight adjustment table per drilling regime; applied to `ensemble_weights` before orchestrator voting, then re-normalised to 1.0 |
+| **Granger Causality** | Statistical test for whether one time series improves prediction of another; approximated here via Pearson cross-correlation at multiple lags |
 
 ---
 
 ## Changelog
+
+### v3.0 - Causal Inference & Regime-Aware Intelligence
+
+**Phase 5: Causal Inference on Edge** (`src/causal/mod.rs`):
+
+- **`detect_leads(history)`** — scans the 60-packet history buffer for drilling parameters that causally precede MSE spikes using Pearson cross-correlation at lags 1–20 s; threshold |r| ≥ 0.45; returns up to 3 `CausalLead` results sorted by |r| descending
+- **Pure-std implementation** — no external crates; Pearson r computed in a single O(n) pass over mean-centred values; < 1 ms per packet on 60-sample buffers; minimum 20 packets before analysis runs
+- **`CausalLead` type** (`src/types/ticket.rs`) — `{ parameter, lag_seconds, pearson_r, direction }` — attached to every `AdvisoryTicket` as `causal_leads: Vec<CausalLead>`; skipped in JSON serialization when empty
+- **Pipeline integration** (`pipeline/coordinator.rs`) — Phase 4.5 block runs causal detection immediately after the history buffer and before advanced physics verification, in both the per-packet and periodic summary paths
+- **Advisory surfacing** (`strategic/templates.rs`) — `format_causal_block()` appends leading-indicator context to template advisory reasoning when leads are present: *"Causal leads: increase WOB precedes MSE by 12s (r=+0.73); decrease SPP precedes MSE by 4s (r=−0.61)."*
+- **7 unit tests** — perfect/anti correlation, constant-series zero guard, insufficient-history early return, synthetic 60-entry WOB→MSE lead, max-3-leads cap
+
+**Phase 6: Regime-Aware Orchestrator Weighting** (`src/agents/orchestrator.rs`):
+
+- **`RegimeProfile`** — struct with four per-specialist multiplicative weight adjustments; `&'static str label` allows `const` array definition with no heap allocation
+- **`REGIME_PROFILES: [RegimeProfile; 4]`** — static table: baseline (0, all ×1.0), hydraulic-stress (1, Hydraulic ×1.4), high-wob (2, MSE ×1.4), unstable (3, WellControl ×1.5)
+- **`apply_regime_weights(votes, regime_id)`** — multiplies each `SpecialistVote.weight` by the regime multiplier then re-normalises so the total always sums to 1.0; out-of-range `regime_id` clamps to regime 3
+- **`vote()` signature extended** — `regime_id: u8` parameter flows from `packet.regime_id` (stamped by the CfC k-means clusterer in Phase 2.8) through the coordinator to the orchestrator in both process_packet and generate_periodic_summary paths
+- **Advisory reasoning** — includes active regime label, e.g., `[regime 2:high-wob]`; WellControl CRITICAL severity override applied after re-normalisation and unaffected by regime weighting
+- **7 new regime tests** — all 4 regimes sum to 1.0, each regime elevates the expected specialist, reasoning includes regime label, out-of-range clamp verified; **260 total unit tests passing**
+
+**CfC extensions** (supporting phases 5–6):
+
+- **`src/cfc/regime_clusterer.rs`** — k-means clustering of the 8 CfC motor neuron outputs into 4 regime labels (0–3); runs each packet, writes `regime_id` onto `WitsPacket` before it enters the pipeline
+- **`src/cfc/formation_detector.rs`** — CfC motor-output pattern analysis for formation boundary detection; supplements the d-exponent shift detector in the ML engine
+
+### v2.2 - Structured Knowledge Base
+
+**Per-well knowledge base** (`src/knowledge_base/`, `src/types/knowledge_base.rs`):
+- **Directory-based KB** replaces flat `well_prognosis.toml` — separates geology, pre-spud engineering, mid-well ML snapshots, and post-well performance into a structured file tree per well per field
+- **Assembler** (`assembler.rs`) — merges field geology + well-specific pre-spud + N offset wells into a `FormationPrognosis` at runtime; geologist sets safety envelope, offset wells set target within it; default parameter derivation from hardness (soft/medium/hard)
+- **Mid-well snapshots** (`mid_well.rs`) — writes hourly ML performance snapshots during drilling; enforces cap (168 hot TOML files, then compress with zstd, then delete beyond 30-day retention)
+- **Post-well generator** (`post_well.rs`) — aggregates all mid-well snapshots into per-formation `PostWellFormationPerformance` files on well completion; compresses mid-well and pre-spud to cold storage
+- **Directory watcher** (`watcher.rs`) — polling-based (30s interval) background task detects new/modified files and hot-reloads the assembled prognosis via `Arc<RwLock>`
+- **Transparent compression** (`compressor.rs`) — reads both `.toml` and `.toml.zst` transparently; zstd level 3 matching fleet convention
+- **Layout helpers** (`layout.rs`) — path construction, directory creation, sibling well enumeration
+- **Legacy fallback** — when `SAIREN_KB` env var is not set, falls back to `FormationPrognosis::load()` from flat TOML
+
+**Fleet performance sharing** (`knowledge_base/fleet_bridge.rs`, `hub/api/performance.rs`):
+- **Upload** — `POST /api/fleet/performance` receives zstd-compressed post-well performance data, upserts into `fleet_performance` PostgreSQL table with `UNIQUE(well_id, formation_name)` constraint
+- **Download** — `GET /api/fleet/performance?field=&since=&exclude_rig=` returns all performance records for a field; spoke writes received files into KB directory, watcher detects and triggers reassembly
+- **Fleet bridge** — `upload_post_well()` sends all per-formation files after well completion; `sync_performance()` pulls offset data during fleet sync loop
+- **Migration** (`migrations/002_fleet_performance.sql`) — new `fleet_performance` table with indexes on field, rig_id, and updated_at
+
+**Migration tool** (`knowledge_base/migration.rs`):
+- `sairen-os migrate-kb --from well_prognosis.toml --to ./knowledge-base/` — splits flat prognosis into geology, pre-spud engineering, and per-offset-well performance files
+- Verified round-trip: migrate Volve data → reassemble → all 5 formations match original
+
+**Pipeline integration** (`pipeline/coordinator.rs`, `main.rs`):
+- `PipelineCoordinator` gains optional `KnowledgeBase` field; all 4 constructors attempt KB init before falling back to flat prognosis
+- `process_packet()` reads dynamic prognosis from KB when available
+- ML scheduler writes mid-well snapshots after each successful analysis
+- KB watcher starts automatically on pipeline init
+
+**New feature flag**: `knowledge-base` (enabled by default, implies `zstd`)
+
+**Tests**: 17 new unit tests across all KB modules + 3 integration tests (migrate-and-assemble, offset-well assembly, full lifecycle)
 
 ### v2.1 - CfC Active Integration & WITSML Support
 
 **CfC moves from shadow mode to active pipeline participation:**
 
 - **Severity modulation** (`src/agents/tactical.rs`) — `cfc_adjust_severity()` mirrors ACI pattern: score < 0.3 → downgrade one level, 0.3-0.7 → no change, ≥ 0.7 → escalate one level; WellControl never downgraded below High
-- **CfC fields on AdvisoryTicket** (`src/types.rs`) — `CfcFeatureSurpriseInfo` struct (name, error, magnitude), `cfc_anomaly_score: Option<f64>` and `cfc_feature_surprises: Vec<CfcFeatureSurpriseInfo>` on every ticket
+- **CfC fields on AdvisoryTicket** (`src/types/ticket.rs`) — `CfcFeatureSurpriseInfo` struct (name, error, magnitude), `cfc_anomaly_score: Option<f64>` and `cfc_feature_surprises: Vec<CfcFeatureSurpriseInfo>` on every ticket
 - **Strategic LLM context** (`src/llm/strategic_llm.rs`) — CfC section injected into advisory prompt with anomaly score, health score, and top 5 surprised features with direction and magnitude
 - **Strategic tiebreaker** (`src/agents/strategic.rs`) — `cfc_tiebreak()` resolves Uncertain verifications across all 5 category verifiers: score ≥ 0.7 → Confirmed (CfC corroborates), score < 0.2 → Rejected (CfC sees nothing)
 - **Trace logging** — CfC data logged at both tactical creation and strategic verification stages
