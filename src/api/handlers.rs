@@ -1,9 +1,8 @@
 //! API route handlers
 //!
 //! Request handling logic for all API endpoints including:
-//! - Health status from LLM analysis
-//! - System status and learning progress
-//! - Frequency spectrum data for visualization
+//! - Drilling health status and advisory data
+//! - System status with WITS drilling parameters
 //! - Baseline learning status and dynamic thresholds
 
 use axum::{extract::State, Json};
@@ -15,8 +14,10 @@ use tokio::sync::RwLock;
 
 use crate::baseline::{wits_metrics, LearningStatus, ThresholdManager};
 use crate::pipeline::AppState;
-use crate::processing::calculate_bearing_frequencies;
 use crate::ml_engine::{MLInsightsStorage, OptimalFinder};
+use axum::extract::Query;
+use axum::http::StatusCode;
+use axum::response::{IntoResponse, Response};
 
 // ============================================================================
 // API State
@@ -27,8 +28,6 @@ use crate::ml_engine::{MLInsightsStorage, OptimalFinder};
 pub struct DashboardState {
     /// Application state from the pipeline
     pub app_state: Arc<RwLock<AppState>>,
-    /// Historical analysis storage
-    pub storage: Option<crate::storage::AnalysisStorage>,
     /// Strategic report storage
     pub strategic_storage: Option<crate::storage::StrategicStorage>,
     /// Optional threshold manager for baseline status
@@ -41,64 +40,14 @@ pub struct DashboardState {
 
 impl DashboardState {
     /// Create a new DashboardState with storage
-    pub fn new_with_storage(
-        app_state: Arc<RwLock<AppState>>,
-        storage: crate::storage::AnalysisStorage,
-    ) -> Self {
-        Self {
-            app_state,
-            storage: Some(storage),
-            strategic_storage: None,
-            threshold_manager: None,
-            equipment_id: "RIG".to_string(),
-            ml_storage: None,
-        }
-    }
-
-    /// Create a new DashboardState with both tactical and strategic storage
-    pub fn new_with_all_storage(
-        app_state: Arc<RwLock<AppState>>,
-        storage: crate::storage::AnalysisStorage,
-        strategic_storage: crate::storage::StrategicStorage,
-    ) -> Self {
-        Self {
-            app_state,
-            storage: Some(storage),
-            strategic_storage: Some(strategic_storage),
-            threshold_manager: None,
-            equipment_id: "RIG".to_string(),
-            ml_storage: None,
-        }
-    }
-
-    /// Create a new DashboardState with full support including baseline thresholds
-    pub fn new_with_baseline(
-        app_state: Arc<RwLock<AppState>>,
-        storage: crate::storage::AnalysisStorage,
-        strategic_storage: crate::storage::StrategicStorage,
-        threshold_manager: Arc<std::sync::RwLock<ThresholdManager>>,
-        equipment_id: &str,
-    ) -> Self {
-        Self {
-            app_state,
-            storage: Some(storage),
-            strategic_storage: Some(strategic_storage),
-            threshold_manager: Some(threshold_manager),
-            equipment_id: equipment_id.to_string(),
-            ml_storage: None,
-        }
-    }
-
-    /// Create a new DashboardState with storage and thresholds (no strategic storage)
+    /// Create a new DashboardState with thresholds
     pub fn new_with_storage_and_thresholds(
         app_state: Arc<RwLock<AppState>>,
-        storage: crate::storage::AnalysisStorage,
         threshold_manager: Arc<std::sync::RwLock<ThresholdManager>>,
         equipment_id: &str,
     ) -> Self {
         Self {
             app_state,
-            storage: Some(storage),
             strategic_storage: None,
             threshold_manager: Some(threshold_manager),
             equipment_id: equipment_id.to_string(),
@@ -106,20 +55,6 @@ impl DashboardState {
         }
     }
 
-    /// Create a new DashboardState with ML storage
-    pub fn new_with_ml_storage(
-        app_state: Arc<RwLock<AppState>>,
-        ml_storage: Arc<MLInsightsStorage>,
-    ) -> Self {
-        Self {
-            app_state,
-            storage: None,
-            strategic_storage: None,
-            threshold_manager: None,
-            equipment_id: "RIG".to_string(),
-            ml_storage: Some(ml_storage),
-        }
-    }
 }
 
 // ============================================================================
@@ -153,8 +88,8 @@ pub struct HealthResponse {
 pub async fn get_health(State(state): State<DashboardState>) -> Json<HealthResponse> {
     let app_state = state.app_state.read().await;
 
-    // Get MSE efficiency and risk level from strategic advisory if available
-    let (mse_efficiency, risk_level) = match &app_state.latest_strategic_report {
+    // Derive health from strategic advisory
+    let (mse_efficiency, risk_level) = match &app_state.latest_advisory {
         Some(advisory) => (
             Some(advisory.efficiency_score as f64),
             Some(format!("{:?}", advisory.risk_level)),
@@ -162,40 +97,25 @@ pub async fn get_health(State(state): State<DashboardState>) -> Json<HealthRespo
         None => (None, None),
     };
 
-    match &app_state.latest_health {
-        Some(health) => Json(HealthResponse {
-            health_score: health.health_score,
-            severity: health.severity.to_string(),
-            diagnosis: health.diagnosis.clone(),
-            recommended_action: health.recommended_action.clone(),
-            timestamp: health.timestamp,
-            confidence: health.confidence,
-            rpm: health.rpm,
-            mse_efficiency,
-            risk_level,
-        }),
-        None => {
-            // Use strategic advisory for diagnosis if available
-            let (diagnosis, action) = match &app_state.latest_strategic_report {
-                Some(advisory) => (advisory.reasoning.clone(), advisory.recommendation.clone()),
-                None => (
-                    "System initializing, no analysis performed yet. Collecting baseline data...".to_string(),
-                    "Wait for learning phase to complete.".to_string(),
-                ),
-            };
-            Json(HealthResponse {
-                health_score: mse_efficiency.unwrap_or(100.0),
-                severity: risk_level.clone().unwrap_or_else(|| "Healthy".to_string()),
-                diagnosis,
-                recommended_action: action,
-                timestamp: Utc::now(),
-                confidence: 0.0,
-                rpm: app_state.current_rpm,
-                mse_efficiency,
-                risk_level,
-            })
-        }
-    }
+    let (diagnosis, action) = match &app_state.latest_advisory {
+        Some(advisory) => (advisory.reasoning.clone(), advisory.recommendation.clone()),
+        None => (
+            "System initializing, no analysis performed yet. Collecting baseline data...".to_string(),
+            "Wait for learning phase to complete.".to_string(),
+        ),
+    };
+
+    Json(HealthResponse {
+        health_score: mse_efficiency.unwrap_or(100.0),
+        severity: risk_level.clone().unwrap_or_else(|| "Healthy".to_string()),
+        diagnosis,
+        recommended_action: action,
+        timestamp: Utc::now(),
+        confidence: 0.0,
+        rpm: app_state.current_rpm,
+        mse_efficiency,
+        risk_level,
+    })
 }
 
 // ============================================================================
@@ -213,10 +133,6 @@ pub struct StatusResponse {
     pub operation: String,
     /// Short code for operation (DRILL, MILL, CDO, CIRC, STATIC)
     pub operation_code: String,
-    /// Whether system is in learning phase
-    pub learning_phase: bool,
-    /// Learning progress (0.0 to 1.0)
-    pub learning_progress: f64,
     /// Total analyses performed
     pub total_analyses: u64,
     /// Uptime in seconds
@@ -260,17 +176,6 @@ pub struct StatusResponse {
     /// ECD margin to fracture pressure in ppg
     pub ecd_margin: f64,
 
-    // === Legacy fields for compatibility ===
-    /// Current operating RPM (legacy)
-    pub current_rpm: f64,
-    /// Current hookload in Newtons (legacy)
-    pub hookload: f64,
-    /// Current flow rate in bbl/min (legacy)
-    pub flow_rate: f64,
-    /// Motor temperatures (legacy)
-    pub motor_temps: [f64; 4],
-    /// Gearbox temperatures (legacy)
-    pub gearbox_temps: [f64; 2],
 }
 
 /// GET /api/v1/status - Get system status with WITS drilling parameters
@@ -317,8 +222,6 @@ pub async fn get_status(State(state): State<DashboardState>) -> Json<StatusRespo
         rig_state,
         operation,
         operation_code,
-        learning_phase: app_state.learning_phase,
-        learning_progress: app_state.learning_progress,
         total_analyses: app_state.total_analyses,
         uptime_secs: app_state.uptime_secs(),
         samples_collected: app_state.samples_collected,
@@ -340,179 +243,9 @@ pub async fn get_status(State(state): State<DashboardState>) -> Json<StatusRespo
         ecd,
         gas_units,
         ecd_margin,
-        // Legacy fields
-        current_rpm: app_state.current_rpm,
-        hookload: app_state.hookload,
-        flow_rate: app_state.flow_rate,
-        motor_temps: app_state.motor_temps,
-        gearbox_temps: app_state.gearbox_temps,
     })
 }
 
-// ============================================================================
-// Spectrum Endpoint
-// ============================================================================
-
-/// Frequency spectrum response for visualization
-#[derive(Debug, Serialize)]
-pub struct SpectrumResponse {
-    /// Frequency bins (Hz)
-    pub frequencies: Vec<f64>,
-    /// Magnitude values (g)
-    pub magnitudes: Vec<f64>,
-    /// Current RPM
-    pub rpm: f64,
-    /// Ball Pass Frequency Outer race
-    pub bpfo_freq: f64,
-    /// Ball Pass Frequency Inner race
-    pub bpfi_freq: f64,
-    /// Ball Spin Frequency
-    pub bsf_freq: f64,
-    /// Fundamental Train Frequency
-    pub ftf_freq: f64,
-    /// 1× RPM frequency
-    pub one_x_freq: f64,
-    /// 2× RPM frequency
-    pub two_x_freq: f64,
-    /// Overall RMS value
-    pub rms: f64,
-    /// Spectrum timestamp
-    pub timestamp: DateTime<Utc>,
-}
-
-/// GET /api/v1/spectrum - Get current frequency spectrum
-pub async fn get_spectrum(State(state): State<DashboardState>) -> Json<SpectrumResponse> {
-    let app_state = state.app_state.read().await;
-    let rpm = app_state.current_rpm;
-    let bearing_freqs = calculate_bearing_frequencies(rpm);
-
-    match &app_state.latest_spectrum {
-        Some(spectrum) => {
-            // Calculate RMS
-            let rms = if spectrum.magnitudes.is_empty() {
-                0.0
-            } else {
-                let sum_squares: f64 = spectrum.magnitudes.iter().map(|m| m * m).sum();
-                (sum_squares / spectrum.magnitudes.len() as f64).sqrt()
-            };
-
-            // Downsample if too many points (keep every Nth point for visualization)
-            let max_points = 500;
-            let (frequencies, magnitudes) = if spectrum.frequencies.len() > max_points {
-                let step = spectrum.frequencies.len() / max_points;
-                let freqs: Vec<f64> = spectrum.frequencies.iter().step_by(step).copied().collect();
-                let mags: Vec<f64> = spectrum.magnitudes.iter().step_by(step).copied().collect();
-                (freqs, mags)
-            } else {
-                (spectrum.frequencies.clone(), spectrum.magnitudes.clone())
-            };
-
-            Json(SpectrumResponse {
-                frequencies,
-                magnitudes,
-                rpm,
-                bpfo_freq: bearing_freqs.bpfo,
-                bpfi_freq: bearing_freqs.bpfi,
-                bsf_freq: bearing_freqs.bsf,
-                ftf_freq: bearing_freqs.ftf,
-                one_x_freq: bearing_freqs.one_x,
-                two_x_freq: bearing_freqs.two_x,
-                rms,
-                timestamp: Utc::now(),
-            })
-        }
-        None => Json(SpectrumResponse {
-            frequencies: vec![],
-            magnitudes: vec![],
-            rpm,
-            bpfo_freq: bearing_freqs.bpfo,
-            bpfi_freq: bearing_freqs.bpfi,
-            bsf_freq: bearing_freqs.bsf,
-            ftf_freq: bearing_freqs.ftf,
-            one_x_freq: bearing_freqs.one_x,
-            two_x_freq: bearing_freqs.two_x,
-            rms: 0.0,
-            timestamp: Utc::now(),
-        }),
-    }
-}
-
-// ============================================================================
-// TTF (Time to Failure) Endpoint
-// ============================================================================
-
-/// Time to Failure response with physics-based predictions
-#[derive(Debug, Serialize)]
-pub struct TtfResponse {
-    /// Bearing L10 life in hours (ISO 281)
-    /// Time at which 10% of identical bearings would fail under these conditions
-    pub l10_life_hours: f64,
-    /// Cumulative damage index (Miner's rule)
-    /// 0.0 = no damage, 1.0 = theoretical failure point
-    pub cumulative_damage: f64,
-    /// Wear acceleration factor
-    /// > 1.0 indicates accelerating wear, < 1.0 indicates decelerating wear
-    pub wear_acceleration: f64,
-    /// Remaining useful life estimate in hours (conservative estimate)
-    pub remaining_life_hours: f64,
-    /// Health status based on L10 life
-    pub status: String,
-    /// Severity level for TTF
-    pub severity: String,
-    /// Current operating RPM
-    pub rpm: f64,
-    /// Current hookload (N)
-    pub hookload: f64,
-    /// Timestamp
-    pub timestamp: DateTime<Utc>,
-}
-
-/// GET /api/v1/ttf - Get Time to Failure predictions
-pub async fn get_ttf(State(state): State<DashboardState>) -> Json<TtfResponse> {
-    let app_state = state.app_state.read().await;
-
-    // Calculate remaining life based on L10 and cumulative damage
-    let l10_life = app_state.l10_life_hours;
-    let cumulative_damage = app_state.cumulative_damage;
-
-    // Conservative remaining life estimate
-    // Takes the minimum of L10 prediction and damage-based estimate
-    let damage_based_life = if cumulative_damage > 0.0 && cumulative_damage < 1.0 {
-        // Estimate based on current damage rate
-        l10_life * (1.0 - cumulative_damage)
-    } else {
-        l10_life
-    };
-
-    let remaining_life = damage_based_life.min(l10_life);
-
-    // Determine status and severity based on remaining life
-    let (status, severity) = if remaining_life == f64::MAX || remaining_life > 720.0 {
-        ("Healthy".to_string(), "Healthy".to_string())
-    } else if remaining_life > 168.0 {
-        ("Good".to_string(), "Watch".to_string())
-    } else if remaining_life > 24.0 {
-        ("Schedule Maintenance".to_string(), "Warning".to_string())
-    } else {
-        ("Immediate Attention Required".to_string(), "Critical".to_string())
-    };
-
-    // Cap display values for infinity
-    let display_l10 = if l10_life == f64::MAX { 10000.0 } else { l10_life };
-    let display_remaining = if remaining_life == f64::MAX { 10000.0 } else { remaining_life };
-
-    Json(TtfResponse {
-        l10_life_hours: display_l10,
-        cumulative_damage,
-        wear_acceleration: app_state.wear_acceleration,
-        remaining_life_hours: display_remaining,
-        status,
-        severity,
-        rpm: app_state.current_rpm,
-        hookload: app_state.hookload,
-        timestamp: Utc::now(),
-    })
-}
 
 // ============================================================================
 // Legacy Endpoints (kept for compatibility)
@@ -538,286 +271,10 @@ pub async fn legacy_health_check(
     })
 }
 
-// ============================================================================
-// Historical Analysis Endpoints
-// ============================================================================
-
-use axum::extract::Path;
-use axum::http::StatusCode;
-use axum::response::{Html, IntoResponse, Response};
-
-/// Historical analysis entry
-#[derive(Debug, Serialize)]
-pub struct HistoryEntry {
-    pub timestamp: DateTime<Utc>,
-    pub health_score: f64,
-    pub severity: String,
-    pub diagnosis: String,
-    pub recommended_action: String,
-    pub confidence: f64,
-    pub rpm: f64,
-}
-
-/// GET /api/v1/history - Get recent analysis history
-pub async fn get_history(State(state): State<DashboardState>) -> Response {
-    match &state.storage {
-        Some(storage) => match storage.get_recent_history(50) {
-            Ok(assessments) => {
-                let history: Vec<HistoryEntry> = assessments
-                    .into_iter()
-                    .map(|a| HistoryEntry {
-                        timestamp: a.timestamp,
-                        health_score: a.health_score,
-                        severity: a.severity.to_string(),
-                        diagnosis: a.diagnosis,
-                        recommended_action: a.recommended_action,
-                        confidence: a.confidence,
-                        rpm: a.rpm,
-                    })
-                    .collect();
-
-                (StatusCode::OK, Json(history)).into_response()
-            }
-            Err(e) => {
-                tracing::error!("Failed to fetch history: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to fetch history: {}", e),
-                )
-                    .into_response()
-            }
-        },
-        None => (StatusCode::SERVICE_UNAVAILABLE, "Storage not available").into_response(),
-    }
-}
-
-/// GET /api/v1/report/{timestamp} - Generate shift report
-pub async fn get_report(
-    State(state): State<DashboardState>,
-    Path(timestamp_str): Path<String>,
-) -> Response {
-    // Parse timestamp
-    let timestamp = match DateTime::parse_from_rfc3339(&timestamp_str) {
-        Ok(ts) => ts.with_timezone(&Utc),
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                "Invalid timestamp format. Use RFC3339 format (e.g., 2026-01-19T12:00:00Z)",
-            )
-                .into_response()
-        }
-    };
-
-    // Get assessment from storage
-    let assessment = match &state.storage {
-        Some(storage) => match storage.get_by_timestamp_fuzzy(timestamp, 5) {
-            Ok(Some(assessment)) => assessment,
-            Ok(None) => {
-                return (
-                    StatusCode::NOT_FOUND,
-                    format!("No analysis found near timestamp {}", timestamp_str),
-                )
-                    .into_response()
-            }
-            Err(e) => {
-                tracing::error!("Failed to fetch assessment: {}", e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    format!("Failed to fetch assessment: {}", e),
-                )
-                    .into_response();
-            }
-        },
-        None => return (StatusCode::SERVICE_UNAVAILABLE, "Storage not available").into_response(),
-    };
-
-    // Generate HTML report
-    let report_html = generate_shift_report(&assessment);
-    Html(report_html).into_response()
-}
-
-/// Generate an HTML shift report
-fn generate_shift_report(assessment: &crate::director::HealthAssessment) -> String {
-    let severity_color = match assessment.severity {
-        crate::director::Severity::Healthy => "green",
-        crate::director::Severity::Watch => "yellow",
-        crate::director::Severity::Warning => "orange",
-        crate::director::Severity::Critical => "red",
-    };
-
-    format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>SAIREN Shift Report</title>
-    <style>
-        body {{
-            font-family: 'Courier New', monospace;
-            max-width: 900px;
-            margin: 40px auto;
-            padding: 20px;
-            background: #f5f5f5;
-        }}
-        .report {{
-            background: white;
-            padding: 30px;
-            border: 2px solid #333;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-        }}
-        .header {{
-            border-bottom: 3px double #333;
-            margin-bottom: 20px;
-            padding-bottom: 20px;
-        }}
-        h1 {{
-            margin: 0;
-            font-size: 24px;
-            letter-spacing: 2px;
-        }}
-        .timestamp {{
-            color: #666;
-            font-size: 14px;
-            margin-top: 5px;
-        }}
-        .section {{
-            margin: 20px 0;
-            padding: 15px;
-            border-left: 4px solid #ddd;
-        }}
-        .section-title {{
-            font-weight: bold;
-            font-size: 16px;
-            margin-bottom: 10px;
-            text-transform: uppercase;
-        }}
-        .metric {{
-            margin: 10px 0;
-            padding: 10px;
-            background: #f9f9f9;
-        }}
-        .severity {{
-            display: inline-block;
-            padding: 5px 15px;
-            background: {};
-            color: white;
-            font-weight: bold;
-            border-radius: 3px;
-        }}
-        .footer {{
-            margin-top: 30px;
-            padding-top: 20px;
-            border-top: 2px solid #ddd;
-            text-align: center;
-            color: #666;
-            font-size: 12px;
-        }}
-        .ascii-art {{
-            font-family: monospace;
-            background: #1e1e1e;
-            color: #0f0;
-            padding: 15px;
-            overflow-x: auto;
-            border-radius: 4px;
-        }}
-        @media print {{
-            body {{
-                background: white;
-            }}
-            .report {{
-                box-shadow: none;
-            }}
-        }}
-    </style>
-</head>
-<body>
-    <div class="report">
-        <div class="header">
-            <h1>⚙️ SAIREN SHIFT REPORT</h1>
-            <div class="timestamp">Generated: {}</div>
-            <div class="timestamp">Analysis Timestamp: {}</div>
-        </div>
-
-        <div class="section">
-            <div class="section-title">Executive Summary</div>
-            <div class="metric">
-                <strong>Health Score:</strong> {:.1} / 100
-            </div>
-            <div class="metric">
-                <strong>Severity:</strong> <span class="severity">{}</span>
-            </div>
-            <div class="metric">
-                <strong>Operating RPM:</strong> {:.1} RPM
-            </div>
-            <div class="metric">
-                <strong>Confidence:</strong> {:.1}%
-            </div>
-        </div>
-
-        <div class="section">
-            <div class="section-title">Diagnosis</div>
-            <div class="metric">
-                {}
-            </div>
-        </div>
-
-        <div class="section">
-            <div class="section-title">Recommended Action</div>
-            <div class="metric">
-                {}
-            </div>
-        </div>
-
-        <div class="section">
-            <div class="section-title">Vibration Signature (ASCII Representation)</div>
-            <div class="ascii-art">
-{}
-            </div>
-        </div>
-
-        <div class="footer">
-            <div>SAIREN - TDS-11SA Top Drive Monitoring System</div>
-            <div>Confidential - For Authorized Personnel Only</div>
-        </div>
-    </div>
-</body>
-</html>"#,
-        severity_color,
-        Utc::now().format("%Y-%m-%d %H:%M:%S UTC"),
-        assessment.timestamp.format("%Y-%m-%d %H:%M:%S UTC"),
-        assessment.health_score,
-        assessment.severity,
-        assessment.rpm,
-        assessment.confidence * 100.0,
-        assessment.diagnosis,
-        assessment.recommended_action,
-        generate_ascii_spectrum(),
-    )
-}
-
-/// Generate a simple ASCII art representation of frequency spectrum
-fn generate_ascii_spectrum() -> String {
-    let mut output = String::new();
-    output.push_str("Frequency Analysis:\n");
-    output.push_str("╔══════════════════════════════════════════════════════╗\n");
-    output.push_str("║  Freq (Hz)  │  Amplitude  │  Status                ║\n");
-    output.push_str("╠══════════════════════════════════════════════════════╣\n");
-    output.push_str("║  BPFO       │  ▓▓▓░░░░░░░ │  Normal                ║\n");
-    output.push_str("║  BPFI       │  ▓▓░░░░░░░░ │  Normal                ║\n");
-    output.push_str("║  BSF        │  ▓▓░░░░░░░░ │  Normal                ║\n");
-    output.push_str("║  FTF        │  ▓▓▓▓▓░░░░░ │  Elevated              ║\n");
-    output.push_str("║  1× RPM     │  ▓▓▓░░░░░░░ │  Normal                ║\n");
-    output.push_str("║  2× RPM     │  ▓▓░░░░░░░░ │  Normal                ║\n");
-    output.push_str("╚══════════════════════════════════════════════════════╝\n");
-    output.push_str("\nNote: This is a simplified representation.\n");
-    output.push_str("Refer to the dashboard for detailed spectrum analysis.");
-    output
-}
 
 // ============================================================================
 // Strategic Report Endpoints
 // ============================================================================
-
-use axum::extract::Query;
 
 /// Query parameters for strategic endpoints
 #[derive(Debug, serde::Deserialize)]
@@ -968,6 +425,16 @@ pub struct DrillingMetricsResponse {
     pub trend: String,
     /// Specialist votes (if available)
     pub votes: Option<SpecialistVotesResponse>,
+    /// CfC-detected formation transition (if recent)
+    pub cfc_formation_transition: Option<FormationTransitionInfo>,
+}
+
+/// CfC formation transition detection info
+#[derive(Debug, Serialize)]
+pub struct FormationTransitionInfo {
+    pub timestamp: u64,
+    pub bit_depth: f64,
+    pub surprised_features: Vec<String>,
 }
 
 /// Specialist votes for advisory panel
@@ -1022,7 +489,7 @@ pub async fn get_drilling_metrics(State(state): State<DashboardState>) -> Json<D
     };
 
     // Get specialist votes from strategic advisory if available
-    let votes = app_state.latest_strategic_report.as_ref().map(|advisory| {
+    let votes = app_state.latest_advisory.as_ref().map(|advisory| {
         // Map votes by specialist name
         let mut mse_vote = "--".to_string();
         let mut hydraulic_vote = "--".to_string();
@@ -1048,6 +515,21 @@ pub async fn get_drilling_metrics(State(state): State<DashboardState>) -> Json<D
         }
     });
 
+    // Check for CfC formation transition (within last 60 seconds)
+    let cfc_transition = app_state.latest_formation_transition.as_ref().and_then(|event| {
+        let latest_ts = app_state.latest_wits_packet.as_ref().map(|p| p.timestamp).unwrap_or(0);
+        if latest_ts.saturating_sub(event.timestamp) <= 60 {
+            Some(FormationTransitionInfo {
+                timestamp: event.timestamp,
+                bit_depth: event.bit_depth,
+                surprised_features: event.surprised_features.clone(),
+            })
+        } else {
+            None
+        }
+    });
+    let formation_change = cfc_transition.is_some();
+
     Json(DrillingMetricsResponse {
         mse,
         mse_efficiency,
@@ -1056,9 +538,10 @@ pub async fn get_drilling_metrics(State(state): State<DashboardState>) -> Json<D
         d_exponent,
         dxc,
         formation_type: "Normal".to_string(),
-        formation_change: false,
+        formation_change,
         trend: "Stable".to_string(),
         votes,
+        cfc_formation_transition: cfc_transition,
     })
 }
 
@@ -1173,7 +656,7 @@ pub async fn get_current_diagnosis(State(state): State<DashboardState>) -> Respo
     let app_state = state.app_state.read().await;
 
     // Check if we have a strategic advisory
-    match &app_state.latest_strategic_report {
+    match &app_state.latest_advisory {
         Some(advisory) => {
             let response = DiagnosisResponse::from(advisory);
             (StatusCode::OK, Json(response)).into_response()
@@ -1529,6 +1012,7 @@ pub struct MLOptimalParams {
     pub mse_efficiency: f64,
     pub composite_score: f64,
     pub efficiency_rating: String,
+    pub regime_id: Option<u8>,
 }
 
 /// Correlation info for API
@@ -1564,6 +1048,7 @@ impl From<&crate::types::MLInsightsReport> for MLReportSummary {
                         insights.optimal_params.composite_score,
                     )
                     .to_string(),
+                    regime_id: insights.optimal_params.regime_id,
                 }),
                 confidence: Some(insights.confidence.to_string()),
                 sample_count: Some(insights.sample_count),
@@ -1693,6 +1178,7 @@ pub async fn get_ml_optimal(
                                 insights.optimal_params.composite_score,
                             )
                             .to_string(),
+                            regime_id: insights.optimal_params.regime_id,
                         };
                         return (StatusCode::OK, Json(response)).into_response();
                     }
@@ -1809,7 +1295,7 @@ pub async fn get_critical_reports(
 
             // Summarize votes
             let votes_summary: Vec<String> = report.votes.iter()
-                .map(|v| format!("{} ({}%): {}", v.specialist, (v.weight * 100.0) as u8, v.vote))
+                .map(|v| format!("{} ({}%): {}", v.specialist, (v.weight * 100.0).clamp(0.0, 100.0) as u8, v.vote))
                 .collect();
 
             CriticalReportEntry {
@@ -2151,6 +1637,12 @@ pub async fn acknowledge_advisory(
         action_taken: request.action_taken,
     };
 
+    // Persist to sled before touching the in-memory list so the record
+    // survives even if the process is killed immediately after this write.
+    if let Err(e) = crate::storage::acks::persist(record.acknowledged_at, &record) {
+        warn!("Failed to persist acknowledgment: {}", e);
+    }
+
     // Store in the app state's acknowledgment log
     let mut app_state = state.app_state.write().await;
     app_state.acknowledgments.push(record.clone());
@@ -2240,7 +1732,7 @@ pub async fn get_shift_summary(
         (from, to)
     } else {
         let hours = query.hours.unwrap_or(12.0);
-        let duration_secs = (hours * 3600.0) as u64;
+        let duration_secs = (hours.max(0.0) * 3600.0) as u64;
         (now.saturating_sub(duration_secs), now)
     };
 
@@ -2284,6 +1776,112 @@ pub async fn get_shift_summary(
     })
 }
 
+// ============================================================================
+// Prometheus Metrics Endpoint (Item 4.1)
+// ============================================================================
+
+/// GET /api/v1/metrics
+///
+/// Returns runtime counters in Prometheus text format (version 0.0.4).
+/// No external crate required — gauges and counters are hand-formatted from
+/// `AppState` fields that are already maintained by the processing loop.
+///
+/// Exposed metrics:
+/// - `sairen_packets_total`       — cumulative WITS packets processed
+/// - `sairen_tickets_created_total` — advisory tickets generated
+/// - `sairen_tickets_verified_total` — tickets confirmed by strategic agent
+/// - `sairen_tickets_rejected_total` — tickets rejected as transient
+/// - `sairen_uptime_seconds`       — process uptime in seconds
+/// - `sairen_avg_mse_efficiency`   — current rolling MSE efficiency (gauge)
+pub async fn get_metrics(State(state): State<DashboardState>) -> impl IntoResponse {
+    let app_state = state.app_state.read().await;
+
+    let mut body = String::with_capacity(1024);
+
+    body.push_str("# HELP sairen_packets_total Total WITS packets processed\n");
+    body.push_str("# TYPE sairen_packets_total counter\n");
+    body.push_str(&format!("sairen_packets_total {}\n", app_state.packets_processed));
+
+    body.push_str("# HELP sairen_tickets_created_total Advisory tickets generated\n");
+    body.push_str("# TYPE sairen_tickets_created_total counter\n");
+    body.push_str(&format!("sairen_tickets_created_total {}\n", app_state.tickets_created));
+
+    body.push_str("# HELP sairen_tickets_verified_total Tickets confirmed by strategic agent\n");
+    body.push_str("# TYPE sairen_tickets_verified_total counter\n");
+    body.push_str(&format!("sairen_tickets_verified_total {}\n", app_state.tickets_verified));
+
+    body.push_str("# HELP sairen_tickets_rejected_total Tickets rejected as transient\n");
+    body.push_str("# TYPE sairen_tickets_rejected_total counter\n");
+    body.push_str(&format!("sairen_tickets_rejected_total {}\n", app_state.tickets_rejected));
+
+    body.push_str("# HELP sairen_uptime_seconds Process uptime in seconds\n");
+    body.push_str("# TYPE sairen_uptime_seconds gauge\n");
+    body.push_str(&format!("sairen_uptime_seconds {}\n", app_state.uptime_secs()));
+
+    if let Some(eff) = app_state.avg_mse_efficiency {
+        body.push_str("# HELP sairen_avg_mse_efficiency Rolling average MSE efficiency (0-100)\n");
+        body.push_str("# TYPE sairen_avg_mse_efficiency gauge\n");
+        body.push_str(&format!("sairen_avg_mse_efficiency {eff:.2}\n"));
+    }
+
+    (
+        axum::http::StatusCode::OK,
+        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        body,
+    )
+}
+
+// ─── Fleet Intelligence ───────────────────────────────────────────────────────
+
+/// GET /api/v1/fleet/intelligence
+///
+/// Returns locally cached hub intelligence outputs.  The cache is populated by
+/// `run_intelligence_sync` from `fleet/sync.rs` and written to
+/// `./data/fleet_intelligence.json`.
+///
+/// Query params:
+/// - `?type=benchmark` — filter by output_type
+/// - `?formation=Ekofisk` — filter by formation name
+#[cfg(feature = "fleet-client")]
+pub async fn get_fleet_intelligence(
+    Query(params): Query<FleetIntelligenceQuery>,
+) -> Json<Vec<crate::fleet::types::IntelligenceOutput>> {
+    let path = std::path::Path::new("./data/fleet_intelligence.json");
+
+    let outputs: Vec<crate::fleet::types::IntelligenceOutput> = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default();
+
+    let filtered: Vec<_> = outputs
+        .into_iter()
+        .filter(|o| {
+            if let Some(ref t) = params.r#type {
+                if o.output_type != *t {
+                    return false;
+                }
+            }
+            if let Some(ref f) = params.formation {
+                if o.formation_name.as_deref() != Some(f.as_str()) {
+                    return false;
+                }
+            }
+            true
+        })
+        .collect();
+
+    Json(filtered)
+}
+
+#[cfg(feature = "fleet-client")]
+#[derive(serde::Deserialize)]
+pub struct FleetIntelligenceQuery {
+    /// Filter by output_type: `benchmark`, `fingerprint`, `report`, `advisory`
+    pub r#type: Option<String>,
+    /// Filter by formation name
+    pub formation: Option<String>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2292,7 +1890,6 @@ mod tests {
     fn create_test_state() -> DashboardState {
         DashboardState {
             app_state: Arc::new(RwLock::new(AppState::default())),
-            storage: None,
             strategic_storage: None,
             threshold_manager: None,
             equipment_id: "RIG".to_string(),
@@ -2311,7 +1908,6 @@ mod tests {
     async fn test_get_status() {
         let state = create_test_state();
         let response = get_status(State(state)).await;
-        assert!(response.learning_phase);
         assert_eq!(response.total_analyses, 0);
     }
 
@@ -2321,14 +1917,6 @@ mod tests {
         let response = get_health(State(state)).await;
         assert_eq!(response.health_score, 100.0);
         assert_eq!(response.confidence, 0.0);
-    }
-
-    #[tokio::test]
-    async fn test_get_spectrum_empty() {
-        let state = create_test_state();
-        let response = get_spectrum(State(state)).await;
-        assert!(response.frequencies.is_empty());
-        assert!(response.magnitudes.is_empty());
     }
 
     #[tokio::test]

@@ -1,9 +1,9 @@
 //! API route definitions
 //!
-//! Organizes endpoints for the TDS Guardian dashboard:
-//! - /api/v1/health - LLM health assessment
-//! - /api/v1/status - System status and learning progress
-//! - /api/v1/spectrum - FFT spectrum data for visualization
+//! Organizes endpoints for the SAIREN-OS drilling intelligence dashboard:
+//! - /api/v1/health - Drilling health assessment
+//! - /api/v1/status - System status and WITS drilling parameters
+//! - /api/v1/drilling - MSE efficiency and formation analysis
 //! - /api/v1/verification - Latest fault verification result
 //! - /api/v1/baseline - Baseline learning status and thresholds
 
@@ -13,14 +13,10 @@ use super::handlers::{self, DashboardState};
 
 /// Create all API routes for the dashboard
 pub fn api_routes(state: DashboardState) -> Router {
-    Router::new()
+    let router = Router::new()
         .route("/health", get(handlers::get_health))
         .route("/status", get(handlers::get_status))
-        .route("/spectrum", get(handlers::get_spectrum))
-        .route("/ttf", get(handlers::get_ttf))
         .route("/drilling", get(handlers::get_drilling_metrics))
-        .route("/history", get(handlers::get_history))
-        .route("/report/:timestamp", get(handlers::get_report))
         .route("/strategic/hourly", get(handlers::get_hourly_reports))
         .route("/strategic/daily", get(handlers::get_daily_reports))
         .route("/verification", get(handlers::get_verification))
@@ -46,7 +42,17 @@ pub fn api_routes(state: DashboardState) -> Router {
         .route("/advisory/acknowledgments", get(handlers::get_acknowledgments))
         // Shift summary
         .route("/shift/summary", get(handlers::get_shift_summary))
-        .with_state(state)
+        // Prometheus metrics (item 4.1)
+        .route("/metrics", get(handlers::get_metrics));
+
+    // Fleet intelligence cache endpoint (fleet-client feature)
+    #[cfg(feature = "fleet-client")]
+    let router = router.route(
+        "/fleet/intelligence",
+        get(handlers::get_fleet_intelligence),
+    );
+
+    router.with_state(state)
 }
 
 /// Legacy health endpoint at root level
@@ -69,7 +75,6 @@ mod tests {
     fn create_test_state() -> DashboardState {
         DashboardState {
             app_state: Arc::new(RwLock::new(AppState::default())),
-            storage: None,
             strategic_storage: None,
             threshold_manager: None,
             equipment_id: "RIG".to_string(),
@@ -104,24 +109,6 @@ mod tests {
             .oneshot(
                 Request::builder()
                     .uri("/status")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(response.status(), StatusCode::OK);
-    }
-
-    #[tokio::test]
-    async fn test_api_routes_spectrum() {
-        let state = create_test_state();
-        let app = api_routes(state);
-
-        let response = app
-            .oneshot(
-                Request::builder()
-                    .uri("/spectrum")
                     .body(Body::empty())
                     .unwrap(),
             )

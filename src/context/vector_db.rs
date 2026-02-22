@@ -22,6 +22,11 @@ pub enum DocumentCategory {
     FailureMode,
     MaintenanceProcedure,
     OperationalLimit,
+    // Drilling-specific categories
+    WellControl,
+    DrillingEfficiency,
+    Hydraulics,
+    FormationEvaluation,
 }
 
 /// Static knowledge base - loaded once at startup
@@ -190,6 +195,136 @@ fn get_knowledge_base() -> &'static Vec<Document> {
                     "urgent".to_string(),
                 ],
                 category: DocumentCategory::MaintenanceProcedure,
+            },
+
+            // ── Drilling intelligence documents ───────────────────────────────
+            Document {
+                id: 13,
+                content: "Well control kick detection: flow imbalance >10 gpm sustained for >2 minutes \
+                          combined with pit volume gain >5 bbl indicates an influx. Shut in immediately \
+                          and initiate well control procedures.".to_string(),
+                keywords: vec![
+                    "well".to_string(),
+                    "control".to_string(),
+                    "kick".to_string(),
+                    "flow".to_string(),
+                    "imbalance".to_string(),
+                    "influx".to_string(),
+                    "pit".to_string(),
+                    "volume".to_string(),
+                    "gain".to_string(),
+                    "shut".to_string(),
+                    "circulation".to_string(),
+                ],
+                category: DocumentCategory::WellControl,
+            },
+            Document {
+                id: 14,
+                content: "Lost circulation indicators: flow-out drops below flow-in (negative imbalance >15 gpm) \
+                          with no corresponding pump rate change. Pit volume decreasing. \
+                          Reduce circulation rate and consider LCM pill.".to_string(),
+                keywords: vec![
+                    "lost".to_string(),
+                    "loss".to_string(),
+                    "circulation".to_string(),
+                    "flow".to_string(),
+                    "imbalance".to_string(),
+                    "pit".to_string(),
+                    "lcm".to_string(),
+                    "well".to_string(),
+                    "control".to_string(),
+                ],
+                category: DocumentCategory::WellControl,
+            },
+            Document {
+                id: 15,
+                content: "MSE (Mechanical Specific Energy) efficiency: optimal drilling achieved when MSE \
+                          efficiency >75%. Efficiency below 60% indicates bit balling, dysfunction, \
+                          or suboptimal WOB/RPM combination. Adjust parameters to reduce MSE.".to_string(),
+                keywords: vec![
+                    "mse".to_string(),
+                    "mechanical".to_string(),
+                    "specific".to_string(),
+                    "energy".to_string(),
+                    "efficiency".to_string(),
+                    "drilling".to_string(),
+                    "rop".to_string(),
+                    "optimization".to_string(),
+                    "wob".to_string(),
+                    "rpm".to_string(),
+                ],
+                category: DocumentCategory::DrillingEfficiency,
+            },
+            Document {
+                id: 16,
+                content: "ROP optimization: increase WOB in 2 klb increments every 5 minutes until \
+                          founder point. Founder detected when ROP stops increasing despite WOB increase. \
+                          Back off WOB 10% from founder point for optimal MSE.".to_string(),
+                keywords: vec![
+                    "rop".to_string(),
+                    "optimization".to_string(),
+                    "wob".to_string(),
+                    "founder".to_string(),
+                    "drilling".to_string(),
+                    "efficiency".to_string(),
+                    "mse".to_string(),
+                ],
+                category: DocumentCategory::DrillingEfficiency,
+            },
+            Document {
+                id: 17,
+                content: "Standpipe pressure (SPP) spike >300 psi above baseline may indicate string \
+                          washout, motor stall, or pack-off. ECD margin <0.2 ppg risks losses; \
+                          >fracture gradient risks formation fracture.".to_string(),
+                keywords: vec![
+                    "standpipe".to_string(),
+                    "spp".to_string(),
+                    "pressure".to_string(),
+                    "hydraulics".to_string(),
+                    "ecd".to_string(),
+                    "mud".to_string(),
+                    "weight".to_string(),
+                    "fracture".to_string(),
+                    "margin".to_string(),
+                ],
+                category: DocumentCategory::Hydraulics,
+            },
+            Document {
+                id: 18,
+                content: "ECD (Equivalent Circulating Density) management: ECD = static mud weight + \
+                          annular friction pressure. Monitor ECD margin to fracture gradient. \
+                          Reduce flow rate or mud weight if ECD exceeds safe window.".to_string(),
+                keywords: vec![
+                    "ecd".to_string(),
+                    "equivalent".to_string(),
+                    "circulating".to_string(),
+                    "density".to_string(),
+                    "mud".to_string(),
+                    "weight".to_string(),
+                    "hydraulics".to_string(),
+                    "pressure".to_string(),
+                    "annular".to_string(),
+                ],
+                category: DocumentCategory::Hydraulics,
+            },
+            Document {
+                id: 19,
+                content: "D-exponent (Dx) and corrected D-exponent (Dxc) are real-time pore pressure \
+                          indicators. Decreasing Dxc trend signals increasing pore pressure or formation \
+                          change. Dxc below 1.0 in normally-pressured intervals warrants mud weight review.".to_string(),
+                keywords: vec![
+                    "d-exponent".to_string(),
+                    "dxc".to_string(),
+                    "formation".to_string(),
+                    "pressure".to_string(),
+                    "pore".to_string(),
+                    "lithology".to_string(),
+                    "change".to_string(),
+                    "mud".to_string(),
+                    "weight".to_string(),
+                    "torque".to_string(),
+                ],
+                category: DocumentCategory::FormationEvaluation,
             },
         ]
     })
