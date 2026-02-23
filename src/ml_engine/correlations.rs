@@ -210,8 +210,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     #[test]

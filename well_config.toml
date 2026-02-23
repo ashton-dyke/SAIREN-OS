@@ -1,0 +1,32 @@
+# ==============================================================================
+# SAIREN-OS Well Configuration — Tuned for reduced noise
+# ==============================================================================
+# Only overriding values that differ from defaults.
+# Everything else falls back to built-in defaults.
+#
+# Key changes from defaults:
+#   - MSE warning: 70% -> 60% (less sensitive to minor inefficiency)
+#   - MSE poor:    50% -> 40% (only flags genuinely bad drilling)
+#   - Cooldown:    60s -> 180s (3 min between same-type alerts)
+# ==============================================================================
+
+[well]
+name  = "WELL-A1"
+field = "Volve"
+rig   = "RIG-001"
+
+# --- MSE: relaxed to reduce noise on optimization alerts ---
+[thresholds.mse]
+efficiency_optimal_percent = 85.0    # Above this = optimal (unchanged)
+efficiency_warning_percent = 60.0    # Was 70% — only alert when clearly inefficient
+efficiency_poor_percent    = 40.0    # Was 50% — only flag genuinely poor drilling
+
+# --- Advisory timing: longer cooldown to reduce repetitive alerts ---
+[advisory]
+default_cooldown_seconds  = 180     # Was 60s — 3 minutes between same-type alerts
+critical_bypass_cooldown  = true    # Safety-critical alerts still come through immediately
+
+# --- Campaign overrides: match the relaxed MSE thresholds ---
+[campaign.production]
+mse_efficiency_warning  = 60.0      # Was 70%
+mse_efficiency_poor     = 40.0      # Was 50%

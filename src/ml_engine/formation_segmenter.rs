@@ -136,6 +136,69 @@ impl FormationSegmenter {
         }
     }
 
+    /// Detect formation boundaries using both d-exponent shifts AND CfC transition timestamps.
+    ///
+    /// Merges boundaries from two sources:
+    /// 1. D-exponent >15% shift detector (existing algorithm)
+    /// 2. CfC feature surprise timestamps (early indicator)
+    ///
+    /// Duplicate/near-duplicate boundaries are deduplicated.
+    pub fn segment_with_cfc_boundaries(
+        packets: &[&WitsPacket],
+        cfc_transition_timestamps: &[u64],
+    ) -> Vec<FormationSegment> {
+        if packets.len() < 120 {
+            return vec![Self::single_segment(packets, 0)];
+        }
+
+        // Step 1: Get d-exponent boundary indices
+        let d_exp_segments = Self::segment(packets);
+        let mut boundary_indices: Vec<usize> = d_exp_segments
+            .iter()
+            .map(|s| s.packet_range.0)
+            .filter(|&idx| idx > 0) // skip the first segment start (always 0)
+            .collect();
+
+        // Step 2: Convert CfC timestamps to packet indices
+        for &ts in cfc_transition_timestamps {
+            if let Some(idx) = packets.iter().position(|p| p.timestamp >= ts) {
+                boundary_indices.push(idx);
+            }
+        }
+
+        // Step 3: Deduplicate and sort
+        boundary_indices.sort_unstable();
+        boundary_indices.dedup();
+        // Remove boundaries that are too close together (within 30 samples)
+        let mut deduped = Vec::new();
+        for &idx in &boundary_indices {
+            if deduped.last().map_or(true, |&last: &usize| idx.saturating_sub(last) >= 30) {
+                deduped.push(idx);
+            }
+        }
+
+        // Step 4: Split into segments
+        let d_exp_values: Vec<f64> = packets.iter().map(|p| p.d_exponent).collect();
+        let mut segments = Vec::new();
+        let mut prev = 0;
+        for &boundary in &deduped {
+            if boundary > prev && boundary < packets.len() {
+                segments.push(Self::create_segment(packets, &d_exp_values, prev, boundary));
+                prev = boundary;
+            }
+        }
+        // Final segment
+        if prev < packets.len() {
+            segments.push(Self::create_segment(packets, &d_exp_values, prev, packets.len()));
+        }
+
+        if segments.is_empty() {
+            segments.push(Self::single_segment(packets, 0));
+        }
+
+        segments
+    }
+
     /// Check if multiple segments indicate unstable formation
     ///
     /// Returns true if there are multiple segments and the largest
@@ -200,8 +263,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     #[test]

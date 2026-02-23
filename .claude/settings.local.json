@@ -3,7 +3,9 @@
     "allow": [
       "WebSearch",
       "Bash(cargo build:*)",
-      "Bash(cargo test:*)"
+      "Bash(cargo test:*)",
+      "Bash(cargo check:*)",
+      "Bash(curl:*)"
     ]
   }
 }

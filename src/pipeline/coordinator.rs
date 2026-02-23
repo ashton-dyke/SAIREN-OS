@@ -24,22 +24,18 @@ use crate::physics_engine;
 use crate::strategic::AdvisoryComposer;
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, Campaign, DrillingMetrics,
-    DrillingPhysicsReport, HistoryEntry, RigState, StrategicAdvisory,
-    VerificationResult, VerificationStatus, WitsPacket,
+    DrillingPhysicsReport, FormationPrognosis, HistoryEntry,
+    StrategicAdvisory, VerificationResult, VerificationStatus, WitsPacket,
 };
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use tracing::{debug, info, warn};
 
-#[cfg(feature = "llm")]
-use crate::llm::StrategicLLM;
-
-/// History buffer size (60 packets = 1 hour of 60-second samples)
-const HISTORY_BUFFER_SIZE: usize = 60;
-
-/// Periodic summary interval in seconds (10 minutes)
-const PERIODIC_SUMMARY_INTERVAL_SECS: u64 = 600;
+use crate::config::defaults::{
+    HISTORY_BUFFER_SIZE, PERIODIC_SUMMARY_INTERVAL_SECS,
+    MIN_PACKETS_FOR_PERIODIC_SUMMARY, CYCLE_TARGET_GPU_MS,
+};
 
 /// Pipeline Coordinator manages the 10-phase processing sequence
 pub struct PipelineCoordinator {
@@ -59,9 +55,6 @@ pub struct PipelineCoordinator {
     latest_advisory: Option<StrategicAdvisory>,
     /// Latest verification result (for monitoring verification system)
     latest_verification: Option<VerificationResult>,
-    /// Phase 7: Strategic LLM for diagnosis (optional, loaded at runtime)
-    #[cfg(feature = "llm")]
-    strategic_llm: Option<Arc<StrategicLLM>>,
     /// Statistics
     packets_processed: u64,
     tickets_created: u64,
@@ -72,12 +65,33 @@ pub struct PipelineCoordinator {
     last_periodic_summary_time: u64,
     /// Latest drilling metrics (from tactical agent)
     latest_metrics: Option<DrillingMetrics>,
+    /// Formation prognosis (loaded from TOML at startup)
+    formation_prognosis: Option<FormationPrognosis>,
+    /// Last formation name (for transition detection)
+    last_formation_name: Option<String>,
+    /// Proactive optimization engine
+    optimizer: crate::optimization::ParameterOptimizer,
+    /// Structured knowledge base (replaces flat prognosis when available)
+    #[cfg(feature = "knowledge-base")]
+    knowledge_base: Option<crate::knowledge_base::KnowledgeBase>,
 }
 
 impl PipelineCoordinator {
     /// Create a new pipeline coordinator (without LLM - use init_with_llm for LLM support)
     pub fn new() -> Self {
         info!("Initializing Pipeline Coordinator for drilling intelligence");
+
+        #[cfg(feature = "knowledge-base")]
+        let knowledge_base = crate::knowledge_base::KnowledgeBase::init();
+        #[cfg(feature = "knowledge-base")]
+        let formation_prognosis = if let Some(ref kb) = knowledge_base {
+            kb.prognosis()
+        } else {
+            FormationPrognosis::load()
+        };
+        #[cfg(not(feature = "knowledge-base"))]
+        let formation_prognosis = FormationPrognosis::load();
+
         Self {
             tactical_agent: TacticalAgent::new(),
             strategic_agent: StrategicAgent::new(),
@@ -87,8 +101,6 @@ impl PipelineCoordinator {
             history_buffer: VecDeque::with_capacity(HISTORY_BUFFER_SIZE),
             latest_advisory: None,
             latest_verification: None,
-            #[cfg(feature = "llm")]
-            strategic_llm: None,
             packets_processed: 0,
             tickets_created: 0,
             tickets_verified: 0,
@@ -96,36 +108,12 @@ impl PipelineCoordinator {
             strategic_analyses: 0,
             last_periodic_summary_time: 0,
             latest_metrics: None,
+            formation_prognosis,
+            last_formation_name: None,
+            optimizer: crate::optimization::ParameterOptimizer::new(300),
+            #[cfg(feature = "knowledge-base")]
+            knowledge_base,
         }
-    }
-
-    /// Create a new pipeline coordinator with LLM support
-    #[cfg(feature = "llm")]
-    pub async fn init_with_llm() -> anyhow::Result<Self> {
-        info!("Initializing Pipeline Coordinator with LLM support");
-        info!("Loading Strategic LLM for drilling advisory...");
-
-        let llm = StrategicLLM::init().await?;
-        info!("Strategic LLM loaded successfully");
-
-        Ok(Self {
-            tactical_agent: TacticalAgent::new(),
-            strategic_agent: StrategicAgent::new(),
-            orchestrator: Orchestrator::new(),
-            advisory_composer: AdvisoryComposer::new(),
-            knowledge_store: Box::new(crate::context::StaticKnowledgeBase),
-            history_buffer: VecDeque::with_capacity(HISTORY_BUFFER_SIZE),
-            latest_advisory: None,
-            latest_verification: None,
-            strategic_llm: Some(llm),
-            packets_processed: 0,
-            tickets_created: 0,
-            tickets_verified: 0,
-            tickets_rejected: 0,
-            strategic_analyses: 0,
-            last_periodic_summary_time: 0,
-            latest_metrics: None,
-        })
     }
 
     /// Create a new pipeline coordinator with dynamic thresholds support
@@ -138,6 +126,18 @@ impl PipelineCoordinator {
             "Initializing Pipeline Coordinator with dynamic thresholds (learning: {}, equipment: {})",
             start_in_learning_mode, equipment_id
         );
+
+        #[cfg(feature = "knowledge-base")]
+        let knowledge_base = crate::knowledge_base::KnowledgeBase::init();
+        #[cfg(feature = "knowledge-base")]
+        let formation_prognosis = if let Some(ref kb) = knowledge_base {
+            kb.prognosis()
+        } else {
+            FormationPrognosis::load()
+        };
+        #[cfg(not(feature = "knowledge-base"))]
+        let formation_prognosis = FormationPrognosis::load();
+
         Self {
             tactical_agent: TacticalAgent::new_with_thresholds(
                 &equipment_id,
@@ -154,8 +154,6 @@ impl PipelineCoordinator {
             history_buffer: VecDeque::with_capacity(HISTORY_BUFFER_SIZE),
             latest_advisory: None,
             latest_verification: None,
-            #[cfg(feature = "llm")]
-            strategic_llm: None,
             packets_processed: 0,
             tickets_created: 0,
             tickets_verified: 0,
@@ -163,62 +161,27 @@ impl PipelineCoordinator {
             strategic_analyses: 0,
             last_periodic_summary_time: 0,
             latest_metrics: None,
+            formation_prognosis,
+            last_formation_name: None,
+            optimizer: crate::optimization::ParameterOptimizer::new(300),
+            #[cfg(feature = "knowledge-base")]
+            knowledge_base,
         }
-    }
-
-    /// Create a new pipeline coordinator with both LLM and dynamic thresholds
-    #[cfg(feature = "llm")]
-    pub async fn init_with_llm_and_thresholds(
-        threshold_manager: Arc<RwLock<ThresholdManager>>,
-        equipment_id: String,
-        start_in_learning_mode: bool,
-    ) -> anyhow::Result<Self> {
-        info!(
-            "Initializing Pipeline Coordinator with LLM and dynamic thresholds (learning: {}, equipment: {})",
-            start_in_learning_mode, equipment_id
-        );
-        info!("Loading Strategic LLM...");
-
-        let llm = StrategicLLM::init().await?;
-        info!("Strategic LLM loaded successfully");
-
-        Ok(Self {
-            tactical_agent: TacticalAgent::new_with_thresholds(
-                &equipment_id,
-                threshold_manager.clone(),
-                start_in_learning_mode,
-            ),
-            strategic_agent: StrategicAgent::with_thresholds(
-                &equipment_id,
-                threshold_manager,
-            ),
-            orchestrator: Orchestrator::new(),
-            advisory_composer: AdvisoryComposer::new(),
-            knowledge_store: Box::new(crate::context::StaticKnowledgeBase),
-            history_buffer: VecDeque::with_capacity(HISTORY_BUFFER_SIZE),
-            latest_advisory: None,
-            latest_verification: None,
-            strategic_llm: Some(llm),
-            packets_processed: 0,
-            tickets_created: 0,
-            tickets_verified: 0,
-            tickets_rejected: 0,
-            strategic_analyses: 0,
-            last_periodic_summary_time: 0,
-            latest_metrics: None,
-        })
     }
 
     /// Process a WITS packet through the full pipeline
     ///
     /// Returns a StrategicAdvisory if:
-    /// 1. A CRITICAL ticket was created (immediate processing), OR
-    /// 2. 10 minutes have passed since last advisory (periodic summary)
+    /// 1. Any advisory ticket was created (immediate processing), OR
+    /// 2. No ticket was created but 10 minutes have elapsed (periodic summary)
     ///
+    /// Spam protection is provided upstream by the tactical agent's per-severity
+    /// cooldown (`default_cooldown_seconds` in `well_config.toml`), so all
+    /// confirmed tickets reach the orchestrator immediately regardless of severity.
     /// Periodic summaries represent the last 10 minutes of drilling activity.
     pub async fn process_packet(
         &mut self,
-        packet: &WitsPacket,
+        packet: &mut WitsPacket,
         campaign: Campaign,
     ) -> Option<StrategicAdvisory> {
         use crate::types::TicketSeverity;
@@ -235,11 +198,38 @@ impl PipelineCoordinator {
             "Phase 1: WITS packet ingested"
         );
 
+        // Phase 1.1: Input Sanitization
+        let quality = crate::acquisition::wits_parser::sanitize_packet(packet);
+        if !quality.usable {
+            warn!(issues = ?quality.issues, "Packet rejected by sanitizer — skipping");
+            return None;
+        }
+
         // Sync tactical agent campaign with AppState campaign
         self.tactical_agent.set_campaign(campaign);
 
         // PHASE 2-3: Tactical Agent (Basic Physics + Decision)
-        let (ticket_opt, metrics, history_entry) = self.tactical_agent.process(packet);
+        let has_active_advisory = self.latest_advisory.is_some();
+        let (ticket_opt, mut metrics, history_entry) = self.tactical_agent.process(packet, has_active_advisory);
+
+        // Phase 1.2: Enrich metrics with formation context
+        if let Some(formation) = self.current_formation_context(packet.bit_depth) {
+            let current_name = formation.name.clone();
+            let depth_into = packet.bit_depth - formation.depth_top_ft;
+
+            // Detect formation transitions
+            if self.last_formation_name.as_deref() != Some(&current_name) {
+                info!(
+                    from = ?self.last_formation_name,
+                    to = &current_name,
+                    depth = packet.bit_depth,
+                    "Formation transition detected"
+                );
+                self.last_formation_name = Some(current_name.clone());
+            }
+            metrics.current_formation = Some(current_name);
+            metrics.formation_depth_in_ft = Some(depth_into);
+        }
 
         // Store latest metrics for API/dashboard access
         self.latest_metrics = Some(metrics.clone());
@@ -247,10 +237,53 @@ impl PipelineCoordinator {
         // PHASE 4: History Buffer (always update, parallel to ticket processing)
         self.update_history_buffer(history_entry.clone());
 
+        // Refresh prognosis from knowledge base if available (hot reload)
+        #[cfg(feature = "knowledge-base")]
+        let dynamic_prognosis: Option<FormationPrognosis>;
+        #[cfg(feature = "knowledge-base")]
+        {
+            dynamic_prognosis = if let Some(ref kb) = self.knowledge_base {
+                kb.prognosis()
+            } else {
+                self.formation_prognosis.clone()
+            };
+        }
+        #[cfg(not(feature = "knowledge-base"))]
+        let dynamic_prognosis = self.formation_prognosis.clone();
+
+        // PHASE OPT: Proactive Optimization (every N packets, independent of tickets)
+        let opt_advisory = if let Some(ref prognosis) = dynamic_prognosis {
+            if let Some(formation) = prognosis.formation_at_depth(packet.bit_depth).cloned() {
+                let physics = self.compute_physics_for_optimizer(packet, &metrics);
+                let history: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
+                let cfc_score = self.tactical_agent.cfc_result()
+                    .filter(|r| r.is_calibrated)
+                    .map(|r| r.anomaly_score);
+
+                match self.optimizer.evaluate(
+                    packet, &physics, &formation, prognosis, &history, cfc_score, 1.0,
+                ) {
+                    Ok(adv) => {
+                        info!(
+                            confidence = adv.confidence.percent(),
+                            recs = adv.recommendations.len(),
+                            look_ahead = adv.look_ahead.is_some(),
+                            "Optimization advisory generated"
+                        );
+                        Some(crate::optimization::templates::format_optimization_advisory(&adv, &physics))
+                    }
+                    Err(reason) => {
+                        debug!(reason = %reason, "Optimization skipped");
+                        None
+                    }
+                }
+            } else { None }
+        } else { None };
+
         // Check if it's time for a periodic summary (every 10 minutes)
         let time_since_last_summary = packet.timestamp.saturating_sub(self.last_periodic_summary_time);
         let should_generate_periodic = time_since_last_summary >= PERIODIC_SUMMARY_INTERVAL_SECS
-            && self.history_buffer.len() >= 10;  // Need at least 10 packets for meaningful summary
+            && self.history_buffer.len() >= MIN_PACKETS_FOR_PERIODIC_SUMMARY;
 
         // Determine if we have a CRITICAL ticket (bypasses periodic timing)
         let is_critical_ticket = ticket_opt.as_ref()
@@ -258,7 +291,7 @@ impl PipelineCoordinator {
             .unwrap_or(false);
 
         // Check if tactical agent created an advisory ticket
-        let ticket = match ticket_opt {
+        let mut ticket = match ticket_opt {
             Some(t) => {
                 self.tickets_created += 1;
                 debug!(
@@ -272,23 +305,33 @@ impl PipelineCoordinator {
             None => {
                 // No ticket - check if we should generate a periodic summary
                 if should_generate_periodic {
-                    debug!("Phase 3: No ticket, but generating periodic 10-minute summary");
                     return self.generate_periodic_summary(packet, &metrics, campaign).await;
+                }
+                // Return optimization advisory if one was generated this cycle
+                if let Some(adv) = opt_advisory {
+                    return Some(adv);
                 }
                 debug!("Phase 3: No ticket, pipeline ends");
                 return None;
             }
         };
 
-        // For non-critical tickets, check if we should wait for periodic summary
-        if !is_critical_ticket && !should_generate_periodic {
-            // Non-critical ticket but not time for summary yet - skip for now
-            // The ticket info is captured in history for the next periodic summary
-            debug!("Phase 3: Non-critical ticket, waiting for periodic summary");
-            return None;
-        }
-
         // PHASES 5-9: ONLY EXECUTED WHEN TICKET EXISTS
+
+        // CAUSAL: Detect leading indicators before advanced physics
+        {
+            let history_snap: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
+            ticket.causal_leads = crate::causal::detect_leads(&history_snap);
+            if !ticket.causal_leads.is_empty() {
+                debug!(
+                    leads = ticket.causal_leads.len(),
+                    top_param = %ticket.causal_leads[0].parameter,
+                    top_r = ticket.causal_leads[0].pearson_r,
+                    top_lag_secs = ticket.causal_leads[0].lag_seconds,
+                    "Causal leads detected"
+                );
+            }
+        }
 
         // PHASE 5: Advanced Physics
         let physics = self.run_advanced_physics(&ticket, packet);
@@ -333,8 +376,8 @@ impl PipelineCoordinator {
             .generate_explanation(&ticket, &physics, &context, campaign)
             .await;
 
-        // PHASE 8: Orchestrator Voting (trait-based specialists)
-        let voting_result = self.orchestrator.vote(&ticket, &physics);
+        // PHASE 8: Orchestrator Voting (regime-aware specialist weighting)
+        let voting_result = self.orchestrator.vote(&ticket, &physics, packet.regime_id);
 
         // PHASE 9: Advisory Composition (with CRITICAL cooldown)
         let advisory = match self.advisory_composer.compose(
@@ -368,11 +411,8 @@ impl PipelineCoordinator {
             "Strategic analysis complete - advisory sent to dashboard"
         );
 
-        // Cycle time targets: 100ms for GPU, 60s for CPU (LLM inference is slower on CPU)
-        #[cfg(feature = "llm")]
-        let cycle_target_ms: u128 = if crate::llm::is_cuda_available() { 100 } else { 60_000 };
-        #[cfg(not(feature = "llm"))]
-        let cycle_target_ms: u128 = 100;
+        // Cycle time target: 100 ms. LLM inference runs on the hub — not here.
+        let cycle_target_ms: u128 = CYCLE_TARGET_GPU_MS;
 
         if cycle_time.as_millis() > cycle_target_ms {
             warn!(
@@ -503,15 +543,18 @@ impl PipelineCoordinator {
             ecd_margin: avg_ecd_margin,
             torque_delta_percent: current_metrics.torque_delta_percent,
             spp_delta: current_metrics.spp_delta,
+            flow_data_available: current_metrics.flow_data_available,
             is_anomaly: anomaly_rate > 10.0,
             anomaly_category: category.clone(),
             anomaly_description: Some(format!(
                 "10-min summary: {:.1}% anomaly rate, avg ROP {:.1} ft/hr, avg MSE {:.0} psi",
                 anomaly_rate, avg_rop, avg_mse
             )),
+            current_formation: None,
+            formation_depth_in_ft: None,
         };
 
-        let summary_ticket = AdvisoryTicket {
+        let mut summary_ticket = AdvisoryTicket {
             timestamp: packet.timestamp,
             ticket_type,
             category: category.clone(),
@@ -529,7 +572,14 @@ impl PipelineCoordinator {
             trace_log: Vec::new(),
             cfc_anomaly_score: None,
             cfc_feature_surprises: Vec::new(),
+            causal_leads: Vec::new(),
         };
+
+        // CAUSAL: Attach leading indicators to periodic summary
+        {
+            let history_snap: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
+            summary_ticket.causal_leads = crate::causal::detect_leads(&history_snap);
+        }
 
         // Run through remaining phases
         let physics = self.run_advanced_physics(&summary_ticket, packet);
@@ -545,8 +595,8 @@ impl PipelineCoordinator {
             .generate_explanation(&summary_ticket, &physics, &context, campaign)
             .await;
 
-        // Orchestrator voting (trait-based specialists)
-        let voting_result = self.orchestrator.vote(&summary_ticket, &physics);
+        // Orchestrator voting (regime-aware specialist weighting)
+        let voting_result = self.orchestrator.vote(&summary_ticket, &physics, packet.regime_id);
 
         // Advisory composition (with CRITICAL cooldown)
         let advisory = match self.advisory_composer.compose(
@@ -712,6 +762,103 @@ impl PipelineCoordinator {
         }
     }
 
+    /// Lightweight physics computation for the optimization engine.
+    ///
+    /// Same MSE stats, trends, and snapshot logic as `run_advanced_physics`
+    /// but takes `DrillingMetrics` directly instead of an `AdvisoryTicket`.
+    fn compute_physics_for_optimizer(
+        &self,
+        packet: &WitsPacket,
+        metrics: &DrillingMetrics,
+    ) -> DrillingPhysicsReport {
+        let mse_values: Vec<f64> = self.history_buffer.iter().map(|e| e.metrics.mse).collect();
+        let avg_mse = if !mse_values.is_empty() {
+            mse_values.iter().sum::<f64>() / mse_values.len() as f64
+        } else {
+            packet.mse
+        };
+
+        let mse_trend = if mse_values.len() >= 5 {
+            let recent: Vec<f64> = mse_values.iter().rev().take(5).copied().collect();
+            let earlier: Vec<f64> = mse_values.iter().take(5).copied().collect();
+            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
+            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
+            (recent_avg - earlier_avg) / earlier_avg.max(1.0) * 100.0
+        } else {
+            0.0
+        };
+
+        let formation_hardness = (metrics.d_exponent * 3.0).clamp(1.0, 10.0);
+        let optimal_mse = physics_engine::estimate_optimal_mse(formation_hardness);
+        let mse_efficiency = (optimal_mse / avg_mse.max(1.0) * 100.0).min(100.0);
+
+        let dxc_values: Vec<f64> = self.history_buffer.iter().map(|e| e.metrics.d_exponent).collect();
+        let dxc_trend = if dxc_values.len() >= 5 {
+            let recent: Vec<f64> = dxc_values.iter().rev().take(5).copied().collect();
+            let earlier: Vec<f64> = dxc_values.iter().take(5).copied().collect();
+            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
+            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
+            (recent_avg - earlier_avg) / earlier_avg.max(0.1) * 100.0
+        } else {
+            0.0
+        };
+
+        let flow_balance_values: Vec<f64> = self.history_buffer.iter()
+            .map(|e| e.metrics.flow_balance)
+            .collect();
+        let flow_balance_trend = if flow_balance_values.len() >= 5 {
+            let recent: Vec<f64> = flow_balance_values.iter().rev().take(5).copied().collect();
+            let earlier: Vec<f64> = flow_balance_values.iter().take(5).copied().collect();
+            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
+            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
+            recent_avg - earlier_avg
+        } else {
+            0.0
+        };
+
+        let pit_rates: Vec<f64> = self.history_buffer.iter()
+            .map(|e| e.metrics.pit_rate)
+            .collect();
+        let avg_pit_rate = if !pit_rates.is_empty() {
+            pit_rates.iter().sum::<f64>() / pit_rates.len() as f64
+        } else {
+            0.0
+        };
+
+        let confidence = (self.history_buffer.len() as f64 / HISTORY_BUFFER_SIZE as f64).min(1.0);
+
+        DrillingPhysicsReport {
+            avg_mse,
+            mse_trend,
+            optimal_mse,
+            mse_efficiency,
+            dxc_trend,
+            flow_balance_trend,
+            avg_pit_rate,
+            formation_hardness,
+            confidence,
+            detected_dysfunctions: Vec::new(),
+            wob_trend: 0.0,
+            rop_trend: 0.0,
+            founder_detected: false,
+            founder_severity: 0.0,
+            optimal_wob_estimate: 0.0,
+            current_depth: packet.bit_depth,
+            current_rop: packet.rop,
+            current_wob: packet.wob,
+            current_rpm: packet.rpm,
+            current_torque: packet.torque,
+            current_spp: packet.spp,
+            current_casing_pressure: packet.casing_pressure,
+            current_flow_in: packet.flow_in,
+            current_flow_out: packet.flow_out,
+            current_mud_weight: packet.mud_weight_in,
+            current_ecd: packet.ecd,
+            current_gas: packet.gas_units,
+            current_pit_volume: packet.pit_volume,
+        }
+    }
+
     /// Phase 6: Context lookup from knowledge store (trait-based)
     fn lookup_context(&self, ticket: &AdvisoryTicket) -> Vec<String> {
         let query = match ticket.category {
@@ -735,42 +882,11 @@ impl PipelineCoordinator {
         context
     }
 
-    /// Phase 7: Generate explanation using LLM (if available) or template fallback
-    #[cfg(feature = "llm")]
-    async fn generate_explanation(
-        &self,
-        ticket: &AdvisoryTicket,
-        physics: &DrillingPhysicsReport,
-        context: &[String],
-        campaign: Campaign,
-    ) -> (String, String, String) {
-        if let Some(ref llm) = self.strategic_llm {
-            let start = Instant::now();
-            match llm
-                .generate_advisory(ticket, &ticket.current_metrics, physics, context, campaign)
-                .await
-            {
-                Ok(advisory) => {
-                    let elapsed = start.elapsed();
-                    info!(
-                        latency_ms = elapsed.as_millis(),
-                        campaign = %campaign.short_code(),
-                        source = "llm",
-                        "LLM advisory generation complete"
-                    );
-                    return (advisory.recommendation, advisory.expected_benefit, advisory.reasoning);
-                }
-                Err(e) => {
-                    warn!(error = %e, "LLM advisory failed, falling back to template");
-                }
-            }
-        }
-
-        Self::template_explanation(ticket, physics, campaign)
-    }
-
-    /// Phase 7: Generate explanation (template-based, no LLM feature)
-    #[cfg(not(feature = "llm"))]
+    /// Phase 7: Generate explanation (template-based).
+    ///
+    /// LLM advisory generation runs exclusively on the fleet hub which has a
+    /// CUDA GPU and embeds mistralrs directly. The edge client always uses
+    /// deterministic templates so pipeline latency stays within the 100 ms target.
     async fn generate_explanation(
         &self,
         ticket: &AdvisoryTicket,
@@ -795,14 +911,21 @@ impl PipelineCoordinator {
         (result.recommendation, result.expected_benefit, result.reasoning)
     }
 
-    /// Get latest advisory for dashboard
-    pub fn get_latest_advisory(&self) -> Option<&StrategicAdvisory> {
-        self.latest_advisory.as_ref()
+    /// Look up the formation at the current bit depth.
+    ///
+    /// When the knowledge base is active, it dynamically reads from the KB
+    /// (which may have been updated by the watcher). Falls back to the static prognosis.
+    fn current_formation_context(&self, depth_ft: f64) -> Option<crate::types::FormationInterval> {
+        #[cfg(feature = "knowledge-base")]
+        if let Some(ref kb) = self.knowledge_base {
+            return kb.formation_at_depth(depth_ft);
+        }
+        self.formation_prognosis.as_ref()?.formation_at_depth(depth_ft).cloned()
     }
 
-    /// Get latest verification result
-    pub fn get_latest_verification(&self) -> Option<&VerificationResult> {
-        self.latest_verification.as_ref()
+    /// Get a reference to the tactical agent
+    pub fn tactical_agent(&self) -> &TacticalAgent {
+        &self.tactical_agent
     }
 
     /// Get pipeline statistics
@@ -817,24 +940,25 @@ impl PipelineCoordinator {
         }
     }
 
-    /// Get current rig state from tactical agent
-    pub fn get_rig_state(&self) -> RigState {
-        self.tactical_agent.current_state()
-    }
-
-    /// Check if baseline learning is complete
-    pub fn is_baseline_locked(&self) -> bool {
-        self.tactical_agent.is_baseline_locked()
-    }
-
-    /// Get tactical agent statistics
-    pub fn get_tactical_stats(&self) -> crate::agents::AgentStats {
-        self.tactical_agent.stats()
-    }
-
     /// Get latest drilling metrics (from tactical agent)
     pub fn get_latest_metrics(&self) -> Option<&DrillingMetrics> {
         self.latest_metrics.as_ref()
+    }
+
+    /// Get the latest regime ID from CfC motor output clustering
+    pub fn latest_regime_id(&self) -> u8 {
+        self.tactical_agent.latest_regime_id()
+    }
+
+    /// Get the current regime centroids (k=4, dim=8)
+    pub fn regime_centroids(&self) -> [[f64; 8]; 4] {
+        self.tactical_agent.regime_centroids()
+    }
+
+    /// Start the knowledge base watcher (if KB is active)
+    #[cfg(feature = "knowledge-base")]
+    pub fn start_kb_watcher(&self) -> Option<tokio::task::JoinHandle<()>> {
+        self.knowledge_base.as_ref().map(|kb| kb.start_watcher())
     }
 }
 
@@ -872,6 +996,7 @@ impl std::fmt::Display for PipelineStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::types::RigState;
 
     fn create_test_packet(rop: f64, flow_balance: f64) -> WitsPacket {
         WitsPacket {
@@ -911,8 +1036,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: std::sync::Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     #[tokio::test]
@@ -921,10 +1046,10 @@ mod tests {
 
         // Process several normal packets to build baseline
         for _ in 0..20 {
-            let packet = create_test_packet(50.0, 2.0);
-            let result = coordinator.process_packet(&packet, Campaign::Production).await;
+            let mut packet = create_test_packet(50.0, 2.0);
+            let result = coordinator.process_packet(&mut packet, Campaign::Production).await;
             // During baseline learning, should not generate advisories
-            if !coordinator.is_baseline_locked() {
+            if !coordinator.tactical_agent().is_baseline_locked() {
                 assert!(result.is_none());
             }
         }
@@ -939,15 +1064,15 @@ mod tests {
 
         // Build baseline first with more packets to ensure lock
         for _ in 0..50 {
-            let packet = create_test_packet(50.0, 2.0);
-            coordinator.process_packet(&packet, Campaign::Production).await;
+            let mut packet = create_test_packet(50.0, 2.0);
+            coordinator.process_packet(&mut packet, Campaign::Production).await;
         }
 
         // Simulate kick with high flow imbalance
         let mut kick_packet = create_test_packet(30.0, 25.0); // 25 bbl/hr flow out excess
         kick_packet.pit_volume_change = 10.0; // 10 bbl pit gain
         kick_packet.gas_units = 200.0; // High gas
-        let _result = coordinator.process_packet(&kick_packet, Campaign::Production).await;
+        let _result = coordinator.process_packet(&mut kick_packet, Campaign::Production).await;
 
         // Verify packets were processed
         let stats = coordinator.get_stats();

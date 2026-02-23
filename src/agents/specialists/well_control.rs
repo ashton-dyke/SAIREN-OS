@@ -72,6 +72,11 @@ impl Specialist for WellControlSpecialist {
                     metrics.flow_balance
                 ),
             )
+        } else if !metrics.flow_data_available {
+            (
+                TicketSeverity::Low,
+                "Flow sensor data unavailable - cannot assess flow balance".to_string(),
+            )
         } else {
             (
                 TicketSeverity::Low,

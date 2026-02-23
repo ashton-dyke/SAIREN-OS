@@ -22,6 +22,8 @@
 //! ```
 
 mod well_config;
+mod formation;
+pub mod defaults;
 
 pub use well_config::*;
 
@@ -35,9 +37,9 @@ static WELL_CONFIG: OnceLock<WellConfig> = OnceLock::new();
 /// Must be called exactly once before any calls to `get()`.
 /// Panics if called more than once.
 pub fn init(config: WellConfig) {
-    WELL_CONFIG
-        .set(config)
-        .expect("config::init() called more than once");
+    if WELL_CONFIG.set(config).is_err() {
+        tracing::warn!("config::init() called more than once — ignoring");
+    }
 }
 
 /// Get a reference to the global well configuration.

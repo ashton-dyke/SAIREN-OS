@@ -1,6 +1,9 @@
 //! Strategic Report Parsing
 //!
 //! Parses LLM outputs for hourly and daily strategic reports with strict format validation.
+//! Functions are exercised by `StrategicActor` when the `llm` feature is active.
+
+#![allow(dead_code)]
 
 use anyhow::Result;
 use serde::{Deserialize, Serialize};

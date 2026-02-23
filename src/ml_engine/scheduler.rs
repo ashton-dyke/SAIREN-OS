@@ -41,10 +41,7 @@ pub fn get_interval() -> Duration {
 /// ML Analysis Scheduler
 ///
 /// Runs ML analysis at configurable intervals and stores results.
-pub struct MLScheduler {
-    /// Analysis interval
-    interval: Duration,
-}
+pub struct MLScheduler;
 
 impl MLScheduler {
     /// Create a new scheduler with the configured interval
@@ -54,19 +51,7 @@ impl MLScheduler {
             interval_secs = interval_secs,
             "ML Engine scheduler created (env: ML_INTERVAL_SECS)"
         );
-        Self {
-            interval: Duration::from_secs(interval_secs),
-        }
-    }
-
-    /// Create a scheduler with a custom interval (for testing)
-    pub fn with_interval(interval: Duration) -> Self {
-        Self { interval }
-    }
-
-    /// Get the configured interval
-    pub fn interval(&self) -> Duration {
-        self.interval
+        Self
     }
 
     /// Run analysis on a dataset
@@ -111,6 +96,8 @@ impl MLScheduler {
         campaign: Campaign,
         bit_hours: f64,
         bit_depth: f64,
+        cfc_transition_timestamps: &[u64],
+        regime_centroids: [[f64; 8]; 4],
     ) -> HourlyDataset {
         use std::collections::HashMap;
 
@@ -153,6 +140,8 @@ impl MLScheduler {
             bit_depth,
             rejected_sample_count: 0,
             formation_segments: Vec::new(),
+            cfc_transition_timestamps: cfc_transition_timestamps.to_vec(),
+            regime_centroids,
         }
     }
 }
@@ -207,8 +196,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     fn make_metric(mse: f64, mse_efficiency: f64) -> DrillingMetrics {
@@ -225,9 +214,12 @@ mod tests {
             ecd_margin: 1.0,
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
+            flow_data_available: true,
             is_anomaly: false,
             anomaly_category: AnomalyCategory::None,
             anomaly_description: None,
+            current_formation: None,
+            formation_depth_in_ft: None,
         }
     }
 
@@ -239,8 +231,8 @@ mod tests {
 
     #[test]
     fn test_scheduler_creation() {
-        let scheduler = MLScheduler::with_interval(Duration::from_secs(60));
-        assert_eq!(scheduler.interval(), Duration::from_secs(60));
+        let _scheduler = MLScheduler::new();
+        // Scheduler uses env-configured interval (default 3600s)
     }
 
     #[test]
@@ -260,6 +252,8 @@ mod tests {
             Campaign::Production,
             48.0,
             1200.0,
+            &[],
+            [[0.0; 8]; 4],
         );
 
         assert_eq!(dataset.well_id, "TEST-WELL");
@@ -289,6 +283,8 @@ mod tests {
             Campaign::Production,
             24.0,
             500.0,
+            &[],
+            [[0.0; 8]; 4],
         );
 
         let report = MLScheduler::run_analysis(&dataset);
@@ -315,6 +311,8 @@ mod tests {
             Campaign::Production,
             24.0,
             500.0,
+            &[],
+            [[0.0; 8]; 4],
         );
 
         let report = MLScheduler::run_analysis(&dataset);

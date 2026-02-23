@@ -792,8 +792,8 @@ fn parse_row(
         torque_delta_percent: 0.0,
         spp_delta: 0.0,
         rig_state,
-        waveform_snapshot: Arc::new(Vec::new()),
-    }))
+        regime_id: 0,
+        seconds_since_param_change: 0,    }))
 }
 
 // ============================================================================
@@ -839,21 +839,21 @@ fn parse_datetime_string(s: &str) -> Result<u64, String> {
     // Try float epoch
     if let Ok(epoch_f) = s.parse::<f64>() {
         if epoch_f > 1_000_000_000.0 && epoch_f.is_finite() {
-            return Ok(epoch_f as u64);
+            return Ok(epoch_f.max(0.0) as u64);
         }
     }
 
     // "2009-06-27 16:50:29+00:00" (Kaggle parsed format)
     if let Ok(dt) = chrono::DateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S%:z") {
-        return Ok(dt.timestamp() as u64);
+        return Ok(dt.timestamp().max(0) as u64);
     }
 
     // ISO 8601 with timezone
     if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(s) {
-        return Ok(dt.timestamp() as u64);
+        return Ok(dt.timestamp().max(0) as u64);
     }
     if let Ok(dt) = chrono::DateTime::parse_from_str(s, "%Y-%m-%dT%H:%M:%S%.f%:z") {
-        return Ok(dt.timestamp() as u64);
+        return Ok(dt.timestamp().max(0) as u64);
     }
 
     // Without timezone (assume UTC)
@@ -865,7 +865,7 @@ fn parse_datetime_string(s: &str) -> Result<u64, String> {
         "%Y-%m-%d %H:%M:%S",
     ] {
         if let Ok(dt) = chrono::NaiveDateTime::parse_from_str(s, fmt) {
-            return Ok(dt.and_utc().timestamp() as u64);
+            return Ok(dt.and_utc().timestamp().max(0) as u64);
         }
     }
 

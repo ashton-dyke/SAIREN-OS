@@ -94,20 +94,44 @@ impl DrillingBaseline {
         let alpha = if self.samples_collected < 10 { 0.5 } else { 0.1 };
 
         if metrics.mse > 0.0 {
-            self.mse = self.mse * (1.0 - alpha) + metrics.mse * alpha;
+            if self.mse == 0.0 {
+                self.mse = metrics.mse;
+            } else {
+                self.mse = self.mse * (1.0 - alpha) + metrics.mse * alpha;
+            }
         }
         if packet.torque > 0.0 {
-            self.torque = self.torque * (1.0 - alpha) + packet.torque * alpha;
+            if self.torque == 0.0 {
+                self.torque = packet.torque;
+            } else {
+                self.torque = self.torque * (1.0 - alpha) + packet.torque * alpha;
+            }
         }
         if packet.spp > 0.0 {
-            self.spp = self.spp * (1.0 - alpha) + packet.spp * alpha;
+            if self.spp == 0.0 {
+                self.spp = packet.spp;
+            } else {
+                self.spp = self.spp * (1.0 - alpha) + packet.spp * alpha;
+            }
         }
         self.flow_balance = self.flow_balance * (1.0 - alpha) + metrics.flow_balance * alpha;
         if packet.pit_volume > 0.0 {
-            self.pit_volume = self.pit_volume * (1.0 - alpha) + packet.pit_volume * alpha;
+            if self.pit_volume == 0.0 {
+                self.pit_volume = packet.pit_volume;
+            } else {
+                self.pit_volume = self.pit_volume * (1.0 - alpha) + packet.pit_volume * alpha;
+            }
         }
 
         self.samples_collected += 1;
+    }
+
+    /// Reset the baseline to a clean state (e.g. after a formation transition).
+    ///
+    /// Clears all EMA values and resets the sample counter so the next samples
+    /// are learned with the fast alpha (0.5) rather than the slow one (0.1).
+    pub fn reset(&mut self) {
+        *self = Self::default();
     }
 
     /// Calculate MSE delta from baseline (percentage)
@@ -130,7 +154,7 @@ impl DrillingBaseline {
 
     /// Calculate SPP delta from baseline (absolute psi)
     pub fn spp_delta(&self, current_spp: f64) -> f64 {
-        if self.samples_collected > 5 {
+        if self.spp > 0.0 && self.samples_collected > 5 {
             current_spp - self.spp
         } else {
             0.0
@@ -139,7 +163,7 @@ impl DrillingBaseline {
 
     /// Calculate pit volume change from baseline (bbl)
     pub fn pit_volume_change(&self, current_pit: f64) -> f64 {
-        if self.samples_collected > 5 {
+        if self.pit_volume > 0.0 && self.samples_collected > 5 {
             current_pit - self.pit_volume
         } else {
             0.0
@@ -279,12 +303,26 @@ pub struct TacticalAgent {
     cfc_network: crate::cfc::CfcNetwork,
     /// Latest CfC result (only during drilling/reaming)
     cfc_result: Option<crate::cfc::CfcDrillingResult>,
+    /// CfC-based formation transition detector
+    cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector,
+    /// Latest CfC formation transition event (if any)
+    latest_formation_transition: Option<crate::types::FormationTransitionEvent>,
+    /// Online k-means regime clusterer for CfC motor outputs
+    regime_clusterer: crate::cfc::RegimeClusterer,
+    /// Latest assigned regime ID (0-3)
+    latest_regime_id: u8,
+    /// Current regime centroids (k=4, dim=8)
+    regime_centroids: [[f64; 8]; 4],
     /// Last time a ticket was created (for cooldown)
     last_ticket_time: Option<Instant>,
     /// Current campaign type for operation detection
     campaign: Campaign,
     /// Previous operation for transition logging
     previous_operation: Operation,
+    /// Pending operation for debounce (requires 3 consecutive packets to confirm)
+    pending_operation: Option<Operation>,
+    /// Count of consecutive packets in pending operation state
+    pending_operation_count: u32,
 }
 
 impl std::fmt::Debug for TacticalAgent {
@@ -313,9 +351,16 @@ impl TacticalAgent {
             aci_result: None,
             cfc_network: crate::cfc::CfcNetwork::new(42),
             cfc_result: None,
+            cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
+            latest_formation_transition: None,
+            regime_clusterer: crate::cfc::RegimeClusterer::new(),
+            latest_regime_id: 0,
+            regime_centroids: [[0.0; 8]; 4],
             last_ticket_time: None,
             campaign: Campaign::Production,
             previous_operation: Operation::Static,
+            pending_operation: None,
+            pending_operation_count: 0,
         }
     }
 
@@ -333,9 +378,16 @@ impl TacticalAgent {
             aci_result: None,
             cfc_network: crate::cfc::CfcNetwork::new(42),
             cfc_result: None,
+            cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
+            latest_formation_transition: None,
+            regime_clusterer: crate::cfc::RegimeClusterer::new(),
+            latest_regime_id: 0,
+            regime_centroids: [[0.0; 8]; 4],
             last_ticket_time: None,
             campaign,
             previous_operation: Operation::Static,
+            pending_operation: None,
+            pending_operation_count: 0,
         }
     }
 
@@ -394,9 +446,16 @@ impl TacticalAgent {
             aci_result: None,
             cfc_network: crate::cfc::CfcNetwork::new(42),
             cfc_result: None,
+            cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
+            latest_formation_transition: None,
+            regime_clusterer: crate::cfc::RegimeClusterer::new(),
+            latest_regime_id: 0,
+            regime_centroids: [[0.0; 8]; 4],
             last_ticket_time: None,
             campaign,
             previous_operation: Operation::Static,
+            pending_operation: None,
+            pending_operation_count: 0,
         }
     }
 
@@ -425,6 +484,7 @@ impl TacticalAgent {
     pub fn process(
         &mut self,
         packet: &WitsPacket,
+        has_active_advisory: bool,
     ) -> (Option<AdvisoryTicket>, DrillingMetrics, HistoryEntry) {
         let start = Instant::now();
         self.packets_processed += 1;
@@ -454,21 +514,36 @@ impl TacticalAgent {
         let detected_operation = detect_operation(packet, self.campaign);
         metrics.operation = detected_operation;
 
-        // Log operation transitions
+        // Debounced operation transitions: require 3 consecutive packets in new state
         if detected_operation != self.previous_operation {
-            info!(
-                previous = %self.previous_operation.short_code(),
-                current = %detected_operation.short_code(),
-                campaign = %self.campaign.short_code(),
-                depth = packet.bit_depth,
-                rpm = packet.rpm,
-                wob = packet.wob,
-                torque = packet.torque,
-                rop = packet.rop,
-                flow_in = packet.flow_in,
-                "Operation transition detected"
-            );
-            self.previous_operation = detected_operation;
+            if self.pending_operation == Some(detected_operation) {
+                self.pending_operation_count += 1;
+                if self.pending_operation_count >= 3 {
+                    info!(
+                        previous = %self.previous_operation.short_code(),
+                        current = %detected_operation.short_code(),
+                        campaign = %self.campaign.short_code(),
+                        depth = packet.bit_depth,
+                        rpm = packet.rpm,
+                        wob = packet.wob,
+                        torque = packet.torque,
+                        rop = packet.rop,
+                        flow_in = packet.flow_in,
+                        "Operation transition detected"
+                    );
+                    self.previous_operation = detected_operation;
+                    self.pending_operation = None;
+                    self.pending_operation_count = 0;
+                }
+            } else {
+                self.pending_operation = Some(detected_operation);
+                self.pending_operation_count = 1;
+            }
+            // Hold previous operation until transition is confirmed
+            metrics.operation = self.previous_operation;
+        } else {
+            self.pending_operation = None;
+            self.pending_operation_count = 0;
         }
 
         let elapsed = start.elapsed();
@@ -493,6 +568,44 @@ impl TacticalAgent {
         } else {
             None
         };
+
+        // ====================================================================
+        // PHASE 2.8.1: Regime clustering from CfC motor outputs
+        // ====================================================================
+        if let Some(ref result) = self.cfc_result {
+            if !result.motor_outputs.is_empty() {
+                self.latest_regime_id = self.regime_clusterer.assign(&result.motor_outputs);
+                self.regime_centroids = self.regime_clusterer.centroids();
+            }
+        }
+
+        // ====================================================================
+        // PHASE 2.9: CfC Formation Transition Detection
+        // ====================================================================
+        self.latest_formation_transition = if let Some(ref result) = self.cfc_result {
+            if result.is_calibrated {
+                self.cfc_formation_detector.check(
+                    &result.feature_sigmas,
+                    has_active_advisory,
+                    packet.timestamp,
+                    packet.bit_depth,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(ref event) = self.latest_formation_transition {
+            info!(
+                "CfC formation transition at depth {:.0} ft — surprised features: {:?}",
+                event.bit_depth, event.surprised_features
+            );
+            // Reset the EMA baseline so the new formation builds its own reference
+            // values from scratch rather than being compared against the previous one.
+            self.baseline.reset();
+        }
 
         // Create history entry (ALWAYS stored in Phase 4 buffer)
         let mse_contribution = self.calculate_mse_contribution(&metrics);
@@ -683,6 +796,7 @@ impl TacticalAgent {
                     name: s.name.to_string(), error: s.error, magnitude: s.magnitude,
                 }).collect())
                 .unwrap_or_default(),
+            causal_leads: Vec::new(),
         };
 
         // Log creation event (Flight Recorder entry #1)
@@ -1182,9 +1296,24 @@ impl TacticalAgent {
         self.cfc_result.as_ref()
     }
 
+    /// Get the latest CfC formation transition event (if any)
+    pub fn latest_formation_transition(&self) -> Option<&crate::types::FormationTransitionEvent> {
+        self.latest_formation_transition.as_ref()
+    }
+
     /// Get a reference to the CfC network for diagnostics
     pub fn cfc_network(&self) -> &crate::cfc::CfcNetwork {
         &self.cfc_network
+    }
+
+    /// Get the latest regime ID (0-3) from CfC motor output clustering
+    pub fn latest_regime_id(&self) -> u8 {
+        self.latest_regime_id
+    }
+
+    /// Get the current regime centroids (k=4, dim=8)
+    pub fn regime_centroids(&self) -> [[f64; 8]; 4] {
+        self.regime_centroids
     }
 
     pub fn stats(&self) -> AgentStats {
@@ -1209,7 +1338,14 @@ impl TacticalAgent {
         self.aci_result = None;
         self.cfc_network.reset();
         self.cfc_result = None;
+        self.cfc_formation_detector = crate::cfc::formation_detector::FormationTransitionDetector::new();
+        self.latest_formation_transition = None;
+        self.regime_clusterer.reset();
+        self.latest_regime_id = 0;
+        self.regime_centroids = [[0.0; 8]; 4];
         self.previous_operation = Operation::Static;
+        self.pending_operation = None;
+        self.pending_operation_count = 0;
     }
 
     /// Get current rig state from last processed packet
@@ -1330,7 +1466,7 @@ mod tests {
         ensure_config();
         let mut agent = TacticalAgent::new();
         let packet = create_normal_drilling_packet();
-        let (ticket, metrics, _entry) = agent.process(&packet);
+        let (ticket, metrics, _entry) = agent.process(&packet, false);
 
         // Normal drilling should not generate ticket
         assert!(ticket.is_none() || metrics.anomaly_category == AnomalyCategory::DrillingEfficiency);
@@ -1341,7 +1477,7 @@ mod tests {
         ensure_config();
         let mut agent = TacticalAgent::new();
         let packet = create_kick_packet();
-        let (ticket, metrics, _entry) = agent.process(&packet);
+        let (ticket, metrics, _entry) = agent.process(&packet, false);
 
         assert!(metrics.is_anomaly, "Kick conditions should be detected as anomaly");
         assert_eq!(
@@ -1355,7 +1491,7 @@ mod tests {
     fn test_history_entry_always_created() {
         ensure_config();
         let mut agent = TacticalAgent::new();
-        let (_, _, entry) = agent.process(&create_normal_drilling_packet());
+        let (_, _, entry) = agent.process(&create_normal_drilling_packet(), false);
         assert!(entry.packet.timestamp > 0);
     }
 
@@ -1364,9 +1500,9 @@ mod tests {
         ensure_config();
         let mut agent = TacticalAgent::new();
 
-        agent.process(&create_normal_drilling_packet());
-        agent.process(&create_normal_drilling_packet());
-        agent.process(&create_normal_drilling_packet());
+        agent.process(&create_normal_drilling_packet(), false);
+        agent.process(&create_normal_drilling_packet(), false);
+        agent.process(&create_normal_drilling_packet(), false);
 
         let stats = agent.stats();
         assert_eq!(stats.packets_processed, 3);
@@ -1381,7 +1517,7 @@ mod tests {
         for i in 0..20 {
             let mut packet = create_normal_drilling_packet();
             packet.timestamp = 1000 + i * 60;
-            agent.process(&packet);
+            agent.process(&packet, false);
         }
 
         assert!(agent.baseline.samples_collected >= 20);

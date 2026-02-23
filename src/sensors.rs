@@ -140,8 +140,8 @@ fn parse_csv_line(line: &str, line_num: usize) -> Result<WitsPacket, String> {
         torque_delta_percent: 0.0,
         spp_delta: 0.0,
         rig_state,
-        waveform_snapshot: std::sync::Arc::new(Vec::new()),
-    })
+        regime_id: 0,
+        seconds_since_param_change: 0,    })
 }
 
 /// Classify rig state from drilling parameters
@@ -170,11 +170,11 @@ fn parse_timestamp(s: &str) -> Result<u64, String> {
 
     // Parse ISO 8601 using chrono
     DateTime::parse_from_rfc3339(s)
-        .map(|dt| dt.with_timezone(&Utc).timestamp() as u64)
+        .map(|dt| dt.with_timezone(&Utc).timestamp().max(0) as u64)
         .or_else(|_| {
             format!("{}Z", s.trim_end_matches('Z'))
                 .parse::<DateTime<Utc>>()
-                .map(|dt| dt.timestamp() as u64)
+                .map(|dt| dt.timestamp().max(0) as u64)
                 .map_err(|e| format!("Cannot parse timestamp '{}': {}", s, e))
         })
 }
@@ -233,8 +233,8 @@ pub fn generate_fault_test_data() -> Vec<WitsPacket> {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: std::sync::Arc::new(Vec::new()),
-        });
+            regime_id: 0,
+            seconds_since_param_change: 0,        });
     }
 
     // Phase 2: MSE inefficiency - poor drilling (20 samples)
@@ -276,8 +276,8 @@ pub fn generate_fault_test_data() -> Vec<WitsPacket> {
             torque_delta_percent: 20.0,
             spp_delta: 100.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: std::sync::Arc::new(Vec::new()),
-        });
+            regime_id: 0,
+            seconds_since_param_change: 0,        });
     }
 
     // Phase 3: Well control event - kick (15 samples)
@@ -320,8 +320,8 @@ pub fn generate_fault_test_data() -> Vec<WitsPacket> {
             torque_delta_percent: -7.0,
             spp_delta: -100.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: std::sync::Arc::new(Vec::new()),
-        });
+            regime_id: 0,
+            seconds_since_param_change: 0,        });
     }
 
     // Phase 4: Return to normal (10 samples)
@@ -363,8 +363,8 @@ pub fn generate_fault_test_data() -> Vec<WitsPacket> {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: std::sync::Arc::new(Vec::new()),
-        });
+            regime_id: 0,
+            seconds_since_param_change: 0,        });
     }
 
     tracing::debug!(count = packets.len(), "Generated synthetic drilling test packets");

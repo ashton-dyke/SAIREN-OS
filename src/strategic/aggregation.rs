@@ -1,4 +1,8 @@
 //! Data aggregation for strategic analysis
+//!
+//! Used by `StrategicActor` when the `llm` feature is active.
+
+#![allow(dead_code)]
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -46,20 +50,20 @@ impl HourlyAggregate {
         }
 
         let count = analyses.len();
-        let start_time = analyses.first().unwrap().timestamp;
-        let end_time = analyses.last().unwrap().timestamp;
+        let start_time = analyses.first().expect("checked non-empty above").timestamp;
+        let end_time = analyses.last().expect("checked non-empty above").timestamp;
 
         let mean_health_score = analyses.iter().map(|a| a.health_score).sum::<f64>() / count as f64;
         let min_health_score = analyses
             .iter()
             .map(|a| a.health_score)
-            .min_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .expect("checked non-empty above");
         let max_health_score = analyses
             .iter()
             .map(|a| a.health_score)
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .expect("checked non-empty above");
 
         let mean_rpm = analyses.iter().map(|a| a.rpm).sum::<f64>() / count as f64;
         let mean_motor_temp = analyses.iter().map(|a| a.motor_temp_avg).sum::<f64>() / count as f64;
@@ -168,21 +172,21 @@ impl DailyAggregate {
         }
 
         let count = aggregates.len();
-        let start_time = aggregates.first().unwrap().start_time;
-        let end_time = aggregates.last().unwrap().end_time;
+        let start_time = aggregates.first().expect("checked non-empty above").start_time;
+        let end_time = aggregates.last().expect("checked non-empty above").end_time;
 
         let mean_health_score =
             aggregates.iter().map(|h| h.mean_health_score).sum::<f64>() / count as f64;
         let min_health_score = aggregates
             .iter()
             .map(|h| h.min_health_score)
-            .min_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
+            .min_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .expect("checked non-empty above");
         let max_health_score = aggregates
             .iter()
             .map(|h| h.max_health_score)
-            .max_by(|a, b| a.partial_cmp(b).unwrap())
-            .unwrap();
+            .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+            .expect("checked non-empty above");
 
         // Health score trend (slope over the day)
         let health_scores: Vec<f64> = aggregates.iter().map(|h| h.mean_health_score).collect();

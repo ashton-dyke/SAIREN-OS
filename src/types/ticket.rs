@@ -124,6 +124,12 @@ pub struct AdvisoryTicket {
     /// CfC per-feature surprise decomposition (top contributors to anomaly)
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub cfc_feature_surprises: Vec<CfcFeatureSurpriseInfo>,
+    /// Causal leading indicators detected before this anomaly (Phase 5 causal inference)
+    ///
+    /// Parameters whose past values correlate most strongly with the current MSE spike,
+    /// giving the driller advance warning of developing inefficiency.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub causal_leads: Vec<CausalLead>,
 }
 
 impl AdvisoryTicket {
@@ -259,6 +265,32 @@ pub mod verification_thresholds {
     pub const MIN_CONSECUTIVE_FOR_SUSTAINED: u32 = 3;
     /// Minimum history required for verification (minutes)
     pub const MIN_HISTORY_MINUTES: f64 = 5.0;
+}
+
+// ============================================================================
+// Causal Inference Types
+// ============================================================================
+
+/// A detected causal leading indicator for a drilling anomaly.
+///
+/// Represents a drilling parameter (e.g. WOB, RPM) whose historical values
+/// precede an MSE spike at a specific lag, giving the driller advance warning
+/// of developing inefficiency. Computed by the causal inference module using
+/// cross-correlation over the 60-packet history buffer.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CausalLead {
+    /// Drilling parameter name (e.g. "WOB", "RPM", "Torque", "SPP", "ROP")
+    pub parameter: String,
+    /// Number of seconds this parameter leads the MSE response
+    pub lag_seconds: u32,
+    /// Pearson correlation coefficient between lagged parameter and MSE
+    /// Positive = co-movement (parameter increase → MSE increase)
+    /// Negative = inverse (parameter increase → MSE decrease)
+    pub pearson_r: f64,
+    /// Sign of the correlation: +1 when parameter and MSE move together,
+    /// -1 when they move inversely. Use this to generate natural-language
+    /// descriptions rather than interpreting it as a drilling prescription.
+    pub correlation_sign: i8,
 }
 
 // ============================================================================

@@ -64,6 +64,12 @@ pub struct HourlyDataset {
     pub rejected_sample_count: usize,
     /// Detected formation segments (if boundary found)
     pub formation_segments: Vec<FormationSegment>,
+    /// CfC-detected formation transition timestamps (for dual-source segmentation)
+    #[serde(default)]
+    pub cfc_transition_timestamps: Vec<u64>,
+    /// Regime centroids from CfC motor output clustering (k=4, dim=8)
+    #[serde(default)]
+    pub regime_centroids: [[f64; 8]; 4],
 }
 
 impl Default for HourlyDataset {
@@ -82,6 +88,8 @@ impl Default for HourlyDataset {
             bit_depth: 0.0,
             rejected_sample_count: 0,
             formation_segments: Vec::new(),
+            cfc_transition_timestamps: Vec::new(),
+            regime_centroids: [[0.0; 8]; 4],
         }
     }
 }
@@ -97,6 +105,19 @@ pub struct FormationSegment {
     pub avg_d_exponent: f64,
     /// Sample count after quality filtering
     pub valid_sample_count: usize,
+}
+
+/// CfC-detected formation transition event.
+///
+/// Emitted when >= 3 CfC features show surprise > 2.0σ for >= 5 consecutive
+/// packets with no active advisory ticket. Complements the d-exponent 15%
+/// shift detector as an early indicator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormationTransitionEvent {
+    pub timestamp: u64,
+    pub bit_depth: f64,
+    pub surprised_features: Vec<String>,
+    pub packet_index: u64,
 }
 
 /// Result of ML analysis - either successful insights or explicit failure
@@ -272,6 +293,9 @@ pub struct OptimalParams {
     /// Whether dysfunction filtering was applied
     #[serde(default)]
     pub dysfunction_filtered: bool,
+    /// Regime ID from CfC motor output clustering (None if not partitioned)
+    #[serde(default)]
+    pub regime_id: Option<u8>,
 }
 
 impl Default for OptimalParams {
@@ -295,6 +319,7 @@ impl Default for OptimalParams {
             bin_sample_count: 0,
             bins_evaluated: 0,
             dysfunction_filtered: false,
+            regime_id: None,
         }
     }
 }

@@ -47,6 +47,10 @@ pub struct WellConfig {
     /// Campaign-specific overrides
     #[serde(default)]
     pub campaign: CampaignOverrides,
+
+    /// ML engine tuning
+    #[serde(default)]
+    pub ml: MlConfig,
 }
 
 impl Default for WellConfig {
@@ -59,6 +63,7 @@ impl Default for WellConfig {
             ensemble_weights: EnsembleWeightsConfig::default(),
             physics: PhysicsConfig::default(),
             campaign: CampaignOverrides::default(),
+            ml: MlConfig::default(),
         }
     }
 }
@@ -1304,6 +1309,36 @@ impl CampaignSpecific {
             weight_formation: Some(0.15),
             cement_returns_expected: Some(true),
             plug_depth_tolerance: Some(5.0),
+        }
+    }
+}
+
+// ============================================================================
+// ML Engine Config
+// ============================================================================
+
+/// ML engine tuning parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MlConfig {
+    /// ROP lag compensation in seconds.
+    ///
+    /// When the driller changes WOB at surface, the ROP response at the bit
+    /// takes time to propagate through the drillstring. This lag means a WOB
+    /// change at time T produces a measurable ROP change at time T + lag.
+    /// By pairing each sample's WOB/RPM with the ROP from `rop_lag_seconds`
+    /// later, the grid sees steady-state responses instead of transients.
+    ///
+    /// Typical values: 30–90 s depending on well depth and drillstring length.
+    #[serde(default = "default_rop_lag_seconds")]
+    pub rop_lag_seconds: u64,
+}
+
+fn default_rop_lag_seconds() -> u64 { 60 }
+
+impl Default for MlConfig {
+    fn default() -> Self {
+        Self {
+            rop_lag_seconds: default_rop_lag_seconds(),
         }
     }
 }

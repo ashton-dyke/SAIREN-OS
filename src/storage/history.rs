@@ -10,8 +10,6 @@ use std::sync::{Arc, OnceLock};
 /// Global database instance for the history storage
 static HISTORY_DB: OnceLock<Arc<sled::Db>> = OnceLock::new();
 
-/// Default database path
-const DEFAULT_DB_PATH: &str = "./data/strategic_history.db";
 
 /// Error type for storage operations
 #[derive(Debug)]
@@ -47,20 +45,17 @@ impl From<serde_json::Error> for StorageError {
 
 /// History storage for StrategicReports
 #[derive(Clone)]
+#[allow(dead_code)]
 pub struct HistoryStorage {
     db: Arc<sled::Db>,
 }
 
+#[allow(dead_code)]
 impl HistoryStorage {
     /// Open or create the history storage at the specified path
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, StorageError> {
         let db = sled::open(path)?;
         Ok(Self { db: Arc::new(db) })
-    }
-
-    /// Open with default path
-    pub fn open_default() -> Result<Self, StorageError> {
-        Self::open(DEFAULT_DB_PATH)
     }
 
     /// Store a strategic report
@@ -212,6 +207,7 @@ impl HistoryStorage {
 
 /// Storage statistics
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 pub struct StorageStats {
     pub report_count: usize,
     pub size_bytes: u64,
@@ -219,6 +215,7 @@ pub struct StorageStats {
     pub newest_timestamp: Option<u64>,
 }
 
+#[allow(dead_code)]
 impl StorageStats {
     /// Get size in megabytes
     pub fn size_mb(&self) -> f64 {
@@ -239,13 +236,8 @@ pub fn init(path: &str) -> Result<(), StorageError> {
     Ok(())
 }
 
-/// Initialize with default path
-pub fn init_default() -> Result<(), StorageError> {
-    init(DEFAULT_DB_PATH)
-}
-
 /// Get the global database (initializes with default if not yet initialized)
-fn get_db() -> Result<&'static Arc<sled::Db>, StorageError> {
+pub(super) fn get_db() -> Result<&'static Arc<sled::Db>, StorageError> {
     HISTORY_DB.get().ok_or(StorageError::NotInitialized)
 }
 
@@ -264,40 +256,24 @@ pub fn store_report(report: &StrategicReport) -> Result<(), StorageError> {
     Ok(())
 }
 
-/// Get recent history using the global database
-pub fn get_recent_history(limit: usize) -> Vec<StrategicReport> {
-    let db = match get_db() {
-        Ok(db) => db,
-        Err(_) => return Vec::new(),
-    };
+/// Delete reports older than `max_age_days` days from the global database.
+///
+/// Returns the number of deleted records, or an error if the database is not
+/// initialized or the deletion fails. Call once at startup after `init()` to
+/// keep the on-disk history bounded.
+pub fn prune_old_reports(max_age_days: u64) -> Result<usize, StorageError> {
+    let db = get_db()?;
 
-    let mut reports = Vec::with_capacity(limit);
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
 
-    for item in db.iter().rev() {
-        if reports.len() >= limit {
-            break;
-        }
+    let cutoff = now.saturating_sub(max_age_days * 86_400);
 
-        if let Ok((_key, value)) = item {
-            if let Ok(report) = serde_json::from_slice::<StrategicReport>(&value) {
-                reports.push(report);
-            }
-        }
-    }
-
-    reports
-}
-
-/// Get count using global database
-pub fn count() -> usize {
-    get_db().map(|db| db.len()).unwrap_or(0)
-}
-
-/// Get size using global database
-pub fn size_bytes() -> u64 {
-    get_db()
-        .and_then(|db| db.size_on_disk().map_err(|e| StorageError::DatabaseError(e.to_string())))
-        .unwrap_or(0)
+    // Reuse cleanup_before via a temporary wrapper that shares the global db handle.
+    let storage = HistoryStorage { db: Arc::clone(db) };
+    storage.cleanup_before(cutoff)
 }
 
 /// Get only Critical severity reports (newest first)

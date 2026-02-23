@@ -1,15 +1,12 @@
-//! WITS packet types and Arc<Vec> helpers
+//! WITS packet types
 
 use serde::{Deserialize, Serialize};
-use std::sync::Arc;
 
 use super::RigState;
 
 /// WITS Level 0 packet containing full drilling parameters
 ///
 /// Contains ~40+ channels covering drilling, hydraulics, mud, and well control data.
-/// The `waveform_snapshot` field uses `Arc<Vec<f64>>` to enable zero-copy
-/// sharing between threads for high-frequency sensor data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WitsPacket {
     pub timestamp: u64,
@@ -114,34 +111,15 @@ pub struct WitsPacket {
     #[serde(default)]
     pub rig_state: RigState,
 
-    // === High-Frequency Data (Optional) ===
-    /// High-frequency waveform snapshot for vibration analysis
-    /// 1024 samples at 10 kHz = 100ms window
-    /// Used for stick-slip and vibration analysis
-    #[serde(default = "default_arc_vec", serialize_with = "serialize_arc_vec", deserialize_with = "deserialize_arc_vec")]
-    pub waveform_snapshot: Arc<Vec<f64>>,
-}
+    // === Regime Clustering ===
+    /// Regime ID from CfC motor output k-means clustering (0-3)
+    #[serde(default)]
+    pub regime_id: u8,
 
-/// Default for Arc<Vec<f64>> - creates an empty Arc-wrapped vector
-fn default_arc_vec() -> Arc<Vec<f64>> {
-    Arc::new(Vec::new())
-}
+    /// Seconds since last significant WOB/RPM change (for sustained-sample filtering)
+    #[serde(default)]
+    pub seconds_since_param_change: u64,
 
-/// Serialize Arc<Vec<f64>> as just Vec<f64>
-fn serialize_arc_vec<S>(data: &Arc<Vec<f64>>, serializer: S) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    data.as_ref().serialize(serializer)
-}
-
-/// Deserialize Vec<f64> into Arc<Vec<f64>>
-fn deserialize_arc_vec<'de, D>(deserializer: D) -> Result<Arc<Vec<f64>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let vec = Vec::<f64>::deserialize(deserializer)?;
-    Ok(Arc::new(vec))
 }
 
 impl Default for WitsPacket {
@@ -183,17 +161,13 @@ impl Default for WitsPacket {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Idle,
-            waveform_snapshot: Arc::new(Vec::new()),
+            regime_id: 0,
+            seconds_since_param_change: 0,
         }
     }
 }
 
 impl WitsPacket {
-    /// Check if this packet has a valid waveform snapshot for vibration analysis
-    pub fn has_waveform(&self) -> bool {
-        !self.waveform_snapshot.is_empty()
-    }
-
     /// Calculate flow balance (positive = gain, negative = loss)
     pub fn flow_balance(&self) -> f64 {
         self.flow_out - self.flow_in

@@ -434,8 +434,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     fn make_metric(
@@ -457,6 +457,7 @@ mod tests {
             ecd_margin: 1.0,
             torque_delta_percent: torque_delta,
             spp_delta,
+            flow_data_available: true,
             is_anomaly,
             anomaly_category: if is_anomaly {
                 AnomalyCategory::Mechanical
@@ -464,6 +465,8 @@ mod tests {
                 AnomalyCategory::None
             },
             anomaly_description: None,
+            current_formation: None,
+            formation_depth_in_ft: None,
         }
     }
 

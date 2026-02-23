@@ -187,7 +187,7 @@ fn main() {
 
     for (i, packet) in packets.iter().enumerate() {
         // Phase 2-3: Tactical agent processes packet
-        let (ticket_opt, metrics, history_entry) = tactical.process(packet);
+        let (ticket_opt, metrics, history_entry) = tactical.process(packet, false);
 
         // Track stats
         stats.record_metrics(&metrics, packet);

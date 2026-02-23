@@ -28,6 +28,8 @@ pub struct FeatureSurprise {
     pub error: f64,
     /// Absolute error magnitude.
     pub magnitude: f64,
+    /// Z-score: (abs_error - mean) / std
+    pub sigma: f64,
 }
 
 /// CfC neural network for drilling anomaly detection.
@@ -213,11 +215,15 @@ impl CfcNetwork {
 
                 // Only include if current error is notably above average
                 if avg_err > 1e-10 && abs_err > avg_err * 1.5 {
+                    let variance = self.feature_error_sq_ema[i] - avg_err * avg_err;
+                    let std = if variance > 0.0 { variance.sqrt() } else { 1e-10 };
+                    let sigma = (abs_err - avg_err) / std;
                     Some(FeatureSurprise {
                         index: i,
                         name: FEATURE_NAMES[i],
                         error: self.last_feature_errors[i],
                         magnitude: abs_err,
+                        sigma,
                     })
                 } else {
                     None
@@ -227,6 +233,31 @@ impl CfcNetwork {
 
         surprises.sort_by(|a, b| b.magnitude.partial_cmp(&a.magnitude).unwrap_or(std::cmp::Ordering::Equal));
         surprises
+    }
+
+    /// Get z-scores for ALL 16 features (for formation transition detection).
+    ///
+    /// Unlike `feature_surprises()` which only returns filtered surprises,
+    /// this returns sigma values for every feature so the formation detector
+    /// can count how many features are simultaneously surprised.
+    pub fn all_feature_sigmas(&self) -> Vec<(usize, &'static str, f64)> {
+        if self.train_steps < 10 {
+            return Vec::new();
+        }
+        (0..NUM_FEATURES)
+            .map(|i| {
+                let abs_err = self.last_feature_errors[i].abs();
+                let avg = self.feature_error_ema[i];
+                let var = self.feature_error_sq_ema[i] - avg * avg;
+                let std = if var > 0.0 { var.sqrt() } else { 1e-10 };
+                let sigma = if avg > 1e-10 {
+                    (abs_err - avg) / std
+                } else {
+                    0.0
+                };
+                (i, FEATURE_NAMES[i], sigma)
+            })
+            .collect()
     }
 
     /// Compute health score (0-1), inverse of anomaly.
@@ -276,6 +307,12 @@ impl CfcNetwork {
     /// Current BPTT depth being used (actual cache size, up to BPTT_DEPTH).
     pub fn current_bptt_depth(&self) -> usize {
         self.cache_history.len()
+    }
+
+    /// Get the latest motor neuron outputs (8-dimensional) from the most recent forward pass.
+    /// Returns None if no forward pass has been computed yet.
+    pub fn latest_motor_outputs(&self) -> Option<&[f64]> {
+        self.cache_history.front().map(|cache| cache.motor_out.as_slice())
     }
 
     /// Reset network state (hidden state and training history, but keep weights).

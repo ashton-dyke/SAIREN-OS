@@ -20,8 +20,6 @@ pub enum MLStorageError {
     Database(sled::Error),
     /// Serialization error
     Serialization(serde_json::Error),
-    /// Report not found
-    NotFound,
 }
 
 impl std::fmt::Display for MLStorageError {
@@ -29,7 +27,6 @@ impl std::fmt::Display for MLStorageError {
         match self {
             Self::Database(e) => write!(f, "Database error: {}", e),
             Self::Serialization(e) => write!(f, "Serialization error: {}", e),
-            Self::NotFound => write!(f, "Report not found"),
         }
     }
 }
@@ -53,6 +50,7 @@ pub struct MLInsightsStorage {
     db: Db,
 }
 
+#[allow(dead_code)]
 impl MLInsightsStorage {
     /// Open or create the ML insights database
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self, MLStorageError> {
@@ -76,22 +74,6 @@ impl MLInsightsStorage {
             "{}/{}/{:?}/{}",
             report.field_name, report.well_id, report.campaign, report.timestamp
         )
-    }
-
-    /// Parse key into components
-    fn parse_key(key: &str) -> Option<(String, String, String, u64)> {
-        let parts: Vec<&str> = key.split('/').collect();
-        if parts.len() == 4 {
-            let timestamp = parts[3].parse().ok()?;
-            Some((
-                parts[0].to_string(),
-                parts[1].to_string(),
-                parts[2].to_string(),
-                timestamp,
-            ))
-        } else {
-            None
-        }
     }
 
     /// Store an ML insights report
@@ -276,66 +258,6 @@ impl MLInsightsStorage {
     }
 }
 
-/// Build ML context for LLM prompt injection
-///
-/// Formats recent ML insights for inclusion in LLM prompts
-pub fn build_ml_context(reports: &[MLInsightsReport], current_depth: f64) -> String {
-    if reports.is_empty() {
-        return String::from("### HISTORICAL ML INSIGHTS\nNo ML analysis data available yet.\n");
-    }
-
-    let mut context = String::from("### HISTORICAL ML INSIGHTS\n");
-
-    for (i, report) in reports.iter().enumerate().take(5) {
-        // Limit to 5 most relevant
-        match &report.result {
-            AnalysisResult::Success(insights) => {
-                context.push_str(&format!(
-                    "[{}] {} at {:.0}-{:.0}ft in {} (bit: {:.0}hrs, {} confidence):\n",
-                    i + 1,
-                    report.well_id,
-                    report.depth_range.0,
-                    report.depth_range.1,
-                    report.formation_type,
-                    report.bit_hours,
-                    insights.confidence
-                ));
-                context.push_str(&format!(
-                    "    Optimal: WOB={:.1} klbs, RPM={:.0}, Flow={:.0} gpm\n",
-                    insights.optimal_params.best_wob,
-                    insights.optimal_params.best_rpm,
-                    insights.optimal_params.best_flow,
-                ));
-                context.push_str(&format!(
-                    "    Achieved: ROP={:.1} ft/hr, MSE_eff={:.0}%\n",
-                    insights.optimal_params.achieved_rop, insights.optimal_params.mse_efficiency,
-                ));
-
-                // Include strongest correlation
-                if let Some(corr) = insights.correlations.first() {
-                    context.push_str(&format!(
-                        "    Correlation: {} vs {} r={:.2} (p={:.4})\n",
-                        corr.x_param, corr.y_param, corr.r_value, corr.p_value
-                    ));
-                }
-            }
-            AnalysisResult::Failure(failure) => {
-                // V2: Include failure context so LLM knows data quality issues
-                context.push_str(&format!(
-                    "[{}] {} at {:.0}ft: Analysis unavailable - {}\n",
-                    i + 1,
-                    report.well_id,
-                    current_depth,
-                    failure
-                ));
-            }
-        }
-        context.push('\n');
-    }
-
-    context
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -382,6 +304,7 @@ mod tests {
                     bin_sample_count: 50,
                     bins_evaluated: 48,
                     dysfunction_filtered: false,
+                    regime_id: None,
                 },
                 correlations: vec![SignificantCorrelation {
                     x_param: "WOB".to_string(),
@@ -501,22 +424,6 @@ mod tests {
         let near_5000 = storage.find_by_depth("WELL-001", 5000.0, 100.0, 10).unwrap();
         assert_eq!(near_5000.len(), 1);
         assert!((near_5000[0].depth_range.0 - 4950.0).abs() < 1.0);
-    }
-
-    #[test]
-    fn test_build_ml_context() {
-        let reports = vec![
-            make_report("WELL-001", "FIELD-A", Campaign::Production, 1000, 5000.0),
-            make_report("WELL-001", "FIELD-A", Campaign::Production, 2000, 5100.0),
-        ];
-
-        let context = build_ml_context(&reports, 5050.0);
-
-        assert!(context.contains("### HISTORICAL ML INSIGHTS"));
-        assert!(context.contains("WELL-001"));
-        assert!(context.contains("WOB="));
-        assert!(context.contains("RPM="));
-        assert!(context.contains("ROP="));
     }
 
     #[test]

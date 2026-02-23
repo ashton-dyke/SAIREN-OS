@@ -22,9 +22,12 @@ pub mod wiring;
 pub mod cell;
 pub mod training;
 pub mod network;
+pub mod formation_detector;
+pub mod regime_clusterer;
 
 pub use network::{CfcNetwork, FeatureSurprise};
 pub use normalizer::NUM_FEATURES;
+pub use regime_clusterer::RegimeClusterer;
 
 use crate::types::{DrillingMetrics, WitsPacket};
 
@@ -48,6 +51,11 @@ pub struct CfcDrillingResult {
     /// Per-feature surprises (most surprising first), only features exceeding
     /// 1.5x their running average error. Empty if not calibrated or too early.
     pub feature_surprises: Vec<FeatureSurprise>,
+    /// Z-scores for ALL 16 features (for formation transition detection).
+    pub feature_sigmas: Vec<(usize, &'static str, f64)>,
+    /// Motor neuron outputs (8-dimensional) from the CfC NCP motor layer.
+    /// Used for regime clustering. Empty if no forward pass has been computed.
+    pub motor_outputs: Vec<f64>,
 }
 
 /// Extract the 16 CfC input features from a WITS packet and drilling metrics.
@@ -113,6 +121,8 @@ pub fn update_from_drilling(
         packets_processed: network.packets_processed(),
         avg_loss: network.avg_loss(),
         feature_surprises: network.feature_surprises(),
+        feature_sigmas: network.all_feature_sigmas(),
+        motor_outputs: network.latest_motor_outputs().map(|s| s.to_vec()).unwrap_or_default(),
     }
 }
 
@@ -155,9 +165,12 @@ mod tests {
             ecd_margin: 3.5,
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
+            flow_data_available: true,
             is_anomaly: false,
             anomaly_category: AnomalyCategory::None,
             anomaly_description: None,
+            current_formation: None,
+            formation_depth_in_ft: None,
         }
     }
 

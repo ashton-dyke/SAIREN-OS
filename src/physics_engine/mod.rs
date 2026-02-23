@@ -21,17 +21,11 @@ pub mod models;
 // Export drilling-specific functions
 pub use drilling_models::{
     calculate_d_exponent, calculate_dxc, calculate_ecd, calculate_mse, calculate_mse_efficiency,
-    calculate_r_squared, calculate_trend, classify_rig_state, detect_formation_change,
+    calculate_r_squared, calculate_trend, classify_rig_state,
     detect_founder, detect_founder_quick, detect_kick, detect_lost_circulation, detect_packoff,
-    detect_stick_slip, estimate_annular_pressure_loss, estimate_optimal_mse,
-    strategic_drilling_analysis, FormationChange,
+    detect_stick_slip, estimate_optimal_mse,
 };
 
-// Export statistical metrics
-pub use metrics::kurtosis;
-
-// Export legacy models (for backward compatibility)
-pub use models::{l10_life, miners_rule, wear_acceleration};
 
 use crate::types::{
     AnomalyCategory, DrillingMetrics, DrillingPhysicsReport, EnhancedPhysicsReport, HistoryEntry,
@@ -86,11 +80,11 @@ pub fn tactical_update(packet: &WitsPacket, prev_packet: Option<&WitsPacket>) ->
     let dxc = calculate_dxc(d_exponent, packet.mud_weight_in, normal_mud_weight);
 
     // Calculate flow balance (positive = gain/kick, negative = loss)
-    // When flow_out sensor is unavailable (zero while flow_in > 0), skip flow balance
-    // to avoid false well-control alerts. This is common with single-sensor datasets
-    // like the Volve Kaggle data which only has flow_in.
-    let flow_out_available = packet.flow_out > 0.0 || packet.flow_in == 0.0;
-    let flow_balance = if flow_out_available {
+    // When both flow sensors read zero, we can't distinguish "balanced" from "no data".
+    // When only flow_out is zero while flow_in > 0, skip flow balance to avoid false alerts.
+    let flow_data_available = packet.flow_in > 0.0 || packet.flow_out > 0.0;
+    let flow_out_available = packet.flow_out > 0.0 || !flow_data_available;
+    let flow_balance = if flow_data_available && flow_out_available {
         packet.flow_out - packet.flow_in
     } else {
         0.0
@@ -161,9 +155,12 @@ pub fn tactical_update(packet: &WitsPacket, prev_packet: Option<&WitsPacket>) ->
         ecd_margin,
         torque_delta_percent,
         spp_delta,
+        flow_data_available,
         is_anomaly,
         anomaly_category,
         anomaly_description,
+        current_formation: None,
+        formation_depth_in_ft: None,
     }
 }
 
@@ -392,7 +389,7 @@ fn detect_anomalies(
 /// Called when an advisory ticket is created to provide deep analysis.
 /// Returns comprehensive DrillingPhysicsReport with trends and predictions.
 pub fn strategic_analysis(history: &[HistoryEntry]) -> DrillingPhysicsReport {
-    strategic_drilling_analysis(history)
+    drilling_models::strategic_drilling_analysis(history)
 }
 
 /// Enhanced strategic analysis for verification system
@@ -403,7 +400,7 @@ pub fn enhanced_strategic_analysis(history: &[HistoryEntry]) -> EnhancedPhysicsR
         return EnhancedPhysicsReport::default();
     }
 
-    let base = strategic_drilling_analysis(history);
+    let base = drilling_models::strategic_drilling_analysis(history);
 
     // Calculate history duration in hours
     let history_hours = if history.len() >= 2 {
@@ -488,8 +485,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     #[test]

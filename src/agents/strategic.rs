@@ -18,12 +18,11 @@
 //! and ticket details to generate actionable drilling recommendations.
 
 use crate::baseline::ThresholdManager;
-use crate::llm::StrategicLLM;
 use crate::physics_engine;
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, CheckStatus, EnhancedPhysicsReport, FinalSeverity,
-    HistoryEntry, TicketEvent, TicketSeverity, TicketStage, TicketType, VerificationResult,
-    VerificationStatus, WitsPacket,
+    HistoryEntry, TicketEvent, TicketStage, VerificationResult,
+    VerificationStatus,
 };
 use std::sync::{Arc, RwLock};
 
@@ -33,14 +32,14 @@ use std::sync::{Arc, RwLock};
 /// 1. Physics-based drilling calculations (MSE trends, d-exponent, etc.)
 /// 2. Baseline context verification (z-score consistency)
 /// 3. Contextual knowledge lookup from vector DB
-/// 4. LLM-powered advisory generation
+///
+/// LLM-powered advisory generation runs on the fleet hub; this agent performs
+/// deterministic physics verification only.
 pub struct StrategicAgent {
     /// Count of analyses performed
     analyses_performed: u64,
     /// Whether to use verbose output
     verbose: bool,
-    /// Optional LLM for advisory generation
-    llm: Option<Arc<StrategicLLM>>,
     /// Optional threshold manager for baseline context
     threshold_manager: Option<Arc<RwLock<ThresholdManager>>>,
     /// Equipment ID for baseline lookups
@@ -52,7 +51,6 @@ impl std::fmt::Debug for StrategicAgent {
         f.debug_struct("StrategicAgent")
             .field("analyses_performed", &self.analyses_performed)
             .field("verbose", &self.verbose)
-            .field("llm_enabled", &self.llm.is_some())
             .field("baseline_enabled", &self.threshold_manager.is_some())
             .field("equipment_id", &self.equipment_id)
             .finish()
@@ -60,23 +58,11 @@ impl std::fmt::Debug for StrategicAgent {
 }
 
 impl StrategicAgent {
-    /// Create a new strategic agent (no LLM, uses mock diagnosis)
+    /// Create a new strategic agent
     pub fn new() -> Self {
         Self {
             analyses_performed: 0,
             verbose: false,
-            llm: None,
-            threshold_manager: None,
-            equipment_id: "RIG".to_string(),
-        }
-    }
-
-    /// Create with LLM enabled for real diagnosis
-    pub fn with_llm(llm: Arc<StrategicLLM>) -> Self {
-        Self {
-            analyses_performed: 0,
-            verbose: false,
-            llm: Some(llm),
             threshold_manager: None,
             equipment_id: "RIG".to_string(),
         }
@@ -90,40 +76,14 @@ impl StrategicAgent {
         Self {
             analyses_performed: 0,
             verbose: false,
-            llm: None,
             threshold_manager: Some(threshold_manager),
             equipment_id: equipment_id.to_string(),
         }
-    }
-
-    /// Create with both LLM and dynamic thresholds
-    pub fn with_llm_and_thresholds(
-        equipment_id: &str,
-        llm: Arc<StrategicLLM>,
-        threshold_manager: Arc<RwLock<ThresholdManager>>,
-    ) -> Self {
-        Self {
-            analyses_performed: 0,
-            verbose: false,
-            llm: Some(llm),
-            threshold_manager: Some(threshold_manager),
-            equipment_id: equipment_id.to_string(),
-        }
-    }
-
-    /// Set or replace the LLM instance
-    pub fn set_llm(&mut self, llm: Arc<StrategicLLM>) {
-        self.llm = Some(llm);
     }
 
     /// Set or replace the threshold manager
     pub fn set_threshold_manager(&mut self, manager: Arc<RwLock<ThresholdManager>>) {
         self.threshold_manager = Some(manager);
-    }
-
-    /// Check if LLM is enabled
-    pub fn has_llm(&self) -> bool {
-        self.llm.is_some()
     }
 
     /// Check if baseline context is enabled
@@ -840,8 +800,7 @@ impl Default for StrategicAgent {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DrillingMetrics, RigState};
-    use std::sync::Arc;
+    use crate::types::{DrillingMetrics, RigState, TicketSeverity, TicketType, WitsPacket};
 
     /// Ensure the global config is initialized for tests.
     /// Safe to call multiple times; only the first call initializes.
@@ -870,9 +829,12 @@ mod tests {
                 ecd_margin: 0.5,
                 torque_delta_percent: 0.1,
                 spp_delta: 50.0,
+                flow_data_available: true,
                 is_anomaly: true,
                 anomaly_category: category,
                 anomaly_description: Some("Test anomaly".to_string()),
+                current_formation: None,
+                formation_depth_in_ft: None,
             },
             trigger_parameter: "flow_balance".to_string(),
             trigger_value: 15.0,
@@ -883,6 +845,7 @@ mod tests {
             trace_log: Vec::new(),
             cfc_anomaly_score: None,
             cfc_feature_surprises: Vec::new(),
+            causal_leads: Vec::new(),
         }
     }
 
@@ -902,6 +865,8 @@ mod tests {
                     flow_in: 500.0,
                     flow_out: 515.0,
                     pit_volume: 800.0 + (i as f64 * 0.1),
+                    regime_id: 0,
+                    seconds_since_param_change: 0,
                     ..WitsPacket::default()
                 };
                 let metrics = DrillingMetrics {

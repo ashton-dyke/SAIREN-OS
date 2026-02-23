@@ -201,6 +201,7 @@ mod tests {
             trace_log: Vec::new(),
             cfc_anomaly_score: None,
             cfc_feature_surprises: Vec::new(),
+            causal_leads: Vec::new(),
         }
     }
 

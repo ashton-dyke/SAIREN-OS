@@ -24,9 +24,6 @@ pub mod grid_config {
     pub const RPM_BINS: usize = 6;
     /// Minimum samples in a bin to consider it valid
     pub const MIN_BIN_SAMPLES: usize = 10;
-    /// Stability weight in composite score (0-1)
-    /// Higher = more penalty for operating near dysfunction thresholds
-    pub const STABILITY_WEIGHT: f64 = 0.25;
 }
 
 /// V2.2: Campaign-specific composite weights
@@ -47,10 +44,6 @@ fn get_weights(campaign: Campaign) -> (f64, f64, f64) {
 struct ParameterBin {
     /// Indices of samples falling in this bin
     sample_indices: Vec<usize>,
-    /// WOB range for this bin
-    wob_range: (f64, f64),
-    /// RPM range for this bin
-    rpm_range: (f64, f64),
     /// Composite score (higher = better)
     composite_score: f64,
     /// Average stability score
@@ -132,23 +125,13 @@ impl OptimalFinder {
 
         let mut bins: Vec<ParameterBin> = Vec::new();
 
-        for wob_idx in 0..WOB_BINS {
-            for rpm_idx in 0..RPM_BINS {
-                let wob_lo = wob_min + wob_idx as f64 * wob_step;
-                let wob_hi = wob_lo + wob_step;
-                let rpm_lo = rpm_min + rpm_idx as f64 * rpm_step;
-                let rpm_hi = rpm_lo + rpm_step;
-
-                bins.push(ParameterBin {
-                    sample_indices: Vec::new(),
-                    wob_range: (wob_lo, wob_hi),
-                    rpm_range: (rpm_lo, rpm_hi),
-                    composite_score: 0.0,
-                    stability_score: 0.0,
-                    stats: BinStats::default(),
-                });
-            }
-        }
+        let total_bins = WOB_BINS * RPM_BINS;
+        bins.resize_with(total_bins, || ParameterBin {
+            sample_indices: Vec::new(),
+            composite_score: 0.0,
+            stability_score: 0.0,
+            stats: BinStats::default(),
+        });
 
         // Pre-compute stability scores for all samples (need rolling torque CV)
         let torque_cv_values = Self::compute_rolling_torque_cv(packets, 10);
@@ -158,8 +141,8 @@ impl OptimalFinder {
             let wob = packets[i].wob;
             let rpm = packets[i].rpm;
 
-            let wob_idx = ((wob - wob_min) / wob_step).floor() as usize;
-            let rpm_idx = ((rpm - rpm_min) / rpm_step).floor() as usize;
+            let wob_idx = ((wob - wob_min) / wob_step).floor().max(0.0) as usize;
+            let rpm_idx = ((rpm - rpm_min) / rpm_step).floor().max(0.0) as usize;
 
             // Clamp to valid range
             let wob_idx = wob_idx.min(WOB_BINS - 1);
@@ -225,6 +208,7 @@ impl OptimalFinder {
             bin_sample_count: best_bin.sample_indices.len(),
             bins_evaluated: valid_bin_count,
             dysfunction_filtered,
+            regime_id: None,
         })
     }
 
@@ -391,6 +375,7 @@ impl OptimalFinder {
             bin_sample_count: n,
             bins_evaluated: 0, // No binning was done
             dysfunction_filtered,
+            regime_id: None,
         }
     }
 
@@ -410,15 +395,6 @@ impl OptimalFinder {
         }
     }
 
-    /// V2.2: Interpret stability score
-    pub fn interpret_stability_score(score: f64) -> &'static str {
-        match score {
-            s if s > 0.85 => "Very stable operation",
-            s if s > 0.70 => "Stable with minor variations",
-            s if s > 0.50 => "Moderate stability - monitor closely",
-            _ => "Unstable - recommend parameter adjustment",
-        }
-    }
 }
 
 #[cfg(test)]
@@ -465,8 +441,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     fn make_metric(mse: f64, mse_efficiency: f64) -> DrillingMetrics {
@@ -483,9 +459,12 @@ mod tests {
             ecd_margin: 1.0,
             torque_delta_percent: 0.02,
             spp_delta: 10.0,
+            flow_data_available: true,
             is_anomaly: false,
             anomaly_category: AnomalyCategory::None,
             anomaly_description: None,
+            current_formation: None,
+            formation_depth_in_ft: None,
         }
     }
 

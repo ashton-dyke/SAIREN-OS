@@ -21,6 +21,16 @@ use super::{
     quality_filter::DataQualityFilter,
 };
 
+/// Result from running Steps 3-5 on a single regime partition
+struct PartitionResult {
+    optimal_params: crate::types::OptimalParams,
+    correlations: Vec<SignificantCorrelation>,
+    formation_type: String,
+    sample_count: usize,
+    low_correlation_confidence: bool,
+    depth_range: (f64, f64),
+}
+
 /// Core ML analyzer that orchestrates the full analysis pipeline
 pub struct HourlyAnalyzer;
 
@@ -106,83 +116,220 @@ impl HourlyAnalyzer {
             );
         }
 
-        // Step 3: Formation segmentation (on stable samples only)
-        let segments = FormationSegmenter::segment(&dysfunction_result.stable_packets);
+        // Steps 3-5: Regime-partitioned analysis
+        // Group stable samples by regime_id, merge small partitions, run Steps 3-5 on each
+        let partition_results = Self::analyze_by_regime(
+            &dysfunction_result.stable_packets,
+            &dysfunction_result.stable_metrics,
+            dataset,
+            dysfunction_filtered,
+            timestamp,
+        );
 
-        // V2: Check for unstable formation
-        if FormationSegmenter::is_unstable(&segments, MIN_ANALYSIS_SAMPLES) {
-            let max_segment = segments
-                .iter()
-                .map(|s| s.valid_sample_count)
-                .max()
-                .unwrap_or(0);
+        // If no partition succeeded, return a failure report
+        if partition_results.is_empty() {
             return Self::build_failure_report(
                 dataset,
                 timestamp,
-                AnalysisFailure::UnstableFormation {
-                    segment_count: segments.len(),
-                    max_segment_size: max_segment,
+                AnalysisFailure::InsufficientData {
+                    valid_samples: dysfunction_result.stable_packets.len(),
+                    required: MIN_ANALYSIS_SAMPLES,
                 },
             );
+        }
+
+        // Pick the partition with the highest composite_score
+        let best = partition_results
+            .into_iter()
+            .max_by(|a, b| {
+                a.optimal_params
+                    .composite_score
+                    .partial_cmp(&b.optimal_params.composite_score)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .expect("partition_results is non-empty");
+
+        // Step 6: Build success report from winning partition
+        let mut confidence = ConfidenceLevel::from_sample_count(best.sample_count);
+        if best.low_correlation_confidence && confidence == ConfidenceLevel::High {
+            confidence = ConfidenceLevel::Medium;
+        }
+
+        let summary = Self::build_summary(
+            &best.optimal_params,
+            &best.correlations,
+            &best.formation_type,
+            dataset,
+            confidence,
+            dysfunction_result.stability_score,
+            best.low_correlation_confidence,
+        );
+
+        let depth_range = best.depth_range;
+
+        MLInsightsReport {
+            timestamp,
+            campaign: dataset.campaign,
+            depth_range,
+            well_id: dataset.well_id.clone(),
+            field_name: dataset.field_name.clone(),
+            bit_hours: dataset.bit_hours,
+            bit_depth: dataset.bit_depth,
+            formation_type: best.formation_type,
+            result: AnalysisResult::Success(AnalysisInsights {
+                optimal_params: best.optimal_params,
+                correlations: best.correlations,
+                summary_text: summary,
+                confidence,
+                sample_count: best.sample_count,
+            }),
+        }
+    }
+
+    /// Run regime-partitioned analysis (Steps 3-5) on stable samples.
+    ///
+    /// Groups samples by `regime_id`, merges small partitions into the nearest
+    /// (by centroid distance), and runs the standard pipeline on each viable partition.
+    fn analyze_by_regime(
+        stable_packets: &[&crate::types::WitsPacket],
+        stable_metrics: &[&crate::types::DrillingMetrics],
+        dataset: &HourlyDataset,
+        dysfunction_filtered: bool,
+        _timestamp: u64,
+    ) -> Vec<PartitionResult> {
+        use std::collections::HashMap;
+
+        // Group indices by regime_id
+        let mut partitions: HashMap<u8, Vec<usize>> = HashMap::new();
+        for (i, pkt) in stable_packets.iter().enumerate() {
+            partitions.entry(pkt.regime_id).or_default().push(i);
+        }
+
+        // Merge partitions with < 50 samples into nearest by centroid distance
+        let centroids = dataset.regime_centroids;
+        let small_keys: Vec<u8> = partitions
+            .iter()
+            .filter(|(_, indices)| indices.len() < 50)
+            .map(|(k, _)| *k)
+            .collect();
+
+        for small_key in small_keys {
+            if let Some(small_indices) = partitions.remove(&small_key) {
+                // Find the nearest non-empty partition by centroid distance
+                let target = partitions
+                    .keys()
+                    .copied()
+                    .min_by(|&a, &b| {
+                        euclidean_distance_8(&centroids[small_key as usize], &centroids[a as usize])
+                            .partial_cmp(&euclidean_distance_8(
+                                &centroids[small_key as usize],
+                                &centroids[b as usize],
+                            ))
+                            .unwrap_or(std::cmp::Ordering::Equal)
+                    });
+
+                if let Some(target_key) = target {
+                    partitions.get_mut(&target_key).expect("target_key came from partitions.keys()").extend(small_indices);
+                } else {
+                    // All other partitions were also small and removed; re-insert
+                    partitions.insert(small_key, small_indices);
+                }
+            }
+        }
+
+        // If no partition reaches MIN_ANALYSIS_SAMPLES, combine all into one (regime_id = None)
+        let any_viable = partitions.values().any(|idx| idx.len() >= MIN_ANALYSIS_SAMPLES);
+        if !any_viable {
+            // Combine everything
+            let all_indices: Vec<usize> = (0..stable_packets.len()).collect();
+            let mut combined = HashMap::new();
+            combined.insert(255u8, all_indices); // sentinel for "no regime"
+            return Self::run_partitions(&combined, stable_packets, stable_metrics, dataset, dysfunction_filtered, true);
+        }
+
+        Self::run_partitions(&partitions, stable_packets, stable_metrics, dataset, dysfunction_filtered, false)
+    }
+
+    /// Run Steps 3-5 on each viable partition.
+    fn run_partitions(
+        partitions: &std::collections::HashMap<u8, Vec<usize>>,
+        stable_packets: &[&crate::types::WitsPacket],
+        stable_metrics: &[&crate::types::DrillingMetrics],
+        dataset: &HourlyDataset,
+        dysfunction_filtered: bool,
+        combined_mode: bool,
+    ) -> Vec<PartitionResult> {
+        let mut results = Vec::new();
+
+        for (&regime_key, indices) in partitions {
+            if indices.len() < MIN_ANALYSIS_SAMPLES {
+                continue;
+            }
+
+            let part_packets: Vec<&crate::types::WitsPacket> =
+                indices.iter().map(|&i| stable_packets[i]).collect();
+            let part_metrics: Vec<&crate::types::DrillingMetrics> =
+                indices.iter().map(|&i| stable_metrics[i]).collect();
+
+            if let Some(mut result) = Self::run_partition(
+                &part_packets,
+                &part_metrics,
+                dataset,
+                dysfunction_filtered,
+            ) {
+                // Tag with regime_id
+                if combined_mode {
+                    result.optimal_params.regime_id = None;
+                } else {
+                    result.optimal_params.regime_id = Some(regime_key);
+                }
+                results.push(result);
+            }
+        }
+
+        results
+    }
+
+    /// Run Steps 3-5 (formation segmentation, correlation, grid optimization) on a single partition.
+    fn run_partition(
+        packets: &[&crate::types::WitsPacket],
+        metrics: &[&crate::types::DrillingMetrics],
+        dataset: &HourlyDataset,
+        dysfunction_filtered: bool,
+    ) -> Option<PartitionResult> {
+        // Step 3: Formation segmentation
+        let segments = FormationSegmenter::segment_with_cfc_boundaries(
+            packets,
+            &dataset.cfc_transition_timestamps,
+        );
+
+        // Check for unstable formation — if so, skip this partition
+        if FormationSegmenter::is_unstable(&segments, MIN_ANALYSIS_SAMPLES) {
+            return None;
         }
 
         // Use largest segment for analysis
         let best_segment = segments
             .iter()
-            .max_by_key(|s| s.valid_sample_count)
-            .expect("should have at least one segment");
+            .max_by_key(|s| s.valid_sample_count)?;
 
         let (start, end) = best_segment.packet_range;
-        let segment_packets: Vec<_> = dysfunction_result.stable_packets[start..end].to_vec();
-        let segment_metrics: Vec<_> = dysfunction_result.stable_metrics[start..end].to_vec();
+        let segment_packets: Vec<_> = packets[start..end].to_vec();
+        let segment_metrics: Vec<_> = metrics[start..end].to_vec();
 
-        // Step 4: Correlation analysis (V2.2: relaxed requirements)
-        // We still calculate correlations for insights, but don't fail if none are significant
+        // Step 4: Correlation analysis
         let (correlations, _best_p) =
             CorrelationEngine::analyze_drilling_correlations(&segment_packets);
-
-        // V2.2: Instead of failing on no correlations, just flag as low confidence
-        // This allows optimization to proceed even in variable drilling conditions
         let low_correlation_confidence = correlations.is_empty();
 
-        // Step 5: Optimal parameter finding with grid-based binning and stability penalty
-        let optimal_params = match OptimalFinder::find_optimal(
+        // Step 5: Optimal parameter finding
+        let optimal_params = OptimalFinder::find_optimal(
             &segment_packets,
             &segment_metrics,
             dataset.campaign,
             dysfunction_filtered,
-        ) {
-            Some(params) => params,
-            None => {
-                return Self::build_failure_report(
-                    dataset,
-                    timestamp,
-                    AnalysisFailure::InsufficientData {
-                        valid_samples: segment_packets.len(),
-                        required: MIN_ANALYSIS_SAMPLES,
-                    },
-                );
-            }
-        };
+        )?;
 
-        // Step 6: Build success report
-        // Confidence is based on sample count but downgraded if correlations were weak
-        let mut confidence = ConfidenceLevel::from_sample_count(segment_packets.len());
-        if low_correlation_confidence && confidence == ConfidenceLevel::High {
-            confidence = ConfidenceLevel::Medium;
-        }
-
-        let summary = Self::build_summary(
-            &optimal_params,
-            &correlations,
-            &best_segment.formation_type,
-            dataset,
-            confidence,
-            dysfunction_result.stability_score,
-            low_correlation_confidence,
-        );
-
-        // Determine depth range from segment
         let depth_range = (
             segment_packets
                 .first()
@@ -194,23 +341,14 @@ impl HourlyAnalyzer {
                 .unwrap_or(dataset.avg_depth),
         );
 
-        MLInsightsReport {
-            timestamp,
-            campaign: dataset.campaign,
-            depth_range,
-            well_id: dataset.well_id.clone(),
-            field_name: dataset.field_name.clone(),
-            bit_hours: dataset.bit_hours,
-            bit_depth: dataset.bit_depth,
+        Some(PartitionResult {
+            optimal_params,
+            correlations,
             formation_type: best_segment.formation_type.clone(),
-            result: AnalysisResult::Success(AnalysisInsights {
-                optimal_params,
-                correlations,
-                summary_text: summary,
-                confidence,
-                sample_count: segment_packets.len(),
-            }),
-        }
+            sample_count: segment_packets.len(),
+            low_correlation_confidence,
+            depth_range,
+        })
     }
 
     /// Build a failure report
@@ -315,6 +453,15 @@ impl HourlyAnalyzer {
     }
 }
 
+/// Euclidean distance between two 8-dimensional centroid vectors.
+fn euclidean_distance_8(a: &[f64; 8], b: &[f64; 8]) -> f64 {
+    a.iter()
+        .zip(b.iter())
+        .map(|(x, y)| (x - y).powi(2))
+        .sum::<f64>()
+        .sqrt()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -360,8 +507,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     fn make_metric(mse: f64, mse_efficiency: f64) -> DrillingMetrics {
@@ -378,9 +525,12 @@ mod tests {
             ecd_margin: 1.0,
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
+            flow_data_available: true,
             is_anomaly: false,
             anomaly_category: AnomalyCategory::None,
             anomaly_description: None,
+            current_formation: None,
+            formation_depth_in_ft: None,
         }
     }
 
@@ -399,6 +549,8 @@ mod tests {
             bit_depth: 500.0,
             rejected_sample_count: 0,
             formation_segments: Vec::new(),
+            cfc_transition_timestamps: Vec::new(),
+            regime_centroids: [[0.0; 8]; 4],
         }
     }
 

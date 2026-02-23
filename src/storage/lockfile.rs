@@ -145,6 +145,7 @@ impl ProcessLock {
     }
 
     /// Get the path to the lock file
+    #[cfg(test)]
     pub fn path(&self) -> &Path {
         &self.lock_path
     }

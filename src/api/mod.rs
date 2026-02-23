@@ -1,9 +1,8 @@
 //! REST API module using Axum
 //!
-//! Provides HTTP endpoints for the TDS Guardian dashboard:
-//! - Real-time health assessment from LLM
+//! Provides HTTP endpoints for the SAIREN-OS drilling intelligence dashboard:
+//! - Real-time health assessment and operational scoring
 //! - System status and learning progress
-//! - Frequency spectrum visualization
 //! - Static file serving for the dashboard
 
 pub mod handlers;

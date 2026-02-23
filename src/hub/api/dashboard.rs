@@ -3,7 +3,6 @@
 use crate::hub::HubState;
 use crate::hub::auth::api_key::AdminAuth;
 use axum::extract::{Query, State};
-use axum::http::StatusCode;
 use axum::response::{Html, IntoResponse, Response};
 use axum::Json;
 use serde::{Deserialize, Serialize};

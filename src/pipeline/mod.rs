@@ -3,7 +3,7 @@
 //! ## 10-Phase Pipeline Architecture
 //!
 //! ```text
-//! PHASE 1: Sensor Ingestion (every 60 seconds)
+//! PHASE 1: WITS Ingestion (every 1 second)
 //! PHASE 2: Basic Physics (inside Tactical Agent, < 15ms)
 //! PHASE 3: Tactical Agent Decision (ticket or discard)
 //! PHASE 4: History Buffer (continuous, parallel)
@@ -16,18 +16,11 @@
 //! ```
 //!
 //! CRITICAL GUARANTEE: Phases 5-9 ONLY execute if Tactical Agent created a ticket.
-//!
-//! # Usage
-//!
-//! ```ignore
-//! use tds_guardian::pipeline::{PipelineCoordinator, VibrationProcessor, AppState};
-//!
-//! let mut coordinator = PipelineCoordinator::new();
-//! let report = coordinator.process_packet(&sensor_packet).await;
-//! ```
 
-mod processor;
+mod state;
 mod coordinator;
+pub mod source;
+pub mod processing_loop;
 
-pub use processor::*;
-pub use coordinator::PipelineCoordinator;
+pub use state::*;
+pub use coordinator::{PipelineCoordinator, PipelineStats};

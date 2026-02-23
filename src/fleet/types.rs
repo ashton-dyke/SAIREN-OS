@@ -198,6 +198,47 @@ impl FleetEpisode {
     }
 }
 
+// ─── Intelligence distribution types ─────────────────────────────────────────
+
+/// A hub intelligence output received by the rig during an intelligence sync.
+///
+/// Fleet-wide outputs (`rig_id == None`) are formation benchmarks and anomaly
+/// fingerprints relevant to all rigs in the field.  Rig-specific outputs
+/// (`rig_id == Some(...)`) are post-well reports or benchmark gap advisories
+/// addressed to a particular rig.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntelligenceOutput {
+    /// Hub-assigned UUID
+    pub id: String,
+    /// Worker that produced this output (e.g. `formation_benchmark`)
+    pub job_type: String,
+    /// Output classification: `benchmark` | `fingerprint` | `report` | `advisory`
+    pub output_type: String,
+    /// Raw LLM text or formatted summary
+    pub content: String,
+    /// Formation this output relates to (if applicable)
+    pub formation_name: Option<String>,
+    /// Rig this output is addressed to (`None` = fleet-wide)
+    pub rig_id: Option<String>,
+    /// Well this output relates to (if applicable)
+    pub well_id: Option<String>,
+    /// Confidence 0.0–1.0 (if provided by the worker)
+    pub confidence: Option<f64>,
+    /// Creation timestamp on the hub (unix seconds)
+    pub created_at: u64,
+}
+
+/// Response from `GET /api/fleet/intelligence`
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IntelligenceSyncResponse {
+    pub outputs: Vec<IntelligenceOutput>,
+    /// Unix timestamp to use as `?since=` on the next pull
+    pub synced_at: u64,
+    pub total: usize,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 /// Check if an advisory's risk level qualifies for fleet upload
 ///
 /// Only AMBER (Elevated/High) and RED (Critical) events are uploaded.

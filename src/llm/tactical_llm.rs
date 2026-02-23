@@ -287,6 +287,8 @@ mod tests {
             is_anomaly,
             anomaly_category: if is_anomaly { AnomalyCategory::DrillingEfficiency } else { AnomalyCategory::None },
             anomaly_description: if is_anomaly { Some("Test anomaly".to_string()) } else { None },
+            current_formation: None,
+            formation_depth_in_ft: None,
         }
     }
 

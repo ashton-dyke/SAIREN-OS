@@ -154,7 +154,6 @@ struct SimulationState {
 
     // Baseline values (established during learning phase)
     baseline_mse: f64,
-    baseline_d_exp: f64,
 
     // Current state values
     rop: f64,
@@ -200,7 +199,6 @@ impl SimulationState {
             current_depth: 10000.0,
             hole_depth: 10050.0,
             baseline_mse: 35000.0,
-            baseline_d_exp: 1.5,
             rop: BASE_ROP,
             wob: BASE_WOB,
             rpm: BASE_RPM,
@@ -218,8 +216,8 @@ impl SimulationState {
             d_exponent: 1.5,
             packets_generated: 0,
             anomaly_packets: 0,
-            small_noise: Normal::new(0.0, 0.02).unwrap(),
-            medium_noise: Normal::new(0.0, 0.1).unwrap(),
+            small_noise: Normal::new(0.0, 0.02).expect("constant std dev"),
+            medium_noise: Normal::new(0.0, 0.1).expect("constant std dev"),
         }
     }
 
@@ -445,8 +443,8 @@ impl SimulationState {
             torque_delta_percent: torque_delta,
             spp_delta,
             rig_state: self.current_phase.rig_state(),
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 }
 
@@ -455,6 +453,7 @@ impl SimulationState {
 // ============================================================================
 
 fn format_time(seconds: f64) -> String {
+    let seconds = seconds.max(0.0);
     let hours = (seconds / 3600.0) as u32;
     let minutes = ((seconds % 3600.0) / 60.0) as u32;
     let secs = (seconds % 60.0) as u32;

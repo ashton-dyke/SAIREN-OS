@@ -28,6 +28,7 @@ use tokio::net::TcpStream;
 
 /// WITS protocol errors
 #[derive(Debug, Error)]
+#[allow(dead_code)]
 pub enum WitsError {
     #[error("Connection failed: {0}")]
     ConnectionFailed(String),
@@ -46,6 +47,7 @@ pub enum WitsError {
 }
 
 /// WITS item codes for drilling data (Record 01)
+#[allow(dead_code)]
 pub mod wits_items {
     pub const BIT_DEPTH: &str = "0108";
     pub const HOLE_DEPTH: &str = "0110";
@@ -130,6 +132,7 @@ impl WitsClient {
     }
 
     /// Set the read timeout (seconds). Default is 120s.
+    #[allow(dead_code)]
     pub fn with_read_timeout(mut self, secs: u64) -> Self {
         self.read_timeout_secs = secs;
         self
@@ -333,6 +336,7 @@ impl WitsClient {
     }
 
     /// Get connection health statistics
+    #[allow(dead_code)]
     pub fn stats(&self) -> WitsClientStats {
         WitsClientStats {
             connected: self.connected,
@@ -429,11 +433,12 @@ impl WitsClient {
             spp_delta: 0.0,
             // State
             rig_state,
-            waveform_snapshot: std::sync::Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     /// Check if connected
+    #[allow(dead_code)]
     pub fn is_connected(&self) -> bool {
         self.connected
     }
@@ -475,6 +480,7 @@ fn classify_rig_state(rpm: f64, wob: f64, hook_load: f64, rop: f64, block_positi
 }
 
 /// WITS client connection health statistics
+#[allow(dead_code)]
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct WitsClientStats {
     pub connected: bool,
@@ -518,6 +524,7 @@ pub struct DataQualityIssue {
 }
 
 /// Severity of a data quality issue
+#[allow(dead_code)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum QualitySeverity {
     /// Data is corrupted — packet should be discarded
@@ -698,7 +705,34 @@ pub fn validate_packet_quality(packet: &WitsPacket) -> DataQualityReport {
     }
 }
 
+/// Sanitize a WITS packet by clamping physically impossible values.
+/// Returns a DataQualityReport for logging (reuses existing validation).
+pub fn sanitize_packet(packet: &mut WitsPacket) -> DataQualityReport {
+    // Clamp negative values that should never be negative
+    if packet.wob < 0.0 { packet.wob = 0.0; }
+    if packet.torque < 0.0 { packet.torque = 0.0; }
+    if packet.rpm < 0.0 { packet.rpm = 0.0; }
+    if packet.rop < 0.0 { packet.rop = 0.0; }
+    if packet.flow_in < 0.0 { packet.flow_in = 0.0; }
+    if packet.flow_out < 0.0 { packet.flow_out = 0.0; }
+    if packet.spp < 0.0 { packet.spp = 0.0; }
+
+    // Replace NaN/Inf with 0.0 for all f64 fields
+    macro_rules! sanitize_nan {
+        ($($field:ident),*) => {
+            $(if !packet.$field.is_finite() { packet.$field = 0.0; })*
+        }
+    }
+    sanitize_nan!(bit_depth, hole_depth, rop, wob, rpm, torque, spp,
+                  flow_in, flow_out, pit_volume, mud_weight_in, mud_weight_out,
+                  ecd, gas_units, mud_temp_in, mud_temp_out);
+
+    // Run existing validation for reporting
+    validate_packet_quality(packet)
+}
+
 /// Parse WITS JSON format (for testing with wits_simulator.py)
+#[allow(dead_code)]
 pub fn parse_wits_json(json_str: &str) -> Result<WitsPacket> {
     let packet: WitsPacket = serde_json::from_str(json_str)
         .context("Failed to parse WITS JSON")?;
@@ -706,10 +740,12 @@ pub fn parse_wits_json(json_str: &str) -> Result<WitsPacket> {
 }
 
 /// WITS Level 0 frame builder (for testing/simulation)
+#[allow(dead_code)]
 pub struct WitsFrameBuilder {
     items: Vec<(String, String)>,
 }
 
+#[allow(dead_code)]
 impl WitsFrameBuilder {
     pub fn new() -> Self {
         Self { items: Vec::new() }

@@ -35,7 +35,7 @@ pub fn template_advisory(
     physics: &DrillingPhysicsReport,
     campaign: Campaign,
 ) -> TemplateAdvisory {
-    let (recommendation, expected_benefit, reasoning) = match ticket.category {
+    let (recommendation, expected_benefit, mut reasoning) = match ticket.category {
         AnomalyCategory::WellControl => well_control_template(ticket, physics, campaign),
         AnomalyCategory::DrillingEfficiency => efficiency_template(ticket, physics),
         AnomalyCategory::Hydraulics => hydraulics_template(ticket, physics),
@@ -44,6 +44,11 @@ pub fn template_advisory(
         AnomalyCategory::None => normal_template(physics),
     };
 
+    // Append causal lead context when available
+    if !ticket.causal_leads.is_empty() {
+        reasoning.push_str(&format_causal_block(&ticket.causal_leads));
+    }
+
     TemplateAdvisory {
         recommendation,
         expected_benefit,
@@ -51,6 +56,25 @@ pub fn template_advisory(
         confidence: 0.70,
         source: "template",
     }
+}
+
+/// Format causal leads as a compact sentence appended to the reasoning block.
+fn format_causal_block(leads: &[crate::types::CausalLead]) -> String {
+    let parts: Vec<String> = leads
+        .iter()
+        .map(|l| {
+            let movement = if l.correlation_sign > 0 {
+                "rising"
+            } else {
+                "falling"
+            };
+            format!(
+                "{} {} precedes MSE rise by {}s (r={:+.2})",
+                l.parameter, movement, l.lag_seconds, l.pearson_r
+            )
+        })
+        .collect();
+    format!(" Causal leads: {}.", parts.join("; "))
 }
 
 fn well_control_template(
@@ -89,7 +113,7 @@ fn well_control_template(
 }
 
 fn efficiency_template(
-    ticket: &AdvisoryTicket,
+    _ticket: &AdvisoryTicket,
     physics: &DrillingPhysicsReport,
 ) -> (String, String, String) {
     let eff = physics.mse_efficiency;
@@ -291,6 +315,7 @@ mod tests {
             trace_log: Vec::new(),
             cfc_anomaly_score: None,
             cfc_feature_surprises: Vec::new(),
+            causal_leads: Vec::new(),
         }
     }
 

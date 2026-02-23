@@ -34,6 +34,7 @@ struct StoredReport<T> {
 // Implementation
 // ============================================================================
 
+#[cfg_attr(not(feature = "llm"), allow(dead_code))]
 impl StrategicStorage {
     /// Open or create the strategic storage database
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -290,7 +291,8 @@ impl StrategicStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strategic::{DetailsSection, HourlyReport, DailyReport};
+    use crate::strategic::{HourlyReport, DailyReport};
+    use crate::strategic::parsing::DetailsSection;
 
     fn create_test_hourly() -> HourlyReport {
         HourlyReport {

@@ -18,6 +18,9 @@ pub mod thresholds;
 mod advisory;
 mod ticket;
 mod ml;
+mod formation;
+mod optimization;
+mod knowledge_base;
 
 pub use state::*;
 pub use wits::*;
@@ -26,3 +29,6 @@ pub use thresholds::*;
 pub use advisory::*;
 pub use ticket::*;
 pub use ml::*;
+pub use formation::*;
+pub use optimization::*;
+pub use knowledge_base::*;

@@ -59,7 +59,7 @@ pub fn calculate_mse(torque: f64, rpm: f64, bit_diameter: f64, rop: f64, wob: f6
 /// Returns 0-100%, capped at 100% for efficiency > 100%
 pub fn calculate_mse_efficiency(actual_mse: f64, optimal_mse: f64) -> f64 {
     if actual_mse <= 0.0 || optimal_mse <= 0.0 {
-        return 100.0;
+        return 0.0; // Not assessable
     }
 
     let efficiency = (optimal_mse / actual_mse) * 100.0;

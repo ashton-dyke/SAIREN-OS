@@ -27,7 +27,11 @@ pub mod uploader;
 #[cfg(feature = "fleet-client")]
 pub mod sync;
 
-pub use types::{FleetEvent, FleetEpisode, EventOutcome};
+pub use types::{FleetEvent, FleetEpisode, EventOutcome, IntelligenceOutput, IntelligenceSyncResponse};
 pub use queue::UploadQueue;
 #[cfg(feature = "fleet-client")]
 pub use client::FleetClient;
+
+// Re-export fleet bridge types when knowledge-base feature is enabled
+#[cfg(feature = "knowledge-base")]
+pub use crate::knowledge_base::fleet_bridge::{FleetPerformanceUpload, FleetPerformanceResponse};

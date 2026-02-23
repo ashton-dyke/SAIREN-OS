@@ -19,7 +19,12 @@ impl Specialist for MseSpecialist {
         let efficiency = physics.mse_efficiency;
         let cfg = crate::config::get();
 
-        let (vote, reasoning) = if efficiency < cfg.thresholds.mse.efficiency_poor_percent {
+        let (vote, reasoning) = if efficiency <= 0.0 {
+            (
+                TicketSeverity::Low,
+                "MSE not assessable - insufficient drilling data".to_string(),
+            )
+        } else if efficiency < cfg.thresholds.mse.efficiency_poor_percent {
             (
                 TicketSeverity::High,
                 format!(

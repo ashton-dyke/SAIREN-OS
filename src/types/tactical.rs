@@ -75,12 +75,20 @@ pub struct DrillingMetrics {
     pub torque_delta_percent: f64,
     /// SPP delta from baseline (psi)
     pub spp_delta: f64,
+    /// Whether flow sensor data is available (at least one of flow_in/flow_out > 0)
+    pub flow_data_available: bool,
     /// Whether metrics indicate an anomaly
     pub is_anomaly: bool,
     /// Category of detected anomaly
     pub anomaly_category: AnomalyCategory,
     /// Description of detected anomaly
     pub anomaly_description: Option<String>,
+    /// Current formation name (from prognosis lookup)
+    #[serde(default)]
+    pub current_formation: Option<String>,
+    /// Depth into current formation in feet (for progress tracking)
+    #[serde(default)]
+    pub formation_depth_in_ft: Option<f64>,
 }
 
 impl Default for DrillingMetrics {
@@ -98,9 +106,12 @@ impl Default for DrillingMetrics {
             ecd_margin: 1.5, // Safe default margin
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
+            flow_data_available: false,
             is_anomaly: false,
             anomaly_category: AnomalyCategory::None,
             anomaly_description: None,
+            current_formation: None,
+            formation_depth_in_ft: None,
         }
     }
 }

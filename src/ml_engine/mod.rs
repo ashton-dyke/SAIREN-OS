@@ -29,6 +29,7 @@ pub mod optimal_finder;
 pub mod analyzer;
 pub mod scheduler;
 pub mod storage;
+pub mod param_change_tracker;
 
 // Re-export public types
 pub use formation_segmenter::FormationSegmenter;

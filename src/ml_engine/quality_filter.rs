@@ -17,8 +17,6 @@ pub struct FilterResult<'a> {
     pub valid_packets: Vec<&'a WitsPacket>,
     /// Valid metrics corresponding to valid packets
     pub valid_metrics: Vec<&'a DrillingMetrics>,
-    /// Number of samples rejected
-    pub rejected_count: usize,
     /// Primary reason for rejections (if any)
     pub rejection_reason: Option<String>,
 }
@@ -95,7 +93,6 @@ impl DataQualityFilter {
         FilterResult {
             valid_packets,
             valid_metrics,
-            rejected_count: rejected,
             rejection_reason,
         }
     }
@@ -131,6 +128,7 @@ impl DataQualityFilter {
     }
 
     /// Quick check if a packet is valid for ML analysis
+    #[cfg(test)]
     pub fn is_valid(packet: &WitsPacket, metric: &DrillingMetrics) -> bool {
         Self::validate(packet, metric).is_ok()
     }
@@ -189,8 +187,8 @@ mod tests {
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
-            waveform_snapshot: Arc::new(Vec::new()),
-        }
+            regime_id: 0,
+            seconds_since_param_change: 0,        }
     }
 
     fn make_valid_metric() -> DrillingMetrics {
@@ -207,9 +205,12 @@ mod tests {
             ecd_margin: 1.0,
             torque_delta_percent: 0.0,
             spp_delta: 0.0,
+            flow_data_available: true,
             is_anomaly: false,
             anomaly_category: crate::types::AnomalyCategory::None,
             anomaly_description: None,
+            current_formation: None,
+            formation_depth_in_ft: None,
         }
     }
 
@@ -282,7 +283,6 @@ mod tests {
 
         assert_eq!(result.valid_packets.len(), 2);
         assert_eq!(result.valid_metrics.len(), 2);
-        assert_eq!(result.rejected_count, 1);
         assert!(result.rejection_reason.is_some());
     }
 }
