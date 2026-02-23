@@ -1,9 +1,7 @@
-//! Rig registry handlers — register, list, get, revoke
+//! Rig registry handlers — enroll, list, get, revoke
 
 use crate::hub::HubState;
-use crate::hub::auth::api_key::{
-    generate_api_key, hash_api_key, AdminAuth, ErrorResponse,
-};
+use crate::hub::auth::api_key::{AdminAuth, ErrorResponse};
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::Json;
@@ -12,16 +10,17 @@ use std::sync::Arc;
 use tracing::info;
 
 #[derive(Deserialize)]
-pub struct RegisterRigRequest {
+pub struct EnrollRigRequest {
     pub rig_id: String,
     pub well_id: String,
     pub field: String,
 }
 
 #[derive(Serialize)]
-pub struct RegisterRigResponse {
+pub struct EnrollRigResponse {
     pub rig_id: String,
-    pub api_key: String,
+    pub well_id: String,
+    pub field: String,
 }
 
 #[derive(Serialize)]
@@ -36,20 +35,17 @@ pub struct RigInfo {
     pub status: String,
 }
 
-/// POST /api/fleet/rigs/register — Register a new rig (admin only)
-pub async fn register_rig(
+/// POST /api/fleet/enroll — Enroll a new rig (passphrase auth)
+pub async fn enroll_rig(
     State(hub): State<Arc<HubState>>,
     _admin: AdminAuth,
-    Json(req): Json<RegisterRigRequest>,
-) -> Result<(StatusCode, Json<RegisterRigResponse>), (StatusCode, Json<ErrorResponse>)> {
-    let api_key = generate_api_key();
-    let key_hash = hash_api_key(&api_key);
-
+    Json(req): Json<EnrollRigRequest>,
+) -> Result<(StatusCode, Json<EnrollRigResponse>), (StatusCode, Json<ErrorResponse>)> {
     sqlx::query(
         "INSERT INTO rigs (rig_id, api_key_hash, well_id, field) VALUES ($1, $2, $3, $4)",
     )
     .bind(&req.rig_id)
-    .bind(&key_hash)
+    .bind("")
     .bind(&req.well_id)
     .bind(&req.field)
     .execute(&hub.db)
@@ -72,13 +68,14 @@ pub async fn register_rig(
         }
     })?;
 
-    info!(rig_id = %req.rig_id, "Rig registered");
+    info!(rig_id = %req.rig_id, "Rig enrolled");
 
     Ok((
         StatusCode::CREATED,
-        Json(RegisterRigResponse {
+        Json(EnrollRigResponse {
             rig_id: req.rig_id,
-            api_key, // Returned in plaintext ONCE
+            well_id: req.well_id,
+            field: req.field,
         }),
     ))
 }
@@ -213,10 +210,6 @@ pub async fn revoke_rig(
             }),
         ))
     } else {
-        // Clear API key cache for this rig
-        let mut cache = hub.api_key_cache.write().await;
-        cache.retain(|_, (rid, _)| rid != &rig_id);
-
         info!(rig_id = %rig_id, "Rig revoked");
         Ok(StatusCode::OK)
     }

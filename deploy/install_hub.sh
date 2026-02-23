@@ -44,7 +44,7 @@ echo "ADMIN KEY (save this): ${ADMIN_KEY}"
 
 # 6. Install systemd service
 echo "[6/7] Installing systemd service..."
-sed "s/FLEET_ADMIN_KEY=changeme/FLEET_ADMIN_KEY=${ADMIN_KEY}/" \
+sed "s/FLEET_PASSPHRASE=changeme/FLEET_PASSPHRASE=${ADMIN_KEY}/" \
     deploy/fleet-hub.service > /etc/systemd/system/fleet-hub.service
 systemctl daemon-reload
 

@@ -28,6 +28,15 @@ pub async fn run_curator(pool: PgPool, config: HubConfig) {
             Ok(count) => {
                 if count > 0 {
                     info!(curated = count, "Curation cycle complete");
+                    // Rebuild knowledge graph in background — non-blocking
+                    let pool_clone = pool.clone();
+                    tokio::spawn(async move {
+                        if let Err(e) =
+                            crate::hub::knowledge_graph::builder::rebuild_graph(&pool_clone).await
+                        {
+                            warn!(error = %e, "Knowledge graph rebuild failed after curation");
+                        }
+                    });
                 }
             }
             Err(e) => {
@@ -45,6 +54,7 @@ pub async fn run_curator(pool: PgPool, config: HubConfig) {
                 error!(error = %e, "Pruning failed");
             }
         }
+
     }
 }
 

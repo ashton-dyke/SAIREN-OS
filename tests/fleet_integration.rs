@@ -163,27 +163,21 @@ fn test_hub_config_overrides() {
         Some("postgres://test".to_string()),
         None,
         Some(9090),
-    );
+    )
+    .expect("from_env should succeed in debug mode");
 
     assert_eq!(config.database_url, "postgres://test");
     assert_eq!(config.bind_address, "0.0.0.0:9090");
 }
 
-/// Test: API key generation produces valid keys
+/// Test: ErrorResponse is serializable
 #[test]
-fn test_api_key_generation() {
-    let key = hub::auth::api_key::generate_api_key();
-    assert!(key.starts_with("sk-fleet-"));
-    assert!(key.len() > 20);
-}
-
-/// Test: API key hash and verify round-trip
-#[test]
-fn test_api_key_hash_verify() {
-    let key = hub::auth::api_key::generate_api_key();
-    let hash = hub::auth::api_key::hash_api_key(&key);
-    assert!(hub::auth::api_key::verify_api_key(&key, &hash));
-    assert!(!hub::auth::api_key::verify_api_key("wrong-key", &hash));
+fn test_error_response_serializable() {
+    let err = hub::auth::api_key::ErrorResponse {
+        error: "test error".to_string(),
+    };
+    let json = serde_json::to_string(&err).expect("serialize");
+    assert!(json.contains("test error"));
 }
 
 /// Test: Scoring algorithm produces valid scores

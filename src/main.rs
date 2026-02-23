@@ -29,18 +29,16 @@
 use anyhow::{Context, Result};
 use clap::Parser;
 use std::sync::Arc;
-use tokio::sync::{mpsc, RwLock};
+use tokio::sync::RwLock;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
 
 mod acquisition;
 mod api;
-mod director;
 mod llm;
 mod ml_engine;
 mod pipeline;
-mod processing;
 mod storage;
 mod strategic;
 
@@ -55,12 +53,18 @@ pub mod baseline;
 pub mod aci;
 pub mod cfc;
 pub mod fleet;
+#[cfg(feature = "knowledge-base")]
+pub mod knowledge_base;
 pub mod background;
+pub mod optimization;
+pub mod causal;
+pub mod volve;
 
 use axum::Router;
 use api::{create_app, DashboardState};
 use pipeline::{AppState, PipelineCoordinator};
-use types::{Campaign, WitsPacket};
+use pipeline::source::{PacketSource, CsvSource, StdinSource, TcpSource};
+use pipeline::processing_loop::{PostProcessHooks, ProcessingLoop};
 
 // ============================================================================
 // CLI Arguments
@@ -98,6 +102,46 @@ struct CliArgs {
     /// Can also be set via RESET_DB=true environment variable.
     #[arg(long)]
     reset_db: bool,
+
+    #[command(subcommand)]
+    command: Option<SubCommand>,
+}
+
+#[derive(clap::Subcommand, Debug)]
+enum SubCommand {
+    /// Migrate a flat well_prognosis.toml into the structured knowledge base directory
+    #[cfg(feature = "knowledge-base")]
+    MigrateKb {
+        /// Path to the source well_prognosis.toml file
+        #[arg(long = "from")]
+        from: String,
+        /// Path to the knowledge base root directory
+        #[arg(long = "to")]
+        to: String,
+    },
+
+    /// Enroll this rig with a Fleet Hub using the shared passphrase
+    #[cfg(feature = "fleet-client")]
+    Enroll {
+        /// Fleet Hub URL (e.g. http://hub:8080)
+        #[arg(long)]
+        hub: String,
+        /// Shared fleet passphrase
+        #[arg(long)]
+        passphrase: String,
+        /// Rig identifier
+        #[arg(long)]
+        rig_id: String,
+        /// Well identifier
+        #[arg(long)]
+        well_id: String,
+        /// Field name
+        #[arg(long)]
+        field: String,
+        /// Config directory (default: /etc/sairen-os)
+        #[arg(long, default_value = "/etc/sairen-os")]
+        config_dir: String,
+    },
 }
 
 // ============================================================================
@@ -109,8 +153,6 @@ struct CliArgs {
 struct AppConfig {
     /// HTTP server bind address
     server_addr: String,
-    /// Channel buffer size for WITS packets
-    channel_buffer_size: usize,
 }
 
 impl AppConfig {
@@ -118,7 +160,6 @@ impl AppConfig {
         Self {
             server_addr: std::env::var("SAIREN_SERVER_ADDR")
                 .unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
-            channel_buffer_size: 10_000,
         }
     }
 }
@@ -131,23 +172,18 @@ impl AppConfig {
 const DATA_DIR: &str = "./data";
 
 /// Check if database reset is requested via CLI flag or environment variable.
-/// Returns true if RESET_DB=true env var is set OR --reset-db flag is present.
 fn should_reset_db(cli_flag: bool) -> bool {
     if cli_flag {
         return true;
     }
-
-    // Check environment variable (case-insensitive, accepts "true", "1", "yes")
     if let Ok(val) = std::env::var("RESET_DB") {
         let val_lower = val.to_lowercase();
         return val_lower == "true" || val_lower == "1" || val_lower == "yes";
     }
-
     false
 }
 
 /// Safely remove the data directory and all its contents.
-/// This is called BEFORE any storage initialization.
 fn reset_data_directory() -> Result<()> {
     use std::fs;
     use std::path::Path;
@@ -165,7 +201,6 @@ fn reset_data_directory() -> Result<()> {
     warn!("");
     warn!("  Removing: {}", data_path.display());
 
-    // List contents before deletion for logging
     if let Ok(entries) = fs::read_dir(data_path) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -174,9 +209,7 @@ fn reset_data_directory() -> Result<()> {
         }
     }
 
-    // Remove the entire directory tree
-    fs::remove_dir_all(data_path)
-        .context("Failed to remove data directory")?;
+    fs::remove_dir_all(data_path).context("Failed to remove data directory")?;
 
     warn!("");
     warn!("  Data directory removed successfully.");
@@ -188,197 +221,34 @@ fn reset_data_directory() -> Result<()> {
 }
 
 // ============================================================================
-// Multi-Agent Pipeline Runner
+// Task Names for Supervisor Logging
 // ============================================================================
 
-/// Run the drilling intelligence pipeline
-async fn run_drilling_pipeline(
-    csv_path: Option<String>,
-    use_stdin: bool,
-    wits_tcp: Option<String>,
-    speed: u64,
-    server_addr: String,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    info!("🚀 Starting SAIREN-OS Drilling Intelligence Pipeline");
-    info!("");
-    info!("   Phase 1: WITS Ingestion (continuous)");
-    info!("   Phase 2: Basic Physics (MSE, d-exponent, etc.)");
-    info!("   Phase 3: Tactical Agent → AdvisoryTicket");
-    info!("   Phase 4: History Buffer (60 packets)");
-    info!("   Phase 5: Strategic Agent → verify_ticket()");
-    info!("   Phase 6: Context Lookup");
-    info!("   Phase 7: LLM Explainer");
-    info!("   Phase 8: Orchestrator Voting (4 Specialists)");
-    info!("   Phase 9: Storage");
-    info!("   Phase 10: Dashboard API");
-    info!("");
-
-    // Determine input mode
-    if let Some(addr) = wits_tcp {
-        info!("📥 Input: WITS TCP (Level 0 protocol from {})", addr);
-        return run_pipeline_wits_tcp(addr, server_addr, cancel_token).await;
-    }
-
-    if use_stdin {
-        info!("📥 Input: stdin (JSON WITS packets from simulation)");
-        return run_pipeline_stdin(speed, server_addr, cancel_token).await;
-    }
-
-    // Load WITS data from CSV or synthetic
-    let packets = if let Some(path) = csv_path {
-        info!("📂 Loading WITS data from CSV: {}", path);
-        let data = sensors::read_csv_data(&path);
-        if data.is_empty() {
-            return Err(anyhow::anyhow!("No WITS data loaded from CSV"));
-        }
-        info!("   Loaded {} packets", data.len());
-        data
-    } else {
-        info!("🧪 Using synthetic test data (drilling fault simulation)");
-        let data = sensors::generate_fault_test_data();
-        info!("   Generated {} packets", data.len());
-        data
-    };
-
-    // Calculate delay between packets based on speed
-    let delay_ms = if speed == 0 {
-        0
-    } else {
-        60_000 / speed
-    };
-
-    info!("⏱️  Speed: {}x ({}ms delay between packets)",
-        if speed == 0 { "max".to_string() } else { speed.to_string() },
-        delay_ms
-    );
-    info!("");
-
-    // Initialize pipeline coordinator
-    #[cfg(feature = "llm")]
-    let mut coordinator = {
-        let mode = if llm::is_cuda_available() { "GPU" } else { "CPU" };
-        info!("🧠 Initializing LLM-enabled pipeline ({} mode)...", mode);
-        match PipelineCoordinator::init_with_llm().await {
-            Ok(c) => {
-                info!("✓ LLM loaded successfully ({})", mode);
-                c
-            }
-            Err(e) => {
-                warn!("⚠️  LLM initialization failed: {}. Using template mode.", e);
-                PipelineCoordinator::new()
-            }
-        }
-    };
-
-    #[cfg(not(feature = "llm"))]
-    let mut coordinator = PipelineCoordinator::new();
-
-    info!("📊 Processing {} WITS packets...", packets.len());
-    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-    let mut packets_processed = 0u64;
-    let mut advisories_generated = 0u64;
-
-    for packet in &packets {
-        if cancel_token.is_cancelled() {
-            info!("🛑 Shutdown signal received");
-            break;
-        }
-
-        packets_processed += 1;
-
-        // Process through pipeline (default to Production campaign for file-based runs)
-        let advisory = coordinator.process_packet(packet, Campaign::Production).await;
-
-        if let Some(ref adv) = advisory {
-            advisories_generated += 1;
-
-            // Log advisory
-            info!(
-                "🎯 ADVISORY #{}: {:?} | Risk: {:?} | Efficiency: {}%",
-                advisories_generated,
-                adv.votes.first().map(|v| &v.specialist).unwrap_or(&"Unknown".to_string()),
-                adv.risk_level,
-                adv.efficiency_score
-            );
-            info!("   Recommendation: {}", truncate_str(&adv.recommendation, 70));
-            info!("   Expected Benefit: {}", truncate_str(&adv.expected_benefit, 70));
-
-            // Log specialist votes
-            for vote in &adv.votes {
-                info!(
-                    "   {} ({:.0}%): {} - {}",
-                    vote.specialist,
-                    vote.weight * 100.0,
-                    vote.vote,
-                    truncate_str(&vote.reasoning, 50)
-                );
-            }
-            info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        }
-
-        // Progress indicator every 10 packets
-        if advisory.is_none() && packets_processed % 10 == 0 {
-            let stats = coordinator.get_stats();
-            info!(
-                "📈 Progress: {}/{} packets | Advisories: {} | Buffer: {}/60",
-                packets_processed,
-                packets.len(),
-                stats.strategic_analyses,
-                stats.history_buffer_size
-            );
-        }
-
-        // Delay between packets
-        if delay_ms > 0 {
-            tokio::time::sleep(tokio::time::Duration::from_millis(delay_ms)).await;
-        }
-    }
-
-    // Final statistics
-    let stats = coordinator.get_stats();
-
-    info!("");
-    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    info!("📊 FINAL STATISTICS");
-    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-    info!("   Packets Processed:    {}", stats.packets_processed);
-    info!("   Tickets Created:      {}", stats.tickets_created);
-    info!("   Tickets Verified:     {}", stats.tickets_verified);
-    info!("   Tickets Rejected:     {}", stats.tickets_rejected);
-    info!("   Advisories Generated: {}", stats.strategic_analyses);
-    info!("   History Buffer Size:  {}/60", stats.history_buffer_size);
-    info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-    Ok(())
-}
-
-/// Truncate string for display
-fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
-        s.to_string()
-    } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
-
-/// Task identification for supervisor logging
 #[derive(Debug, Clone, Copy)]
 enum TaskName {
     HttpServer,
-    WitsIngestion,
     PacketProcessor,
     MLScheduler,
+    #[cfg(feature = "fleet-client")]
+    FleetUploader,
+    #[cfg(feature = "fleet-client")]
+    FleetLibrarySync,
+    #[cfg(feature = "fleet-client")]
+    FleetIntelligenceSync,
 }
 
 impl std::fmt::Display for TaskName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             TaskName::HttpServer => write!(f, "HttpServer"),
-            TaskName::WitsIngestion => write!(f, "WitsIngestion"),
             TaskName::PacketProcessor => write!(f, "PacketProcessor"),
             TaskName::MLScheduler => write!(f, "MLScheduler"),
+            #[cfg(feature = "fleet-client")]
+            TaskName::FleetUploader => write!(f, "FleetUploader"),
+            #[cfg(feature = "fleet-client")]
+            TaskName::FleetLibrarySync => write!(f, "FleetLibrarySync"),
+            #[cfg(feature = "fleet-client")]
+            TaskName::FleetIntelligenceSync => write!(f, "FleetIntelligenceSync"),
         }
     }
 }
@@ -387,7 +257,7 @@ impl std::fmt::Display for TaskName {
 // Shared Pipeline Initialization
 // ============================================================================
 
-/// Common pipeline infrastructure shared between stdin and TCP modes.
+/// Common pipeline infrastructure shared between all modes.
 #[allow(dead_code)]
 struct PipelineCore {
     app_state: Arc<RwLock<AppState>>,
@@ -399,55 +269,71 @@ struct PipelineCore {
 }
 
 /// Initialize the shared pipeline: AppState, storage, thresholds, coordinator,
-/// dashboard, and HTTP listener. Only `equipment_id` varies between modes.
+/// dashboard, and HTTP listener.
 async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<PipelineCore> {
     use baseline::ThresholdManager;
     use std::path::Path;
 
-    // Initialize shared application state for dashboard
-    let app_state = Arc::new(RwLock::new(AppState::default()));
+    let app_state = Arc::new(RwLock::new(AppState::from_env()));
     info!("✓ Application state initialized");
 
-    // Acquire process lock to prevent multiple instances
     info!("🔒 Acquiring process lock...");
     let _process_lock = storage::ProcessLock::acquire("./data")
         .context("Failed to acquire process lock")?;
     info!("✓ Process lock acquired");
 
-    // Initialize analysis storage
-    info!("💾 Initializing analysis storage...");
-    let analysis_storage = storage::AnalysisStorage::open("./data/sairen.db")
-        .context("Failed to open analysis storage")?;
-
-    // Clean up old data (keep last 7 days)
-    match analysis_storage.cleanup_old(7) {
-        Ok(deleted) if deleted > 0 => {
-            info!("🗑️  Cleaned up {} old analysis records", deleted);
-        }
-        Ok(_) => {}
-        Err(e) => {
-            warn!("Failed to clean up old data: {}", e);
-        }
-    }
-    info!("✓ Analysis storage initialized");
-
-    // Initialize history storage for strategic reports
     info!("💾 Initializing strategic history storage...");
     if let Err(e) = storage::history::init("./data/strategic_history.db") {
-        warn!("Failed to initialize history storage: {}. Reports will not be persisted.", e);
+        warn!(
+            "Failed to initialize history storage: {}. Reports will not be persisted.",
+            e
+        );
     } else {
         info!("✓ Strategic history storage initialized");
+        match storage::history::prune_old_reports(30) {
+            Ok(0) => {}
+            Ok(n) => info!("Pruned {} strategic reports older than 30 days", n),
+            Err(e) => warn!("Failed to prune old history reports: {}", e),
+        }
+
+        // Initialise acknowledgment tree and restore persisted records.
+        match storage::acks::init() {
+            Err(e) => warn!("Failed to init acknowledgment store: {}", e),
+            Ok(()) => {
+                let raw = storage::acks::load_all_raw();
+                if !raw.is_empty() {
+                    let mut state = app_state.write().await;
+                    for bytes in raw {
+                        if let Ok(rec) = serde_json::from_slice::<
+                            crate::api::handlers::AcknowledgmentRecord,
+                        >(&bytes)
+                        {
+                            state.acknowledgments.push(rec);
+                        }
+                    }
+                    info!(
+                        count = state.acknowledgments.len(),
+                        "Restored acknowledgments from disk"
+                    );
+                }
+            }
+        }
     }
 
-    // Initialize ThresholdManager for dynamic baselines
-    info!("📊 Initializing dynamic threshold system for: {}", equipment_id);
+    info!(
+        "📊 Initializing dynamic threshold system for: {}",
+        equipment_id
+    );
 
     let thresholds_path = Path::new(baseline::DEFAULT_STATE_PATH);
     let threshold_manager = Arc::new(std::sync::RwLock::new({
         match ThresholdManager::load_from_file(thresholds_path) {
             Some(mgr) => {
                 let locked_count = mgr.locked_count();
-                info!("✓ Loaded {} locked baselines from {:?}", locked_count, thresholds_path);
+                info!(
+                    "✓ Loaded {} locked baselines from {:?}",
+                    locked_count, thresholds_path
+                );
                 mgr
             }
             None => {
@@ -460,7 +346,6 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
         }
     }));
 
-    // Determine if we should start in learning mode
     let start_in_learning_mode = {
         let mgr = threshold_manager.read().unwrap_or_else(|e| {
             warn!("RwLock poisoned on ThresholdManager read, recovering");
@@ -475,42 +360,23 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
         }
     };
 
-    // Initialize pipeline coordinator
-    #[cfg(feature = "llm")]
-    let coordinator = {
-        info!("🧠 Initializing LLM-enabled pipeline with dynamic thresholds...");
-        match PipelineCoordinator::init_with_llm_and_thresholds(
-            threshold_manager.clone(),
-            equipment_id.to_string(),
-            start_in_learning_mode,
-        ).await {
-            Ok(c) => {
-                info!("✓ LLM and dynamic thresholds loaded successfully");
-                c
-            }
-            Err(e) => {
-                warn!("⚠️  LLM initialization failed: {}. Using template mode.", e);
-                PipelineCoordinator::new_with_thresholds(
-                    threshold_manager.clone(),
-                    equipment_id.to_string(),
-                    start_in_learning_mode,
-                )
-            }
-        }
-    };
-
-    #[cfg(not(feature = "llm"))]
+    // LLM inference runs exclusively on the fleet hub (CUDA GPU, embedded mistralrs).
+    // The edge pipeline always uses deterministic template advisories.
     let coordinator = PipelineCoordinator::new_with_thresholds(
         threshold_manager.clone(),
         equipment_id.to_string(),
         start_in_learning_mode,
     );
 
-    // Start HTTP server for dashboard
+    #[cfg(feature = "knowledge-base")]
+    if let Some(handle) = coordinator.start_kb_watcher() {
+        info!("✓ Knowledge base watcher started");
+        drop(handle);
+    }
+
     info!("🌐 Starting HTTP server on {}...", server_addr);
     let dashboard_state = DashboardState::new_with_storage_and_thresholds(
         Arc::clone(&app_state),
-        analysis_storage,
         threshold_manager.clone(),
         equipment_id,
     );
@@ -565,6 +431,215 @@ fn spawn_http_server(
     });
 }
 
+/// Spawn fleet client background tasks (uploader + library sync).
+///
+/// Returns a `FleetContext` with the shared queue so the packet processor
+/// can enqueue events directly.
+#[cfg(feature = "fleet-client")]
+fn spawn_fleet_tasks(
+    task_set: &mut JoinSet<Result<TaskName>>,
+) -> Option<pipeline::processing_loop::FleetContext> {
+    use fleet::{FleetClient, UploadQueue};
+    use fleet::uploader::run_uploader;
+    use fleet::sync::run_library_sync;
+    use context::RAMRecall;
+
+    let hub_url = match std::env::var("FLEET_HUB_URL") {
+        Ok(v) if !v.is_empty() => v,
+        _ => {
+            info!("Fleet client disabled (FLEET_HUB_URL not set)");
+            return None;
+        }
+    };
+    let passphrase = match std::env::var("FLEET_PASSPHRASE") {
+        Ok(v) if !v.is_empty() => v,
+        _ => {
+            warn!("Fleet client disabled (FLEET_PASSPHRASE not set)");
+            return None;
+        }
+    };
+    let rig_id = std::env::var("FLEET_RIG_ID").unwrap_or_else(|_| "UNKNOWN".to_string());
+    let well_id = std::env::var("WELL_ID").unwrap_or_else(|_| "UNKNOWN".to_string());
+
+    let client = FleetClient::new(&hub_url, &passphrase, &rig_id);
+    info!("Fleet client initialized — hub: {}, rig: {}", hub_url, rig_id);
+
+    let queue = match UploadQueue::open("./data/fleet_queue") {
+        Ok(q) => Arc::new(q),
+        Err(e) => {
+            error!("Failed to open fleet upload queue: {} — fleet disabled", e);
+            return None;
+        }
+    };
+
+    let ram_recall = Arc::new(RAMRecall::new());
+
+    // Task: Fleet Uploader (drain queue -> hub every 60s)
+    let uploader_client = client.clone();
+    let uploader_queue = Arc::clone(&queue);
+    task_set.spawn(async move {
+        info!("[FleetUploader] Task starting");
+        run_uploader(uploader_queue, uploader_client, config::defaults::FLEET_UPLOADER_INTERVAL_SECS).await;
+        Ok(TaskName::FleetUploader)
+    });
+
+    // Task: Fleet Library Sync (pull precedents every 6h, jitter +/-30min)
+    let library_client = client.clone();
+    task_set.spawn(async move {
+        info!("[FleetLibrarySync] Task starting");
+        run_library_sync(library_client, ram_recall, config::defaults::FLEET_LIBRARY_SYNC_INTERVAL_SECS, config::defaults::FLEET_LIBRARY_SYNC_JITTER_SECS).await;
+        Ok(TaskName::FleetLibrarySync)
+    });
+
+    // Task: Fleet Intelligence Sync (pull hub LLM outputs every 4h, jitter +/-30min)
+    let intel_client = client.clone();
+    let intel_cache_path = std::path::PathBuf::from("./data/fleet_intelligence.json");
+    task_set.spawn(async move {
+        info!("[FleetIntelligenceSync] Task starting");
+        fleet::sync::run_intelligence_sync(
+            intel_client,
+            intel_cache_path,
+            config::defaults::FLEET_INTELLIGENCE_SYNC_INTERVAL_SECS,
+            config::defaults::FLEET_INTELLIGENCE_SYNC_JITTER_SECS,
+        ).await;
+        Ok(TaskName::FleetIntelligenceSync)
+    });
+
+    Some(pipeline::processing_loop::FleetContext { queue, rig_id, well_id })
+}
+
+/// Spawn the ML Engine Scheduler task.
+fn spawn_ml_scheduler(
+    task_set: &mut JoinSet<Result<TaskName>>,
+    app_state: Arc<RwLock<AppState>>,
+    cancel_token: CancellationToken,
+) {
+    task_set.spawn(async move {
+        use ml_engine::{MLScheduler, get_interval};
+
+        #[cfg(feature = "knowledge-base")]
+        let ml_knowledge_base = knowledge_base::KnowledgeBase::init();
+
+        info!("[MLScheduler] Task starting with interval {:?}", get_interval());
+
+        let mut interval = tokio::time::interval(get_interval());
+        let mut analyses_run = 0u64;
+
+        loop {
+            tokio::select! {
+                _ = cancel_token.cancelled() => {
+                    info!("[MLScheduler] Received shutdown signal after {} analyses", analyses_run);
+                    return Ok(TaskName::MLScheduler);
+                }
+                _ = interval.tick() => {
+                    let (packets, campaign, well_id, field_name, bit_hours, bit_depth, cfc_transition_timestamps, regime_centroids) = {
+                        let state = app_state.read().await;
+                        (
+                            state.wits_history.iter().cloned().collect::<Vec<_>>(),
+                            state.campaign,
+                            state.well_id.clone(),
+                            state.field_name.clone(),
+                            state.bit_hours,
+                            state.bit_depth_drilled,
+                            state.formation_transition_timestamps.clone(),
+                            state.regime_centroids,
+                        )
+                    };
+
+                    // Apply ROP lag compensation
+                    let rop_lag = config::get().ml.rop_lag_seconds as usize;
+                    let mut packets = packets;
+                    if rop_lag > 0 && packets.len() > rop_lag {
+                        for i in 0..packets.len() - rop_lag {
+                            packets[i].rop = packets[i + rop_lag].rop;
+                        }
+                        packets.truncate(packets.len() - rop_lag);
+                    } else if rop_lag > 0 && packets.len() <= rop_lag {
+                        info!(
+                            "[MLScheduler] Skipping analysis: insufficient data for ROP lag ({} packets, need > {})",
+                            packets.len(), rop_lag
+                        );
+                        continue;
+                    }
+
+                    if packets.len() < config::defaults::MIN_PACKETS_FOR_ML_ANALYSIS {
+                        info!(
+                            "[MLScheduler] Skipping analysis: insufficient data ({} packets, need {}+)",
+                            packets.len(), config::defaults::MIN_PACKETS_FOR_ML_ANALYSIS
+                        );
+                        continue;
+                    }
+
+                    analyses_run += 1;
+                    info!("[MLScheduler] Running ML analysis #{} with {} packets", analyses_run, packets.len());
+
+                    #[cfg(feature = "knowledge-base")]
+                    let snapshot_packets = packets.clone();
+
+                    let metrics: Vec<types::DrillingMetrics> = packets.iter().map(|p| {
+                        // Use the physics engine — same formulas as the tactical agent.
+                        // The previous hand-rolled construction had three bugs:
+                        //   1. mse_efficiency used a hardcoded 50 000 psi reference
+                        //      instead of a formation-adaptive optimal MSE.
+                        //   2. ecd_margin was hardcoded to 14.0 ppg fracture gradient
+                        //      instead of using the per-packet fracture_gradient field.
+                        //   3. flow_balance sign was inverted (flow_in - flow_out)
+                        //      vs the rest of the codebase (flow_out - flow_in).
+                        let mut m = physics_engine::tactical_update(p, None);
+                        // tactical_update leaves operation as default; set it from the
+                        // same campaign-aware classifier the tactical agent uses.
+                        m.operation = agents::tactical::detect_operation(p, campaign);
+                        m
+                    }).collect();
+
+                    let dataset = MLScheduler::build_dataset(
+                        packets,
+                        metrics,
+                        &well_id,
+                        &field_name,
+                        campaign,
+                        bit_hours,
+                        bit_depth,
+                        &cfc_transition_timestamps,
+                        regime_centroids,
+                    );
+
+                    let report = MLScheduler::run_analysis(&dataset);
+
+                    {
+                        let mut state = app_state.write().await;
+                        state.latest_ml_report = Some(report.clone());
+                    }
+
+                    #[cfg(feature = "knowledge-base")]
+                    {
+                        if let Some(ref kb) = ml_knowledge_base {
+                            if let Err(e) = kb.write_snapshot_with_packets(&report, &snapshot_packets) {
+                                warn!("Failed to write KB snapshot: {}", e);
+                            }
+                        }
+                    }
+
+                    match &report.result {
+                        types::AnalysisResult::Success(insights) => {
+                            info!(
+                                "🧠 ML Analysis #{}: {} | Score: {:.2} | Correlations: {}",
+                                analyses_run,
+                                insights.confidence,
+                                insights.optimal_params.composite_score,
+                                insights.correlations.len()
+                            );
+                        }
+                        types::AnalysisResult::Failure(failure) => {
+                            warn!("🧠 ML Analysis #{}: Failed - {}", analyses_run, failure);
+                        }
+                    }
+                }
+            }
+        }
+    });
+}
+
 /// Run the supervisor loop: monitor tasks, cancel on failure.
 async fn run_supervisor(
     task_set: &mut JoinSet<Result<TaskName>>,
@@ -605,532 +680,296 @@ async fn run_supervisor(
     Ok(())
 }
 
-/// Run the pipeline with stdin input
-async fn run_pipeline_stdin(
-    _speed: u64,
+// ============================================================================
+// Unified Pipeline Runner
+// ============================================================================
+
+/// Run the drilling intelligence pipeline with any packet source.
+///
+/// All input modes (CSV, stdin, TCP) flow through this function.
+/// The `hooks` parameter provides mode-specific per-packet processing
+/// (e.g. regime stamping for TCP). The `spawn_ml` flag controls
+/// whether the ML scheduler task is started.
+async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
+    mut source: S,
+    hooks: H,
+    equipment_id: &str,
     server_addr: String,
+    spawn_ml: bool,
     cancel_token: CancellationToken,
 ) -> Result<()> {
-    use tokio::io::{AsyncBufReadExt, BufReader};
-
-    info!("⏱️  Stdin mode: processing packets as they arrive");
+    info!("🚀 Starting SAIREN-OS Drilling Intelligence Pipeline");
+    info!("");
+    info!("   Phase 1: WITS Ingestion (continuous)");
+    info!("   Phase 2: Basic Physics (MSE, d-exponent, etc.)");
+    info!("   Phase 3: Tactical Agent -> AdvisoryTicket");
+    info!("   Phase 4: History Buffer (60 packets)");
+    info!("   Phase 5: Strategic Agent -> verify_ticket()");
+    info!("   Phase 6: Context Lookup");
+    info!("   Phase 7: LLM Explainer");
+    info!("   Phase 8: Orchestrator Voting (4 Specialists)");
+    info!("   Phase 9: Storage");
+    info!("   Phase 10: Dashboard API");
     info!("");
 
-    let core = init_pipeline("WITS", &server_addr).await?;
+    let core = init_pipeline(equipment_id, &server_addr).await?;
     let app_state = core.app_state;
-    let _process_lock = core._process_lock;
-    let mut coordinator = core.coordinator;
 
-    // JoinSet Supervisor Pattern
     info!("🔒 Supervisor: Initializing task monitoring");
     let mut task_set: JoinSet<Result<TaskName>> = JoinSet::new();
-
-    // Create channel for passing packets from ingestion to processor
-    let (packet_tx, packet_rx) = mpsc::channel::<WitsPacket>(1000);
 
     // Task 1: HTTP Server
     spawn_http_server(&mut task_set, core.listener, core.app, cancel_token.clone());
 
-    // Task 2: WITS Ingestion (stdin reader)
-    let ingestion_cancel = cancel_token.clone();
-    task_set.spawn(async move {
-        info!("[WitsIngestion] Task starting");
+    // Fleet client background tasks
+    #[cfg(feature = "fleet-client")]
+    let fleet_ctx = spawn_fleet_tasks(&mut task_set);
 
-        let stdin = tokio::io::stdin();
-        let mut reader = BufReader::new(stdin);
-        let mut line_buffer = String::with_capacity(2048);
-        let mut packets_read = 0u64;
-
-        loop {
-            tokio::select! {
-                _ = ingestion_cancel.cancelled() => {
-                    info!("[WitsIngestion] Received shutdown signal after {} packets", packets_read);
-                    return Ok(TaskName::WitsIngestion);
-                }
-                result = reader.read_line(&mut line_buffer) => {
-                    match result {
-                        Ok(0) => {
-                            info!("[WitsIngestion] EOF reached after {} packets", packets_read);
-                            return Ok(TaskName::WitsIngestion);
-                        }
-                        Ok(_) => {
-                            let line = line_buffer.trim();
-                            if !line.is_empty() {
-                                match serde_json::from_str::<WitsPacket>(line) {
-                                    Ok(packet) => {
-                                        packets_read += 1;
-                                        if packet_tx.send(packet).await.is_err() {
-                                            error!("[WitsIngestion] Packet channel closed");
-                                            return Err(anyhow::anyhow!("Packet channel closed"));
-                                        }
-                                    }
-                                    Err(e) => {
-                                        warn!("[WitsIngestion] Failed to parse packet: {}", e);
-                                    }
-                                }
-                            }
-                            line_buffer.clear();
-                        }
-                        Err(e) => {
-                            error!("[WitsIngestion] Read error: {}", e);
-                            return Err(anyhow::anyhow!("Stdin read error: {}", e));
-                        }
-                    }
-                }
-            }
-        }
-    });
-
-    // Task 3: Packet Processor
-    let processor_cancel = cancel_token.clone();
-    let processor_app_state = Arc::clone(&app_state);
+    // Task 2: Packet Processor (unified processing loop)
+    let proc_cancel = cancel_token.clone();
+    let proc_state = Arc::clone(&app_state);
+    #[cfg(feature = "fleet-client")]
+    let proc_fleet = fleet_ctx;
     task_set.spawn(async move {
         info!("[PacketProcessor] Task starting");
 
-        let mut packet_rx = packet_rx;
-        let mut packets_processed = 0u64;
-        let mut advisories_generated = 0u64;
+        let processing_loop = ProcessingLoop::new(
+            core.coordinator,
+            proc_state,
+            hooks,
+            proc_cancel,
+        );
 
-        info!("📊 Processing WITS packets from stdin...");
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
+        #[cfg(feature = "fleet-client")]
+        let processing_loop = if let Some(ctx) = proc_fleet {
+            processing_loop.with_fleet(ctx)
+        } else {
+            processing_loop
+        };
 
-        loop {
-            tokio::select! {
-                _ = processor_cancel.cancelled() => {
-                    info!("[PacketProcessor] Received shutdown signal");
-                    break;
-                }
-                maybe_packet = packet_rx.recv() => {
-                    match maybe_packet {
-                        Some(packet) => {
-                            packets_processed += 1;
-
-                            // Update app state with current WITS data and get campaign
-                            let campaign = {
-                                let mut state = processor_app_state.write().await;
-                                state.current_rpm = packet.rpm;
-                                state.samples_collected = packets_processed as usize;
-                                state.total_analyses = packets_processed;
-                                state.last_analysis_time = Some(chrono::Utc::now());
-                                state.status = pipeline::SystemStatus::Monitoring;
-                                // Store latest WITS packet for dashboard
-                                state.latest_wits_packet = Some(packet.clone());
-                                state.campaign
-                            };
-
-                            // Process through pipeline with campaign context
-                            let advisory = coordinator.process_packet(&packet, campaign).await;
-
-                            if let Some(ref adv) = advisory {
-                                advisories_generated += 1;
-
-                                // Update app state with strategic advisory
-                                {
-                                    let mut state = processor_app_state.write().await;
-                                    state.latest_advisory = Some(adv.clone());
-                                    state.latest_strategic_report = Some(adv.clone());
-                                }
-
-                                // Persist to history storage
-                                if let Err(e) = storage::history::store_report(adv) {
-                                    warn!("Failed to persist advisory to history: {}", e);
-                                }
-
-                                // Log advisory
-                                info!(
-                                    "🎯 ADVISORY #{}: {:?} | Efficiency: {}%",
-                                    advisories_generated,
-                                    adv.risk_level,
-                                    adv.efficiency_score
-                                );
-                                info!("   Recommendation: {}", truncate_str(&adv.recommendation, 70));
-
-                                for vote in &adv.votes {
-                                    info!(
-                                        "   {} ({:.0}%): {} - {}",
-                                        vote.specialist,
-                                        vote.weight * 100.0,
-                                        vote.vote,
-                                        truncate_str(&vote.reasoning, 50)
-                                    );
-                                }
-                                info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                            }
-
-                            // Progress indicator every 10 packets
-                            if advisory.is_none() && packets_processed % 10 == 0 {
-                                let stats = coordinator.get_stats();
-                                info!(
-                                    "📈 Progress: {} packets | Advisories: {} | Buffer: {}/60",
-                                    packets_processed,
-                                    stats.strategic_analyses,
-                                    stats.history_buffer_size
-                                );
-                            }
-                        }
-                        None => {
-                            info!("[PacketProcessor] Packet channel closed");
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-
-        // Final statistics
-        let stats = coordinator.get_stats();
-
-        info!("");
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        info!("📊 FINAL STATISTICS");
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        info!("   Packets Processed:    {}", stats.packets_processed);
-        info!("   Tickets Created:      {}", stats.tickets_created);
-        info!("   Tickets Verified:     {}", stats.tickets_verified);
-        info!("   Tickets Rejected:     {}", stats.tickets_rejected);
-        info!("   Advisories Generated: {}", stats.strategic_analyses);
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
+        let _stats = processing_loop.run(&mut source).await;
         Ok(TaskName::PacketProcessor)
     });
+
+    // Task 3: ML Engine Scheduler (only for streaming modes with history)
+    if spawn_ml {
+        spawn_ml_scheduler(&mut task_set, Arc::clone(&app_state), cancel_token.clone());
+    }
 
     run_supervisor(&mut task_set, cancel_token).await
 }
 
-/// Run the pipeline with WITS Level 0 TCP input
-async fn run_pipeline_wits_tcp(
-    wits_addr: String,
-    server_addr: String,
-    cancel_token: CancellationToken,
-) -> Result<()> {
-    use acquisition::WitsClient;
+// ============================================================================
+// Data Loading (CSV / Synthetic)
+// ============================================================================
 
-    info!("⏱️  WITS TCP mode: connecting to {} for Level 0 data", wits_addr);
-    info!("");
-
-    // Parse host:port from wits_addr
-    let (host, port) = {
-        let parts: Vec<&str> = wits_addr.split(':').collect();
-        if parts.len() != 2 {
-            return Err(anyhow::anyhow!("Invalid WITS address format. Expected HOST:PORT"));
+/// Load WITS packets from CSV file or generate synthetic test data.
+fn load_packets(csv_path: Option<String>) -> Result<Vec<types::WitsPacket>> {
+    if let Some(path) = csv_path {
+        info!("📂 Loading WITS data from CSV: {}", path);
+        let data = match volve::VolveReplay::load(&path, volve::VolveConfig::default()) {
+            Ok(replay) => {
+                info!(
+                    "   Detected Volve WITSML format: {} ({} packets, {:.0}-{:.0} ft)",
+                    replay.info.well_id,
+                    replay.info.packet_count,
+                    replay.info.depth_range_ft.0,
+                    replay.info.depth_range_ft.1,
+                );
+                replay.into_packets()
+            }
+            Err(_) => sensors::read_csv_data(&path),
+        };
+        if data.is_empty() {
+            return Err(anyhow::anyhow!("No WITS data loaded from CSV"));
         }
-        let port: u16 = parts[1].parse()
-            .context("Invalid port number")?;
-        (parts[0].to_string(), port)
+        info!("   Loaded {} packets", data.len());
+        Ok(data)
+    } else {
+        info!("🧪 Using synthetic test data (drilling fault simulation)");
+        let data = sensors::generate_fault_test_data();
+        info!("   Generated {} packets", data.len());
+        Ok(data)
+    }
+}
+
+// ============================================================================
+// Enrollment
+// ============================================================================
+
+/// Update or insert an environment variable in a shell env file.
+///
+/// If the variable exists (commented or not), update its value.
+/// Otherwise, append it at the end.
+#[cfg(feature = "fleet-client")]
+fn update_env_var(contents: &str, key: &str, value: &str) -> String {
+    let mut found = false;
+    let mut lines: Vec<String> = contents
+        .lines()
+        .map(|line| {
+            let trimmed = line.trim();
+            // Match both "KEY=..." and "# KEY=..."
+            if trimmed.starts_with(&format!("{}=", key))
+                || trimmed.starts_with(&format!("# {}=", key))
+            {
+                found = true;
+                format!("{}={}", key, value)
+            } else {
+                line.to_string()
+            }
+        })
+        .collect();
+
+    if !found {
+        lines.push(format!("{}={}", key, value));
+    }
+
+    let mut result = lines.join("\n");
+    if !result.ends_with('\n') {
+        result.push('\n');
+    }
+    result
+}
+
+/// Enroll this rig with a Fleet Hub using the shared passphrase.
+///
+/// 1. POST /api/fleet/enroll with passphrase auth + rig identity
+/// 2. Write env vars to config_dir/env
+/// 3. Update well_config.toml
+/// 4. Verify hub connectivity
+/// 5. Verify passphrase authentication
+#[cfg(feature = "fleet-client")]
+async fn run_enroll(hub_url: &str, passphrase: &str, rig_id: &str, well_id: &str, field: &str, config_dir: &str) -> Result<()> {
+    use std::path::Path;
+
+    let hub_url = hub_url.trim_end_matches('/');
+    let config_path = Path::new(config_dir);
+
+    println!("Enrolling with Fleet Hub: {}", hub_url);
+    println!();
+
+    // Step 1: Enroll rig with passphrase auth
+    println!("  [1/5] Enrolling rig {}...", rig_id);
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .context("Failed to build HTTP client")?;
+
+    let body = serde_json::json!({
+        "rig_id": rig_id,
+        "well_id": well_id,
+        "field": field,
+    });
+    let resp = http
+        .post(format!("{}/api/fleet/enroll", hub_url))
+        .header("Authorization", format!("Bearer {}", passphrase))
+        .json(&body)
+        .send()
+        .await
+        .context("Failed to connect to Fleet Hub")?;
+
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!(
+            "Enrollment failed (HTTP {}): {}",
+            status,
+            text
+        ));
+    }
+
+    #[derive(serde::Deserialize)]
+    struct EnrollResponse {
+        rig_id: String,
+        well_id: String,
+        field: String,
+    }
+
+    let enrollment: EnrollResponse = resp.json().await.context("Invalid enrollment response")?;
+    println!("        Rig:   {}", enrollment.rig_id);
+    println!("        Well:  {}", enrollment.well_id);
+    println!("        Field: {}", enrollment.field);
+
+    // Step 2: Write env file
+    println!("  [2/5] Writing environment to {}/env...", config_dir);
+    let env_path = config_path.join("env");
+    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
+    let mut updated = existing;
+    updated = update_env_var(&updated, "FLEET_HUB_URL", hub_url);
+    updated = update_env_var(&updated, "FLEET_PASSPHRASE", passphrase);
+    updated = update_env_var(&updated, "FLEET_RIG_ID", &enrollment.rig_id);
+    updated = update_env_var(&updated, "WELL_ID", &enrollment.well_id);
+    std::fs::write(&env_path, &updated)
+        .with_context(|| format!("Failed to write {}", env_path.display()))?;
+
+    // Step 3: Update well_config.toml
+    println!("  [3/5] Updating {}/well_config.toml...", config_dir);
+    let well_config_path = config_path.join("well_config.toml");
+    let mut well_config = if well_config_path.exists() {
+        config::WellConfig::load_from_file(&well_config_path)
+            .unwrap_or_else(|_| config::WellConfig::default())
+    } else {
+        config::WellConfig::default()
     };
+    well_config.well.name = enrollment.well_id.clone();
+    well_config.well.field = enrollment.field.clone();
+    well_config.well.rig = enrollment.rig_id.clone();
+    well_config
+        .save_to_file(&well_config_path)
+        .with_context(|| format!("Failed to write {}", well_config_path.display()))?;
 
-    let core = init_pipeline("WITS-TCP", &server_addr).await?;
-    let app_state = core.app_state;
-    let _process_lock = core._process_lock;
-    let coordinator = core.coordinator;
-
-    // JoinSet Supervisor Pattern
-    info!("🔒 Supervisor: Initializing task monitoring");
-    let mut task_set: JoinSet<Result<TaskName>> = JoinSet::new();
-
-    // Create channel for passing packets from ingestion to processor
-    let (packet_tx, packet_rx) = mpsc::channel::<WitsPacket>(1000);
-
-    // Task 1: HTTP Server
-    spawn_http_server(&mut task_set, core.listener, core.app, cancel_token.clone());
-
-    // Task 2: WITS TCP Ingestion
-    let ingestion_cancel = cancel_token.clone();
-    let wits_host = host.clone();
-    let wits_port = port;
-    task_set.spawn(async move {
-        info!("[WitsTcpIngestion] Task starting - connecting to {}:{}", wits_host, wits_port);
-
-        let mut client = WitsClient::new(&wits_host, wits_port);
-        let mut packets_read = 0u64;
-        let mut reconnect_attempts = 0;
-        const MAX_RECONNECT_ATTEMPTS: u32 = 10;
-
-        loop {
-            // Try to connect if not connected
-            if !client.is_connected() {
-                info!("[WitsTcpIngestion] Connecting to WITS server...");
-                match client.connect().await {
-                    Ok(()) => {
-                        info!("[WitsTcpIngestion] Connected successfully");
-                        reconnect_attempts = 0;
-                    }
-                    Err(e) => {
-                        reconnect_attempts += 1;
-                        if reconnect_attempts >= MAX_RECONNECT_ATTEMPTS {
-                            error!("[WitsTcpIngestion] Max reconnect attempts reached");
-                            return Err(anyhow::anyhow!("Failed to connect after {} attempts: {}", MAX_RECONNECT_ATTEMPTS, e));
-                        }
-                        warn!("[WitsTcpIngestion] Connection failed (attempt {}): {}. Retrying...", reconnect_attempts, e);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-                        continue;
-                    }
-                }
-            }
-
-            tokio::select! {
-                _ = ingestion_cancel.cancelled() => {
-                    info!("[WitsTcpIngestion] Received shutdown signal after {} packets", packets_read);
-                    let _ = client.disconnect().await;
-                    return Ok(TaskName::WitsIngestion);
-                }
-                result = client.read_packet() => {
-                    match result {
-                        Ok(packet) => {
-                            packets_read += 1;
-                            if packet_tx.send(packet).await.is_err() {
-                                error!("[WitsTcpIngestion] Packet channel closed");
-                                return Err(anyhow::anyhow!("Packet channel closed"));
-                            }
-                        }
-                        Err(acquisition::WitsError::ConnectionClosed) => {
-                            warn!("[WitsTcpIngestion] Connection closed by server after {} packets", packets_read);
-                            // Mark as disconnected and try to reconnect
-                            let _ = client.disconnect().await;
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        }
-                        Err(e) => {
-                            warn!("[WitsTcpIngestion] Error reading packet: {}", e);
-                            // Try to reconnect on error
-                            let _ = client.disconnect().await;
-                            tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
-                        }
-                    }
-                }
-            }
+    // Step 4: Verify hub reachability
+    println!("  [4/5] Verifying hub connectivity...");
+    let health_resp = http
+        .get(format!("{}/api/fleet/health", hub_url))
+        .send()
+        .await;
+    match health_resp {
+        Ok(r) if r.status().is_success() => {
+            println!("        Hub is healthy");
         }
-    });
-
-    // Task 3: Packet Processor
-    let processor_cancel = cancel_token.clone();
-    let processor_app_state = Arc::clone(&app_state);
-    task_set.spawn(async move {
-        info!("[PacketProcessor] Task starting");
-
-        let mut coordinator = coordinator;
-        let mut packet_rx = packet_rx;
-        let mut packets_processed = 0u64;
-        let mut advisories_generated = 0u64;
-
-        info!("📊 Processing WITS packets from TCP...");
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-        loop {
-            tokio::select! {
-                _ = processor_cancel.cancelled() => {
-                    info!("[PacketProcessor] Received shutdown signal");
-                    break;
-                }
-                maybe_packet = packet_rx.recv() => {
-                    match maybe_packet {
-                        Some(packet) => {
-                            packets_processed += 1;
-
-                            // Update app state with current WITS data and get campaign
-                            let campaign = {
-                                let mut state = processor_app_state.write().await;
-                                state.current_rpm = packet.rpm;
-                                state.samples_collected = packets_processed as usize;
-                                state.total_analyses = packets_processed;
-                                state.last_analysis_time = Some(chrono::Utc::now());
-                                state.status = pipeline::SystemStatus::Monitoring;
-                                // Store latest WITS packet for dashboard
-                                state.latest_wits_packet = Some(packet.clone());
-                                // Add to ML history buffer (keep 2 hours at 1 Hz)
-                                if state.wits_history.len() >= 7200 {
-                                    state.wits_history.pop_front();
-                                }
-                                state.wits_history.push_back(packet.clone());
-                                state.campaign
-                            };
-
-                            // Process through pipeline with campaign context
-                            let advisory = coordinator.process_packet(&packet, campaign).await;
-
-                            // Store latest drilling metrics (includes operation classification)
-                            if let Some(metrics) = coordinator.get_latest_metrics() {
-                                let mut state = processor_app_state.write().await;
-                                state.latest_drilling_metrics = Some(metrics.clone());
-                            }
-
-                            if let Some(ref adv) = advisory {
-                                advisories_generated += 1;
-
-                                // Update app state with strategic advisory
-                                {
-                                    let mut state = processor_app_state.write().await;
-                                    state.latest_advisory = Some(adv.clone());
-                                    state.latest_strategic_report = Some(adv.clone());
-                                }
-
-                                // Persist to history storage
-                                if let Err(e) = storage::history::store_report(adv) {
-                                    warn!("Failed to persist advisory to history: {}", e);
-                                }
-
-                                // Log advisory
-                                info!(
-                                    "🎯 ADVISORY #{}: {:?} | Efficiency: {}%",
-                                    advisories_generated,
-                                    adv.risk_level,
-                                    adv.efficiency_score
-                                );
-                                info!("   Recommendation: {}", truncate_str(&adv.recommendation, 70));
-
-                                for vote in &adv.votes {
-                                    info!(
-                                        "   {} ({:.0}%): {} - {}",
-                                        vote.specialist,
-                                        vote.weight * 100.0,
-                                        vote.vote,
-                                        truncate_str(&vote.reasoning, 50)
-                                    );
-                                }
-                                info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-                            }
-
-                            // Progress indicator every 10 packets
-                            if advisory.is_none() && packets_processed % 10 == 0 {
-                                let stats = coordinator.get_stats();
-                                info!(
-                                    "📈 Progress: {} packets | Advisories: {} | Buffer: {}/60",
-                                    packets_processed,
-                                    stats.strategic_analyses,
-                                    stats.history_buffer_size
-                                );
-                            }
-                        }
-                        None => {
-                            info!("[PacketProcessor] Packet channel closed");
-                            break;
-                        }
-                    }
-                }
-            }
+        Ok(r) => {
+            warn!("Hub health check returned {}", r.status());
+            println!("        WARNING: Hub returned {}", r.status());
         }
-
-        // Final statistics
-        let stats = coordinator.get_stats();
-
-        info!("");
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        info!("📊 FINAL STATISTICS");
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-        info!("   Packets Processed:    {}", stats.packets_processed);
-        info!("   Tickets Created:      {}", stats.tickets_created);
-        info!("   Tickets Verified:     {}", stats.tickets_verified);
-        info!("   Tickets Rejected:     {}", stats.tickets_rejected);
-        info!("   Advisories Generated: {}", stats.strategic_analyses);
-        info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
-
-        Ok(TaskName::PacketProcessor)
-    });
-
-    // Task 4: ML Engine Scheduler
-    let ml_cancel = cancel_token.clone();
-    let ml_app_state = Arc::clone(&app_state);
-    task_set.spawn(async move {
-        use ml_engine::{MLScheduler, get_interval};
-
-        info!("[MLScheduler] Task starting with interval {:?}", get_interval());
-
-        let mut interval = tokio::time::interval(get_interval());
-        let mut analyses_run = 0u64;
-
-        loop {
-            tokio::select! {
-                _ = ml_cancel.cancelled() => {
-                    info!("[MLScheduler] Received shutdown signal after {} analyses", analyses_run);
-                    return Ok(TaskName::MLScheduler);
-                }
-                _ = interval.tick() => {
-                    // Get data from app state
-                    let (packets, campaign, well_id, field_name, bit_hours, bit_depth) = {
-                        let state = ml_app_state.read().await;
-                        (
-                            state.wits_history.iter().cloned().collect::<Vec<_>>(),
-                            state.campaign,
-                            state.well_id.clone(),
-                            state.field_name.clone(),
-                            state.bit_hours,
-                            state.bit_depth_drilled,
-                        )
-                    };
-
-                    // Check if we have enough data for analysis
-                    if packets.len() < 100 {
-                        info!(
-                            "[MLScheduler] Skipping analysis: insufficient data ({} packets, need 100+)",
-                            packets.len()
-                        );
-                        continue;
-                    }
-
-                    analyses_run += 1;
-                    info!("[MLScheduler] Running ML analysis #{} with {} packets", analyses_run, packets.len());
-
-                    // Build dataset and run analysis
-                    let metrics: Vec<types::DrillingMetrics> = packets.iter().map(|p| {
-                        // Detect operation from packet parameters
-                        let operation = agents::tactical::detect_operation(p, campaign);
-                        types::DrillingMetrics {
-                            state: p.rig_state,
-                            operation,
-                            mse: p.mse,
-                            mse_efficiency: 100.0 - (p.mse / 50000.0 * 100.0).min(100.0),
-                            d_exponent: p.d_exponent,
-                            dxc: p.dxc,
-                            mse_delta_percent: 0.0,
-                            flow_balance: p.flow_in - p.flow_out,
-                            pit_rate: p.pit_volume_change,
-                            ecd_margin: 14.0 - p.ecd,
-                            torque_delta_percent: p.torque_delta_percent,
-                            spp_delta: p.spp_delta,
-                            is_anomaly: false,
-                            anomaly_category: types::AnomalyCategory::None,
-                            anomaly_description: None,
-                        }
-                    }).collect();
-
-                    let dataset = MLScheduler::build_dataset(
-                        packets,
-                        metrics,
-                        &well_id,
-                        &field_name,
-                        campaign,
-                        bit_hours,
-                        bit_depth,
-                    );
-
-                    let report = MLScheduler::run_analysis(&dataset);
-
-                    // Store the report in app state
-                    {
-                        let mut state = ml_app_state.write().await;
-                        state.latest_ml_report = Some(report.clone());
-                    }
-
-                    // Log the result
-                    match &report.result {
-                        types::AnalysisResult::Success(insights) => {
-                            info!(
-                                "🧠 ML Analysis #{}: {} | Score: {:.2} | Correlations: {}",
-                                analyses_run,
-                                insights.confidence,
-                                insights.optimal_params.composite_score,
-                                insights.correlations.len()
-                            );
-                        }
-                        types::AnalysisResult::Failure(failure) => {
-                            warn!("🧠 ML Analysis #{}: Failed - {}", analyses_run, failure);
-                        }
-                    }
-                }
-            }
+        Err(e) => {
+            warn!("Hub health check failed: {}", e);
+            println!("        WARNING: Hub unreachable ({})", e);
         }
-    });
+    }
 
-    run_supervisor(&mut task_set, cancel_token).await
+    // Step 5: Verify passphrase auth
+    println!("  [5/5] Verifying passphrase authentication...");
+    let lib_resp = http
+        .get(format!("{}/api/fleet/library", hub_url))
+        .header("Authorization", format!("Bearer {}", passphrase))
+        .header("X-Rig-ID", rig_id)
+        .send()
+        .await;
+    match lib_resp {
+        Ok(r) if r.status().is_success() || r.status() == reqwest::StatusCode::NOT_MODIFIED => {
+            println!("        Authentication verified");
+        }
+        Ok(r) => {
+            let status = r.status();
+            return Err(anyhow::anyhow!(
+                "Passphrase verification failed (HTTP {})",
+                status
+            ));
+        }
+        Err(e) => {
+            return Err(anyhow::anyhow!("Passphrase verification failed: {}", e));
+        }
+    }
+
+    println!();
+    println!("  Enrollment complete!");
+    println!();
+    println!("  Next step:");
+    println!("    sudo systemctl restart sairen-os");
+    println!();
+
+    Ok(())
 }
 
 // ============================================================================
@@ -1148,30 +987,53 @@ async fn main() -> Result<()> {
         .with_target(false)
         .init();
 
-    // Parse CLI arguments
     let args = CliArgs::parse();
 
-    // =========================================================================
-    // RESET_DB CHECK - Must happen BEFORE any storage initialization
-    // =========================================================================
+    // Subcommand dispatch
+    #[cfg(feature = "knowledge-base")]
+    if let Some(SubCommand::MigrateKb { from, to }) = &args.command {
+        let from_path = std::path::Path::new(from);
+        let to_path = std::path::Path::new(to);
+        info!("Migrating knowledge base: {} -> {}", from, to);
+        knowledge_base::migration::migrate_flat_to_kb(from_path, to_path)?;
+        info!("Knowledge base migration complete");
+        return Ok(());
+    }
+
+    #[cfg(feature = "fleet-client")]
+    if let Some(SubCommand::Enroll {
+        hub,
+        passphrase,
+        rig_id,
+        well_id,
+        field,
+        config_dir,
+    }) = &args.command
+    {
+        return run_enroll(hub, passphrase, rig_id, well_id, field, config_dir).await;
+    }
+
+    // Reset DB check — BEFORE any storage initialization
     if should_reset_db(args.reset_db) {
         reset_data_directory()?;
     }
 
-    // Load well configuration (thresholds, physics, baseline learning params)
+    // Load well configuration
     let well_config = config::WellConfig::load();
-    info!("Well: {} | Rig: {} | Bit: {:.1}\"",
+    info!(
+        "Well: {} | Rig: {} | Bit: {:.1}\"",
         well_config.well.name,
-        if well_config.well.rig.is_empty() { "unset" } else { &well_config.well.rig },
+        if well_config.well.rig.is_empty() {
+            "unset"
+        } else {
+            &well_config.well.rig
+        },
         well_config.well.bit_diameter_inches
     );
     config::init(well_config);
 
-    // Load application configuration
-    let config = AppConfig::from_env();
-
-    // Override server address if provided via CLI
-    let server_addr = args.addr.unwrap_or(config.server_addr);
+    let app_config = AppConfig::from_env();
+    let server_addr = args.addr.unwrap_or(app_config.server_addr);
 
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("  SAIREN-OS - Strategic AI Rig ENgine");
@@ -1179,7 +1041,6 @@ async fn main() -> Result<()> {
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("");
 
-    // Log hardware detection for LLM inference
     #[cfg(feature = "llm")]
     {
         let cuda_available = llm::is_cuda_available();
@@ -1199,26 +1060,56 @@ async fn main() -> Result<()> {
         info!("");
     }
 
-    // Create cancellation token for graceful shutdown
+    // Graceful shutdown via Ctrl+C
     let cancel_token = CancellationToken::new();
     let shutdown_token = cancel_token.clone();
-
-    // Setup signal handlers
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.ok();
         info!("🛑 Received Ctrl+C, initiating shutdown...");
         shutdown_token.cancel();
     });
 
-    // Run the drilling pipeline
-    run_drilling_pipeline(
-        args.csv,
-        args.stdin,
-        args.wits_tcp,
-        args.speed,
-        server_addr,
-        cancel_token,
-    ).await?;
+    // Dispatch to unified pipeline with the appropriate source and hooks
+    if let Some(addr) = args.wits_tcp {
+        // --- TCP mode ---
+        let parts: Vec<&str> = addr.split(':').collect();
+        if parts.len() != 2 {
+            return Err(anyhow::anyhow!(
+                "Invalid WITS address format. Expected HOST:PORT"
+            ));
+        }
+        let port: u16 = parts[1].parse().context("Invalid port number")?;
+        let host = parts[0];
+
+        info!("📥 Input: WITS TCP (Level 0 protocol from {})", addr);
+        let source = TcpSource::connect(host, port).await?;
+        run_pipeline(source, (), "WITS-TCP", server_addr, true, cancel_token).await?;
+    } else if args.stdin {
+        // --- Stdin mode ---
+        info!("📥 Input: stdin (JSON WITS packets from simulation)");
+        run_pipeline(StdinSource::new(), (), "WITS", server_addr, false, cancel_token).await?;
+    } else {
+        // --- CSV / synthetic mode ---
+        let packets = load_packets(args.csv)?;
+        let delay_ms = if args.speed == 0 {
+            0
+        } else {
+            config::defaults::SIMULATION_BASE_DELAY_MS / args.speed
+        };
+        info!(
+            "⏱️  Speed: {}x ({}ms delay between packets)",
+            if args.speed == 0 {
+                "max".to_string()
+            } else {
+                args.speed.to_string()
+            },
+            delay_ms
+        );
+        let total = packets.len();
+        info!("📊 {} WITS packets queued for processing", total);
+        let source = CsvSource::new(packets, delay_ms);
+        run_pipeline(source, (), "Volve", server_addr, false, cancel_token).await?;
+    }
 
     info!("");
     info!("✓ SAIREN-OS shutdown complete");

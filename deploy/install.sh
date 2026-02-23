@@ -72,6 +72,11 @@ RUST_LOG=info
 # Well and field identifiers (used by ML engine)
 # WELL_ID=WELL-001
 # FIELD_NAME=DEFAULT
+
+# Fleet hub connection (set automatically by: sairen-os enroll --hub URL --passphrase PASS --rig-id RIG --well-id WELL --field FIELD)
+# FLEET_HUB_URL=http://192.168.1.179:8080
+# FLEET_PASSPHRASE=<shared fleet passphrase>
+# FLEET_RIG_ID=RIG-001
 EOF
     echo "Created env file at ${CONFIG_DIR}/env"
 else
@@ -93,10 +98,15 @@ echo "Installed systemd service"
 echo ""
 echo "=== Installation Complete ==="
 echo ""
-echo "Next steps:"
+echo "Next steps (fleet enrollment — recommended):"
+echo "  1. Get the passphrase from hub admin, then run:"
+echo "     sairen-os enroll --hub http://HUB_IP:8080 --passphrase PASS --rig-id RIG-1 --well-id WELL-1 --field FIELD"
+echo "  2. Enable service:    systemctl enable sairen-os"
+echo "  3. Start service:     systemctl start sairen-os"
+echo "  4. Check status:      systemctl status sairen-os"
+echo "  5. View logs:         journalctl -u sairen-os -f"
+echo ""
+echo "Manual setup (if not using fleet enrollment):"
 echo "  1. Edit well config:  vi ${CONFIG_DIR}/well_config.toml"
 echo "  2. Edit environment:  vi ${CONFIG_DIR}/env"
-echo "  3. Enable service:    systemctl enable sairen-os"
-echo "  4. Start service:     systemctl start sairen-os"
-echo "  5. Check status:      systemctl status sairen-os"
-echo "  6. View logs:         journalctl -u sairen-os -f"
+echo "  3. Enable & start:    systemctl enable --now sairen-os"

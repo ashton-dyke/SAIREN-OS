@@ -10,7 +10,7 @@ Group=sairen
 ExecStart=/usr/local/bin/fleet-hub --database-url postgres:///sairen_fleet --port 8080 --bind-address 10.0.0.1
 Restart=always
 RestartSec=5
-Environment=FLEET_ADMIN_KEY=changeme
+Environment=FLEET_PASSPHRASE=changeme
 Environment=RUST_LOG=info,fleet_hub=debug
 
 [Install]

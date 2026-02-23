@@ -1,15 +1,14 @@
-//! Fleet Hub — central server for multi-rig fleet learning
-//!
-//! The hub collects advisory events from all rigs, curates them into
-//! a scored episode library, and syncs the library back to each rig.
+//! Fleet Hub — central server for multi-rig fleet learning and LLM intelligence
 //!
 //! ## Modules
 //!
-//! - `config` — Hub configuration (env vars, CLI args)
-//! - `db` — Database connection pool and migration runner
-//! - `api` — HTTP route handlers
-//! - `curator` — Background curation pipeline (scoring, dedup, pruning)
-//! - `auth` — API key authentication middleware
+//! - `config`          — Hub configuration (env vars, CLI args)
+//! - `db`              — Database connection pool and migration runner
+//! - `api`             — HTTP route handlers
+//! - `curator`         — Background curation pipeline (scoring, dedup, pruning)
+//! - `auth`            — Passphrase authentication middleware
+//! - `knowledge_graph` — PostgreSQL-backed GraphRAG knowledge graph
+//! - `intelligence`    — Async LLM analysis workers (requires `llm` feature)
 
 #[cfg(feature = "fleet-hub")]
 pub mod config;
@@ -21,17 +20,15 @@ pub mod api;
 pub mod curator;
 #[cfg(feature = "fleet-hub")]
 pub mod auth;
+#[cfg(feature = "fleet-hub")]
+pub mod knowledge_graph;
+#[cfg(all(feature = "fleet-hub", feature = "llm"))]
+pub mod intelligence;
 
 #[cfg(feature = "fleet-hub")]
 use std::sync::atomic::AtomicU64;
 #[cfg(feature = "fleet-hub")]
 use std::sync::Arc;
-#[cfg(feature = "fleet-hub")]
-use std::collections::HashMap;
-#[cfg(feature = "fleet-hub")]
-use std::time::Instant;
-#[cfg(feature = "fleet-hub")]
-use tokio::sync::RwLock;
 
 /// Shared hub application state
 #[cfg(feature = "fleet-hub")]
@@ -42,18 +39,36 @@ pub struct HubState {
     pub config: config::HubConfig,
     /// Current library version (from DB sequence)
     pub library_version: AtomicU64,
-    /// API key verification cache: key -> (rig_id, expires_at)
-    pub api_key_cache: RwLock<HashMap<String, (String, Instant)>>,
+    /// Embedded LLM backend for intelligence workers (None when not configured)
+    #[cfg(feature = "llm")]
+    pub llm_backend: Option<Arc<crate::llm::MistralRsBackend>>,
 }
 
 #[cfg(feature = "fleet-hub")]
 impl HubState {
+    /// Create hub state without an LLM backend (curator-only mode).
     pub fn new(db: sqlx::PgPool, config: config::HubConfig) -> Arc<Self> {
         Arc::new(Self {
             db,
             config,
             library_version: AtomicU64::new(0),
-            api_key_cache: RwLock::new(HashMap::new()),
+            #[cfg(feature = "llm")]
+            llm_backend: None,
+        })
+    }
+
+    /// Create hub state with an embedded LLM backend for intelligence workers.
+    #[cfg(feature = "llm")]
+    pub fn new_with_llm(
+        db: sqlx::PgPool,
+        config: config::HubConfig,
+        backend: Arc<crate::llm::MistralRsBackend>,
+    ) -> Arc<Self> {
+        Arc::new(Self {
+            db,
+            config,
+            library_version: AtomicU64::new(0),
+            llm_backend: Some(backend),
         })
     }
 }

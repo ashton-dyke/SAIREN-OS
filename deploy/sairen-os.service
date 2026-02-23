@@ -19,6 +19,10 @@ Environment=RUST_LOG=info
 Environment=SAIREN_CONFIG=/etc/sairen-os/well_config.toml
 Environment=WITS_HOST=localhost
 Environment=WITS_PORT=5000
+# Fleet hub connection (uncomment when enrolled)
+# Environment=FLEET_HUB_URL=http://192.168.1.179:8080
+# Environment=FLEET_PASSPHRASE=<shared fleet passphrase>
+# Environment=FLEET_RIG_ID=RIG-001
 
 # Restart policy — always restart unless explicitly stopped
 Restart=on-failure

@@ -3,7 +3,7 @@
 //! Handles event uploads, outcome forwarding, and library sync.
 
 #[cfg(feature = "fleet-client")]
-use crate::fleet::types::{EventOutcome, FleetEpisode, FleetEvent};
+use crate::fleet::types::{EventOutcome, FleetEpisode, FleetEvent, IntelligenceSyncResponse};
 
 /// Fleet client errors
 #[cfg(feature = "fleet-client")]
@@ -37,23 +37,23 @@ pub struct LibraryResponse {
 pub struct FleetClient {
     http: reqwest::Client,
     hub_url: String,
-    api_key: String,
+    passphrase: String,
     rig_id: String,
 }
 
 #[cfg(feature = "fleet-client")]
 impl FleetClient {
     /// Create a new fleet client
-    pub fn new(hub_url: &str, api_key: &str, rig_id: &str) -> Self {
+    pub fn new(hub_url: &str, passphrase: &str, rig_id: &str) -> Self {
         let http = reqwest::Client::builder()
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(std::time::Duration::from_secs(crate::config::defaults::FLEET_HTTP_TIMEOUT_SECS))
             .build()
             .expect("Failed to build HTTP client");
 
         Self {
             http,
             hub_url: hub_url.trim_end_matches('/').to_string(),
-            api_key: api_key.to_string(),
+            passphrase: passphrase.to_string(),
             rig_id: rig_id.to_string(),
         }
     }
@@ -69,7 +69,7 @@ impl FleetClient {
         let resp = self
             .http
             .post(format!("{}/api/fleet/events", self.hub_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Authorization", format!("Bearer {}", self.passphrase))
             .header("Content-Type", "application/json")
             .header("Content-Encoding", "zstd")
             .header("X-Rig-ID", &self.rig_id)
@@ -113,7 +113,8 @@ impl FleetClient {
                 "{}/api/fleet/events/{}/outcome",
                 self.hub_url, event_id
             ))
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Authorization", format!("Bearer {}", self.passphrase))
+            .header("X-Rig-ID", &self.rig_id)
             .json(&body)
             .send()
             .await?;
@@ -133,7 +134,8 @@ impl FleetClient {
         let mut req = self
             .http
             .get(format!("{}/api/fleet/library", self.hub_url))
-            .header("Authorization", format!("Bearer {}", self.api_key))
+            .header("Authorization", format!("Bearer {}", self.passphrase))
+            .header("X-Rig-ID", &self.rig_id)
             .header("Accept-Encoding", "zstd");
 
         if let Some(ts) = since {
@@ -161,5 +163,58 @@ impl FleetClient {
     /// Get rig ID
     pub fn rig_id(&self) -> &str {
         &self.rig_id
+    }
+
+    /// Get passphrase
+    pub fn passphrase(&self) -> &str {
+        &self.passphrase
+    }
+
+    /// Pull intelligence outputs from hub since the given cursor timestamp.
+    ///
+    /// On first call pass `since = None` to receive all available outputs.
+    /// Store `response.synced_at` and pass it as `since` on subsequent calls
+    /// to fetch only new outputs (cursor-based delta sync).
+    ///
+    /// If `formation` is `Some`, only outputs related to that formation are
+    /// returned (in addition to rig-specific and formation-unspecific outputs).
+    pub async fn sync_intelligence(
+        &self,
+        since: Option<u64>,
+        formation: Option<&str>,
+    ) -> Result<IntelligenceSyncResponse, FleetClientError> {
+        let mut url = format!("{}/api/fleet/intelligence", self.hub_url);
+        let mut sep = '?';
+
+        if let Some(ts) = since {
+            url.push_str(&format!("{}since={}", sep, ts));
+            sep = '&';
+        }
+        if let Some(f) = formation {
+            let encoded = f.replace(' ', "%20");
+            url.push_str(&format!("{}formation={}", sep, encoded));
+        }
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.passphrase))
+            .header("X-Rig-ID", &self.rig_id)
+            .send()
+            .await?;
+
+        match resp.status() {
+            reqwest::StatusCode::OK => {
+                let body = resp.bytes().await?;
+                let response: IntelligenceSyncResponse = serde_json::from_slice(&body)?;
+                Ok(response)
+            }
+            status => Err(FleetClientError::ServerError(status)),
+        }
+    }
+
+    /// Get the HTTP client (for custom requests)
+    pub fn http_client(&self) -> &reqwest::Client {
+        &self.http
     }
 }

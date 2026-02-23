@@ -37,8 +37,9 @@ pub fn build_router(state: Arc<HubState>) -> Router {
         // Rig registry
         .route("/rigs", axum::routing::get(registry::list_rigs))
         .route("/rigs/{id}", axum::routing::get(registry::get_rig))
-        .route("/rigs/register", axum::routing::post(registry::register_rig))
         .route("/rigs/{id}/revoke", axum::routing::post(registry::revoke_rig))
+        // Enrollment
+        .route("/enroll", axum::routing::post(registry::enroll_rig))
         // Performance data (offset well sharing)
         .route("/performance", axum::routing::post(performance::upload_performance))
         .route("/performance", axum::routing::get(performance::get_performance))

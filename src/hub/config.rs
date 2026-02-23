@@ -1,6 +1,6 @@
 //! Hub configuration — environment variables, CLI args, defaults
 
-use tracing::{error, warn};
+use tracing::warn;
 
 /// Fleet Hub configuration
 #[derive(Debug, Clone)]
@@ -17,8 +17,17 @@ pub struct HubConfig {
     pub library_max_episodes: i64,
     /// Maximum age for episodes in days before archival (default: 365)
     pub pruning_max_age_days: u64,
-    /// Admin API key for rig registration and dashboard
-    pub admin_key: String,
+    /// Shared passphrase for all fleet authentication
+    pub passphrase: String,
+
+    // ─── Intelligence (LLM) settings ───────────────────────────────────────
+    /// Path to the GGUF model file for intelligence workers.
+    /// Set via `SAIREN_LLM_MODEL_PATH`. When unset, intelligence workers are
+    /// disabled even if the binary was compiled with `--features llm`.
+    pub llm_model_path: Option<String>,
+    /// How often the intelligence scheduler polls for pending jobs (seconds).
+    /// Default: 60. Set via `INTELLIGENCE_INTERVAL_SECS`.
+    pub intelligence_interval_secs: u64,
 }
 
 impl Default for HubConfig {
@@ -30,18 +39,24 @@ impl Default for HubConfig {
             curation_interval_secs: 3600,
             library_max_episodes: 50_000,
             pruning_max_age_days: 365,
-            admin_key: String::new(),
+            passphrase: String::new(),
+            llm_model_path: None,
+            intelligence_interval_secs: 60,
         }
     }
 }
 
 impl HubConfig {
-    /// Load configuration from environment variables with CLI overrides
+    /// Load configuration from environment variables with CLI overrides.
+    ///
+    /// Returns an error in release builds when `FLEET_PASSPHRASE` is not set,
+    /// preventing the hub from starting with a publicly known default.
+    /// In debug builds a warning is emitted and the dev default is used.
     pub fn from_env(
         database_url: Option<String>,
         bind_address: Option<String>,
         port: Option<u16>,
-    ) -> Self {
+    ) -> anyhow::Result<Self> {
         let mut config = Self::default();
 
         // Database URL: CLI arg > env var
@@ -56,16 +71,22 @@ impl HubConfig {
             config.bind_address = format!("0.0.0.0:{}", p);
         }
 
-        // Admin key from env
-        config.admin_key = std::env::var("FLEET_ADMIN_KEY")
-            .unwrap_or_else(|_| {
+        // Passphrase from env — mandatory in release builds
+        config.passphrase = match std::env::var("FLEET_PASSPHRASE") {
+            Ok(key) => key,
+            Err(_) => {
                 if cfg!(debug_assertions) {
-                    warn!("FLEET_ADMIN_KEY not set, using default dev key — do NOT use in production");
+                    warn!("FLEET_PASSPHRASE not set, using default dev passphrase — do NOT use in production");
+                    "dev-passphrase".to_string()
                 } else {
-                    error!("FLEET_ADMIN_KEY not set — falling back to insecure default; set FLEET_ADMIN_KEY env var");
+                    anyhow::bail!(
+                        "FLEET_PASSPHRASE environment variable is not set. \
+                         The hub cannot start in release mode without a passphrase. \
+                         Set FLEET_PASSPHRASE to a shared secret."
+                    );
                 }
-                "admin-dev-key".to_string()
-            });
+            }
+        };
 
         // Optional overrides from env
         if let Ok(v) = std::env::var("FLEET_MAX_PAYLOAD_SIZE") {
@@ -84,6 +105,14 @@ impl HubConfig {
             }
         }
 
-        config
+        // Intelligence / LLM settings
+        config.llm_model_path = std::env::var("SAIREN_LLM_MODEL_PATH").ok();
+        if let Ok(v) = std::env::var("INTELLIGENCE_INTERVAL_SECS") {
+            if let Ok(n) = v.parse() {
+                config.intelligence_interval_secs = n;
+            }
+        }
+
+        Ok(config)
     }
 }
