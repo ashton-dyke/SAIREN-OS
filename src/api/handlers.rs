@@ -1279,7 +1279,7 @@ pub async fn get_critical_reports(
                 physics.current_depth,
                 physics.current_rop
             );
-            let digital_signature = format!("SHA256-{:x}", md5::compute(signature_content.as_bytes()));
+            let digital_signature = format!("MD5-{:x}", md5::compute(signature_content.as_bytes()));
 
             // Format timestamp
             let dt = chrono::DateTime::from_timestamp(report.timestamp as i64, 0)
@@ -1337,7 +1337,7 @@ pub async fn get_critical_reports(
 }
 
 /// Extract trigger information from report votes and trace log
-fn extract_trigger_info(report: &crate::types::StrategicReport) -> (String, f64, f64) {
+pub fn extract_trigger_info(report: &crate::types::StrategicReport) -> (String, f64, f64) {
     // Look for WellControl vote as it often has the trigger
     for vote in &report.votes {
         if vote.specialist == "WellControl" && vote.vote == crate::types::TicketSeverity::Critical {
@@ -1842,7 +1842,7 @@ pub async fn get_metrics(State(state): State<DashboardState>) -> impl IntoRespon
 /// Query params:
 /// - `?type=benchmark` — filter by output_type
 /// - `?formation=Ekofisk` — filter by formation name
-#[cfg(feature = "fleet-client")]
+
 pub async fn get_fleet_intelligence(
     Query(params): Query<FleetIntelligenceQuery>,
 ) -> Json<Vec<crate::fleet::types::IntelligenceOutput>> {
@@ -1873,7 +1873,7 @@ pub async fn get_fleet_intelligence(
     Json(filtered)
 }
 
-#[cfg(feature = "fleet-client")]
+
 #[derive(serde::Deserialize)]
 pub struct FleetIntelligenceQuery {
     /// Filter by output_type: `benchmark`, `fingerprint`, `report`, `advisory`

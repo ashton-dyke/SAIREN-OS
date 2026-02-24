@@ -1,18 +1,18 @@
 //! Library sync and performance sync background tasks
 
-#[cfg(feature = "fleet-client")]
+
 use crate::context::RAMRecall;
-#[cfg(feature = "fleet-client")]
+
 use crate::fleet::client::{FleetClient, FleetClientError};
-#[cfg(feature = "fleet-client")]
+
 use std::sync::Arc;
-#[cfg(feature = "fleet-client")]
+
 use std::time::Duration;
-#[cfg(feature = "fleet-client")]
+
 use tracing::{debug, info, warn};
 
 /// Run the library sync background task
-#[cfg(feature = "fleet-client")]
+
 pub async fn run_library_sync(
     client: FleetClient,
     ram_recall: Arc<RAMRecall>,
@@ -71,7 +71,7 @@ pub async fn run_library_sync(
 ///
 /// The cache file is a JSON array of `IntelligenceOutput` structs, capped at
 /// `FLEET_INTELLIGENCE_MAX_CACHED` entries (oldest pruned first).
-#[cfg(feature = "fleet-client")]
+
 pub async fn run_intelligence_sync(
     client: FleetClient,
     cache_path: std::path::PathBuf,
@@ -162,7 +162,7 @@ pub async fn run_intelligence_sync(
 /// Periodically pulls offset well performance data from the fleet hub
 /// and writes it to the knowledge base directory structure. The KB watcher
 /// detects the new files and triggers prognosis reassembly.
-#[cfg(all(feature = "fleet-client", feature = "knowledge-base"))]
+
 pub async fn run_performance_sync(
     client: FleetClient,
     config: crate::types::KnowledgeBaseConfig,

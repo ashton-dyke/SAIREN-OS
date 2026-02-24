@@ -48,7 +48,7 @@ fn load_volve() -> VolveReplay {
 fn csv_replay_50_packets_smoke() {
     // 1. Initialize config with defaults (safe for parallel tests -- double-init is ignored)
     if !config::is_initialized() {
-        config::init(WellConfig::default());
+        config::init(WellConfig::default(), config::ConfigProvenance::default());
     }
 
     // 2. Load Volve CSV and extract drilling packets
@@ -148,7 +148,7 @@ fn csv_replay_context_lookup_non_empty() {
 #[test]
 fn csv_replay_drilling_data_quality() {
     if !config::is_initialized() {
-        config::init(WellConfig::default());
+        config::init(WellConfig::default(), config::ConfigProvenance::default());
     }
 
     let replay = load_volve();
@@ -197,7 +197,7 @@ fn csv_replay_drilling_data_quality() {
 #[test]
 fn csv_replay_200_packets_baseline_and_tickets() {
     if !config::is_initialized() {
-        config::init(WellConfig::default());
+        config::init(WellConfig::default(), config::ConfigProvenance::default());
     }
 
     let replay = load_volve();
@@ -237,5 +237,19 @@ fn csv_replay_200_packets_baseline_and_tickets() {
         history.len().min(60),
         if target_count >= 60 { 60 } else { target_count },
         "History buffer should be filled"
+    );
+
+    // Phase 1C: Baseline should lock after 200 packets (min_samples_for_lock = 100)
+    assert!(
+        baseline_locked,
+        "Baseline should lock after {} packets (min_samples_for_lock = 100)",
+        target_count
+    );
+
+    // Phase 1C: Volve data contains real anomalies — should generate at least 1 ticket
+    assert!(
+        tickets_created >= 1,
+        "Expected at least 1 advisory ticket from {} drilling packets (Volve data has anomalies), got {}",
+        target_count, tickets_created
     );
 }

@@ -1,18 +1,18 @@
 //! Upload background task — drains the queue and sends events to the hub
 
-#[cfg(feature = "fleet-client")]
+
 use crate::fleet::client::FleetClient;
-#[cfg(feature = "fleet-client")]
+
 use crate::fleet::queue::UploadQueue;
-#[cfg(feature = "fleet-client")]
+
 use std::sync::Arc;
-#[cfg(feature = "fleet-client")]
+
 use std::time::Duration;
-#[cfg(feature = "fleet-client")]
+
 use tracing::{info, warn};
 
 /// Run the upload background task
-#[cfg(feature = "fleet-client")]
+
 pub async fn run_uploader(queue: Arc<UploadQueue>, client: FleetClient, interval_secs: u64) {
     let mut interval = tokio::time::interval(Duration::from_secs(interval_secs));
 

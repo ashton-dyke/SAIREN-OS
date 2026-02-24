@@ -27,6 +27,7 @@ pub use drilling_models::{
 };
 
 
+use crate::baseline::BaselineOverrides;
 use crate::types::{
     AnomalyCategory, DrillingMetrics, DrillingPhysicsReport, EnhancedPhysicsReport, HistoryEntry,
     RigState, WitsPacket,
@@ -47,7 +48,11 @@ use crate::types::{
 /// - D-exponent and dxc
 /// - Flow balance and pit rate
 /// - Anomaly detection
-pub fn tactical_update(packet: &WitsPacket, prev_packet: Option<&WitsPacket>) -> DrillingMetrics {
+pub fn tactical_update(
+    packet: &WitsPacket,
+    prev_packet: Option<&WitsPacket>,
+    baseline_overrides: Option<&BaselineOverrides>,
+) -> DrillingMetrics {
     // Classify operational state
     let state = classify_rig_state(packet);
 
@@ -140,7 +145,7 @@ pub fn tactical_update(packet: &WitsPacket, prev_packet: Option<&WitsPacket>) ->
 
     // Detect anomalies
     let (is_anomaly, anomaly_category, anomaly_description) =
-        detect_anomalies(packet, prev_packet, &state, flow_balance, pit_rate, mse_efficiency, torque_delta_percent, spp_delta, flow_out_available);
+        detect_anomalies(packet, prev_packet, &state, flow_balance, pit_rate, mse_efficiency, torque_delta_percent, spp_delta, flow_out_available, baseline_overrides);
 
     DrillingMetrics {
         state,
@@ -195,6 +200,7 @@ fn detect_anomalies(
     torque_delta_percent: f64,
     spp_delta: f64,
     flow_out_available: bool,
+    baseline_overrides: Option<&BaselineOverrides>,
 ) -> (bool, AnomalyCategory, Option<String>) {
     // Only check during active drilling states
     if *state != RigState::Drilling && *state != RigState::Reaming && *state != RigState::Circulating {
@@ -260,14 +266,26 @@ fn detect_anomalies(
         let h = &crate::config::get().thresholds.hydraulics;
         (h.ecd_margin_warning_ppg, h.ecd_margin_critical_ppg)
     } else { (0.3, 0.1) };
-    let (spp_warn, spp_crit) = if cfg_available {
-        let h = &crate::config::get().thresholds.hydraulics;
-        (h.spp_deviation_warning_psi, h.spp_deviation_critical_psi)
-    } else { (100.0, 200.0) };
-    let (torq_warn, torq_crit) = if cfg_available {
-        let m = &crate::config::get().thresholds.mechanical;
-        (m.torque_increase_warning, m.torque_increase_critical)
-    } else { (0.15, 0.25) };
+    let (spp_warn, spp_crit) = {
+        let (cfg_warn, cfg_crit) = if cfg_available {
+            let h = &crate::config::get().thresholds.hydraulics;
+            (h.spp_deviation_warning_psi, h.spp_deviation_critical_psi)
+        } else { (100.0, 200.0) };
+        (
+            baseline_overrides.and_then(|o| o.spp_deviation_warning_psi).unwrap_or(cfg_warn),
+            baseline_overrides.and_then(|o| o.spp_deviation_critical_psi).unwrap_or(cfg_crit),
+        )
+    };
+    let (torq_warn, torq_crit) = {
+        let (cfg_warn, cfg_crit) = if cfg_available {
+            let m = &crate::config::get().thresholds.mechanical;
+            (m.torque_increase_warning, m.torque_increase_critical)
+        } else { (0.15, 0.25) };
+        (
+            baseline_overrides.and_then(|o| o.torque_warning_fraction).unwrap_or(cfg_warn),
+            baseline_overrides.and_then(|o| o.torque_critical_fraction).unwrap_or(cfg_crit),
+        )
+    };
 
     // Gas warning
     if packet.gas_units > gas_warn {
@@ -492,7 +510,7 @@ mod tests {
     #[test]
     fn test_tactical_update_normal_drilling() {
         let packet = create_drilling_packet();
-        let metrics = tactical_update(&packet, None);
+        let metrics = tactical_update(&packet, None, None);
 
         assert_eq!(metrics.state, RigState::Drilling);
         assert!(metrics.mse > 0.0, "MSE should be calculated during drilling");
@@ -509,7 +527,7 @@ mod tests {
         packet.pit_volume_change = 8.0; // 8 bbl gain
         packet.gas_units = 200.0; // Elevated gas
 
-        let metrics = tactical_update(&packet, None);
+        let metrics = tactical_update(&packet, None, None);
 
         assert!(metrics.is_anomaly, "Should detect kick conditions");
         assert_eq!(metrics.anomaly_category, AnomalyCategory::WellControl);
@@ -522,7 +540,7 @@ mod tests {
         packet.wob = 35.0; // High WOB
         // This should result in poor MSE efficiency
 
-        let metrics = tactical_update(&packet, None);
+        let metrics = tactical_update(&packet, None, None);
 
         // Low efficiency is detected when MSE is higher than optimal
         // MSE efficiency is capped at 100.0, so just verify metrics were calculated

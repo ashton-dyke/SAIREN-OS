@@ -1,12 +1,12 @@
 //! Fleet bridge: upload post-well performance to hub, download offset data
 
-#[cfg(feature = "fleet-client")]
+
 use crate::fleet::client::{FleetClient, FleetClientError};
-#[cfg(feature = "fleet-client")]
+
 use crate::types::KnowledgeBaseConfig;
 use crate::types::PostWellFormationPerformance;
 use serde::{Deserialize, Serialize};
-#[cfg(feature = "fleet-client")]
+
 use tracing::{info, warn};
 
 /// Fleet payload for post-well performance sharing
@@ -29,7 +29,7 @@ pub struct FleetPerformanceResponse {
 /// Upload all post-well performance files for the current well to the fleet hub.
 ///
 /// Returns the number of files successfully uploaded.
-#[cfg(feature = "fleet-client")]
+
 pub async fn upload_post_well(
     client: &FleetClient,
     config: &KnowledgeBaseConfig,
@@ -91,7 +91,7 @@ pub async fn upload_post_well(
 ///
 /// Downloads performance records for the field and writes them to the
 /// appropriate sibling well directories.
-#[cfg(feature = "fleet-client")]
+
 pub async fn sync_performance(
     client: &FleetClient,
     config: &KnowledgeBaseConfig,
@@ -155,7 +155,7 @@ pub async fn sync_performance(
 }
 
 /// Simple URL-safe encoding for field/rig names
-#[cfg(feature = "fleet-client")]
+
 fn urlencoding_field(s: &str) -> String {
     s.replace(' ', "%20")
 }

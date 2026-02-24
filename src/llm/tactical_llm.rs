@@ -7,20 +7,14 @@
 //! the physics-based detection by analyzing drilling parameter context.
 
 use crate::types::DrillingMetrics;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 use tokio::sync::Mutex;
 
-#[cfg(feature = "llm")]
-use anyhow::Context;
-#[cfg(feature = "llm")]
-use std::env;
-#[cfg(feature = "llm")]
-use super::MistralRsBackend;
+use super::{LlmBackend, MistralRsBackend};
 
 /// Default model path for tactical model (Qwen 2.5 1.5B - used for both GPU and CPU)
-#[cfg(feature = "llm")]
 const DEFAULT_TACTICAL_MODEL: &str = "models/qwen2.5-1.5b-instruct-q4_k_m.gguf";
 
 /// Global singleton for TacticalLLM
@@ -40,23 +34,19 @@ struct TacticalStats {
 /// Uses a small 1.5B model to quickly verify if detected anomalies
 /// are real drilling issues or operational noise.
 pub struct TacticalLLM {
-    #[cfg(feature = "llm")]
     backend: Arc<MistralRsBackend>,
     stats: Mutex<TacticalStats>,
-    #[cfg(not(feature = "llm"))]
-    _phantom: std::marker::PhantomData<()>,
 }
 
 impl TacticalLLM {
     /// Initialize the tactical LLM singleton
-    #[cfg(feature = "llm")]
     pub async fn init() -> Result<Arc<Self>> {
         if let Some(existing) = TACTICAL_INSTANCE.get() {
             return Ok(Arc::clone(existing));
         }
 
         let uses_gpu = super::is_cuda_available();
-        let model_path = env::var("TACTICAL_MODEL_PATH")
+        let model_path = std::env::var("TACTICAL_MODEL_PATH")
             .unwrap_or_else(|_| DEFAULT_TACTICAL_MODEL.to_string());
 
         tracing::info!(
@@ -84,24 +74,6 @@ impl TacticalLLM {
         Ok(instance)
     }
 
-    /// Initialize mock tactical LLM (when llm feature disabled)
-    #[cfg(not(feature = "llm"))]
-    pub async fn init() -> Result<Arc<Self>> {
-        if let Some(existing) = TACTICAL_INSTANCE.get() {
-            return Ok(Arc::clone(existing));
-        }
-
-        tracing::info!("Initializing Tactical LLM (MOCK - llm feature disabled)");
-
-        let instance = Arc::new(Self {
-            stats: Mutex::new(TacticalStats::default()),
-            _phantom: std::marker::PhantomData,
-        });
-
-        let _ = TACTICAL_INSTANCE.set(Arc::clone(&instance));
-        Ok(instance)
-    }
-
     /// Get the global singleton instance
     pub fn get() -> Option<Arc<Self>> {
         TACTICAL_INSTANCE.get().cloned()
@@ -111,8 +83,12 @@ impl TacticalLLM {
     ///
     /// Returns `true` if this is a significant issue that should generate an advisory.
     /// Returns `false` if this is operational noise that should be filtered out.
-    #[cfg(feature = "llm")]
     pub async fn classify(&self, metrics: &DrillingMetrics) -> Result<bool> {
+        if !metrics_are_valid(metrics) {
+            tracing::warn!("Skipping LLM classification: non-finite metrics");
+            return Ok(false);
+        }
+
         let start = Instant::now();
 
         let prompt = format!(
@@ -188,38 +164,6 @@ Is this a SIGNIFICANT drilling issue? Answer only: YES or NO"#,
         Ok(is_significant)
     }
 
-    /// Mock classification when LLM feature is disabled
-    #[cfg(not(feature = "llm"))]
-    pub async fn classify(&self, metrics: &DrillingMetrics) -> Result<bool> {
-        let start = Instant::now();
-
-        // Mock classification based on physics anomaly flag
-        let is_significant = metrics.is_anomaly;
-
-        let elapsed = start.elapsed();
-
-        {
-            let mut stats = self.stats.lock().await;
-            stats.inference_count += 1;
-            stats.total_latency_ms += elapsed.as_secs_f64() * 1000.0;
-            if is_significant {
-                stats.confirmed_anomalies += 1;
-            } else {
-                stats.noise_filtered += 1;
-            }
-        }
-
-        tracing::debug!(
-            is_significant = is_significant,
-            mse = metrics.mse,
-            flow_balance = metrics.flow_balance,
-            state = ?metrics.state,
-            "(MOCK) Tactical drilling classification"
-        );
-
-        Ok(is_significant)
-    }
-
     /// Get inference statistics
     pub async fn stats(&self) -> TacticalLLMStats {
         let stats = self.stats.lock().await;
@@ -265,6 +209,18 @@ impl std::fmt::Display for TacticalLLMStats {
     }
 }
 
+/// Check that all numeric fields interpolated into the LLM prompt are finite.
+/// Non-finite values (NaN/Infinity) produce garbage prompts and waste inference.
+fn metrics_are_valid(m: &DrillingMetrics) -> bool {
+    m.mse.is_finite()
+        && m.mse_delta_percent.is_finite()
+        && m.d_exponent.is_finite()
+        && m.dxc.is_finite()
+        && m.flow_balance.is_finite()
+        && m.pit_rate.is_finite()
+        && m.ecd_margin.is_finite()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +240,7 @@ mod tests {
             ecd_margin: 0.4,
             torque_delta_percent: 10.0,
             spp_delta: 50.0,
+            flow_data_available: true,
             is_anomaly,
             anomaly_category: if is_anomaly { AnomalyCategory::DrillingEfficiency } else { AnomalyCategory::None },
             anomaly_description: if is_anomaly { Some("Test anomaly".to_string()) } else { None },
@@ -292,30 +249,19 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn test_mock_tactical_classification() {
-        let llm = TacticalLLM::init().await.unwrap();
+    // Note: Tests require actual model files, so they're not runnable in CI.
+    // The tactical LLM is tested via integration tests with the full pipeline.
 
-        let anomaly_metrics = create_test_metrics(true);
-        let result = llm.classify(&anomaly_metrics).await.unwrap();
-        assert!(result, "Should classify anomaly as significant");
-
-        let normal_metrics = create_test_metrics(false);
-        let result = llm.classify(&normal_metrics).await.unwrap();
-        assert!(!result, "Should filter out normal operation");
-    }
-
-    #[tokio::test]
-    async fn test_stats_tracking() {
-        let llm = TacticalLLM::init().await.unwrap();
-        llm.reset_stats().await;
-
-        let metrics = create_test_metrics(true);
-        llm.classify(&metrics).await.unwrap();
-        llm.classify(&metrics).await.unwrap();
-
-        let stats = llm.stats().await;
-        assert_eq!(stats.inference_count, 2);
-        assert_eq!(stats.confirmed_anomalies, 2);
+    #[test]
+    fn test_stats_display() {
+        let stats = TacticalLLMStats {
+            inference_count: 10,
+            avg_latency_ms: 55.0,
+            confirmed_anomalies: 6,
+            noise_filtered: 4,
+        };
+        let display = format!("{}", stats);
+        assert!(display.contains("10 inferences"));
+        assert!(display.contains("55.0ms"));
     }
 }

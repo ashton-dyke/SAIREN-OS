@@ -6,16 +6,13 @@
 //! # Usage
 //!
 //! ```bash
-//! # Run with synthetic test data
+//! # Run with synthetic test data (LLM compiled by default, CUDA detected at runtime)
 //! cargo run --release
 //!
 //! # Run with simulation input from stdin
 //! python wits_simulator.py | ./sairen-os --stdin
 //!
-//! # Run with LLM models (CPU - auto-detects hardware)
-//! cargo run --release --features llm
-//!
-//! # Run with LLM models (GPU - requires CUDA toolkit)
+//! # Run with GPU acceleration (requires CUDA toolkit)
 //! cargo run --release --features cuda
 //! ```
 //!
@@ -53,7 +50,6 @@ pub mod baseline;
 pub mod aci;
 pub mod cfc;
 pub mod fleet;
-#[cfg(feature = "knowledge-base")]
 pub mod knowledge_base;
 pub mod background;
 pub mod optimization;
@@ -109,8 +105,10 @@ struct CliArgs {
 
 #[derive(clap::Subcommand, Debug)]
 enum SubCommand {
+    /// Generate a minimal operator config template to stdout
+    GenerateConfig,
+
     /// Migrate a flat well_prognosis.toml into the structured knowledge base directory
-    #[cfg(feature = "knowledge-base")]
     MigrateKb {
         /// Path to the source well_prognosis.toml file
         #[arg(long = "from")]
@@ -120,8 +118,41 @@ enum SubCommand {
         to: String,
     },
 
-    /// Enroll this rig with a Fleet Hub using the shared passphrase
-    #[cfg(feature = "fleet-client")]
+    /// Launch the setup wizard (web UI on port 8080)
+    Setup {
+        /// Override scan port ranges (default: 5000-5010,10001-10010)
+        #[arg(long)]
+        ports: Option<String>,
+        /// Override server address (default: 0.0.0.0:8080)
+        #[arg(long)]
+        addr: Option<String>,
+        /// Config directory (default: /etc/sairen-os)
+        #[arg(long, default_value = "/etc/sairen-os")]
+        config_dir: String,
+    },
+
+    /// Pair this rig with a Fleet Hub using a 6-digit code (no passphrase needed)
+    Pair {
+        /// Fleet Hub URL (e.g. http://hub:8080)
+        #[arg(long)]
+        hub: String,
+        /// Rig identifier
+        #[arg(long)]
+        rig_id: String,
+        /// Well identifier
+        #[arg(long)]
+        well_id: String,
+        /// Field name
+        #[arg(long)]
+        field: String,
+        /// Config directory (default: /etc/sairen-os)
+        #[arg(long, default_value = "/etc/sairen-os")]
+        config_dir: String,
+    },
+
+    /// [Deprecated] Enroll this rig with a Fleet Hub using the shared passphrase.
+    /// Use 'sairen-os setup' or 'sairen-os pair' instead.
+    #[command(hide = true)]
     Enroll {
         /// Fleet Hub URL (e.g. http://hub:8080)
         #[arg(long)]
@@ -144,25 +175,6 @@ enum SubCommand {
     },
 }
 
-// ============================================================================
-// Configuration
-// ============================================================================
-
-/// Application configuration
-#[derive(Debug, Clone)]
-struct AppConfig {
-    /// HTTP server bind address
-    server_addr: String,
-}
-
-impl AppConfig {
-    fn from_env() -> Self {
-        Self {
-            server_addr: std::env::var("SAIREN_SERVER_ADDR")
-                .unwrap_or_else(|_| "0.0.0.0:8080".to_string()),
-        }
-    }
-}
 
 // ============================================================================
 // Database Reset
@@ -229,11 +241,8 @@ enum TaskName {
     HttpServer,
     PacketProcessor,
     MLScheduler,
-    #[cfg(feature = "fleet-client")]
     FleetUploader,
-    #[cfg(feature = "fleet-client")]
     FleetLibrarySync,
-    #[cfg(feature = "fleet-client")]
     FleetIntelligenceSync,
 }
 
@@ -243,11 +252,8 @@ impl std::fmt::Display for TaskName {
             TaskName::HttpServer => write!(f, "HttpServer"),
             TaskName::PacketProcessor => write!(f, "PacketProcessor"),
             TaskName::MLScheduler => write!(f, "MLScheduler"),
-            #[cfg(feature = "fleet-client")]
             TaskName::FleetUploader => write!(f, "FleetUploader"),
-            #[cfg(feature = "fleet-client")]
             TaskName::FleetLibrarySync => write!(f, "FleetLibrarySync"),
-            #[cfg(feature = "fleet-client")]
             TaskName::FleetIntelligenceSync => write!(f, "FleetIntelligenceSync"),
         }
     }
@@ -368,18 +374,35 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
         start_in_learning_mode,
     );
 
-    #[cfg(feature = "knowledge-base")]
     if let Some(handle) = coordinator.start_kb_watcher() {
         info!("✓ Knowledge base watcher started");
         drop(handle);
     }
 
     info!("🌐 Starting HTTP server on {}...", server_addr);
-    let dashboard_state = DashboardState::new_with_storage_and_thresholds(
+    let mut dashboard_state = DashboardState::new_with_storage_and_thresholds(
         Arc::clone(&app_state),
         threshold_manager.clone(),
         equipment_id,
     );
+
+    // Wire strategic and ML storage into dashboard state so v2 endpoints
+    // can serve hourly/daily/ML reports (fixes always-None bug).
+    match storage::StrategicStorage::open("./data/strategic_reports.db") {
+        Ok(s) => {
+            info!("✓ Strategic report storage opened for dashboard");
+            dashboard_state.strategic_storage = Some(s);
+        }
+        Err(e) => warn!("Failed to open strategic storage for dashboard: {}", e),
+    }
+    match ml_engine::MLInsightsStorage::open("./data/ml_insights.db") {
+        Ok(s) => {
+            info!("✓ ML insights storage opened for dashboard");
+            dashboard_state.ml_storage = Some(Arc::new(s));
+        }
+        Err(e) => warn!("Failed to open ML insights storage for dashboard: {}", e),
+    }
+
     let app = create_app(dashboard_state);
 
     let listener = tokio::net::TcpListener::bind(server_addr)
@@ -435,7 +458,6 @@ fn spawn_http_server(
 ///
 /// Returns a `FleetContext` with the shared queue so the packet processor
 /// can enqueue events directly.
-#[cfg(feature = "fleet-client")]
 fn spawn_fleet_tasks(
     task_set: &mut JoinSet<Result<TaskName>>,
 ) -> Option<pipeline::processing_loop::FleetContext> {
@@ -459,7 +481,8 @@ fn spawn_fleet_tasks(
         }
     };
     let rig_id = std::env::var("FLEET_RIG_ID").unwrap_or_else(|_| "UNKNOWN".to_string());
-    let well_id = std::env::var("WELL_ID").unwrap_or_else(|_| "UNKNOWN".to_string());
+    let well_id = std::env::var("WELL_ID")
+        .unwrap_or_else(|_| config::get().well.name.clone());
 
     let client = FleetClient::new(&hub_url, &passphrase, &rig_id);
     info!("Fleet client initialized — hub: {}, rig: {}", hub_url, rig_id);
@@ -517,7 +540,6 @@ fn spawn_ml_scheduler(
     task_set.spawn(async move {
         use ml_engine::{MLScheduler, get_interval};
 
-        #[cfg(feature = "knowledge-base")]
         let ml_knowledge_base = knowledge_base::KnowledgeBase::init();
 
         info!("[MLScheduler] Task starting with interval {:?}", get_interval());
@@ -573,7 +595,6 @@ fn spawn_ml_scheduler(
                     analyses_run += 1;
                     info!("[MLScheduler] Running ML analysis #{} with {} packets", analyses_run, packets.len());
 
-                    #[cfg(feature = "knowledge-base")]
                     let snapshot_packets = packets.clone();
 
                     let metrics: Vec<types::DrillingMetrics> = packets.iter().map(|p| {
@@ -585,7 +606,7 @@ fn spawn_ml_scheduler(
                         //      instead of using the per-packet fracture_gradient field.
                         //   3. flow_balance sign was inverted (flow_in - flow_out)
                         //      vs the rest of the codebase (flow_out - flow_in).
-                        let mut m = physics_engine::tactical_update(p, None);
+                        let mut m = physics_engine::tactical_update(p, None, None);
                         // tactical_update leaves operation as default; set it from the
                         // same campaign-aware classifier the tactical agent uses.
                         m.operation = agents::tactical::detect_operation(p, campaign);
@@ -611,12 +632,9 @@ fn spawn_ml_scheduler(
                         state.latest_ml_report = Some(report.clone());
                     }
 
-                    #[cfg(feature = "knowledge-base")]
-                    {
-                        if let Some(ref kb) = ml_knowledge_base {
-                            if let Err(e) = kb.write_snapshot_with_packets(&report, &snapshot_packets) {
-                                warn!("Failed to write KB snapshot: {}", e);
-                            }
+                    if let Some(ref kb) = ml_knowledge_base {
+                        if let Err(e) = kb.write_snapshot_with_packets(&report, &snapshot_packets) {
+                            warn!("Failed to write KB snapshot: {}", e);
                         }
                     }
 
@@ -722,13 +740,11 @@ async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
     spawn_http_server(&mut task_set, core.listener, core.app, cancel_token.clone());
 
     // Fleet client background tasks
-    #[cfg(feature = "fleet-client")]
     let fleet_ctx = spawn_fleet_tasks(&mut task_set);
 
     // Task 2: Packet Processor (unified processing loop)
     let proc_cancel = cancel_token.clone();
     let proc_state = Arc::clone(&app_state);
-    #[cfg(feature = "fleet-client")]
     let proc_fleet = fleet_ctx;
     task_set.spawn(async move {
         info!("[PacketProcessor] Task starting");
@@ -740,7 +756,6 @@ async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
             proc_cancel,
         );
 
-        #[cfg(feature = "fleet-client")]
         let processing_loop = if let Some(ctx) = proc_fleet {
             processing_loop.with_fleet(ctx)
         } else {
@@ -801,7 +816,6 @@ fn load_packets(csv_path: Option<String>) -> Result<Vec<types::WitsPacket>> {
 ///
 /// If the variable exists (commented or not), update its value.
 /// Otherwise, append it at the end.
-#[cfg(feature = "fleet-client")]
 fn update_env_var(contents: &str, key: &str, value: &str) -> String {
     let mut found = false;
     let mut lines: Vec<String> = contents
@@ -838,7 +852,6 @@ fn update_env_var(contents: &str, key: &str, value: &str) -> String {
 /// 3. Update well_config.toml
 /// 4. Verify hub connectivity
 /// 5. Verify passphrase authentication
-#[cfg(feature = "fleet-client")]
 async fn run_enroll(hub_url: &str, passphrase: &str, rig_id: &str, well_id: &str, field: &str, config_dir: &str) -> Result<()> {
     use std::path::Path;
 
@@ -973,6 +986,280 @@ async fn run_enroll(hub_url: &str, passphrase: &str, rig_id: &str, well_id: &str
 }
 
 // ============================================================================
+// Generate Config Template
+// ============================================================================
+
+/// Output a minimal operator TOML template to stdout.
+///
+/// Operator-relevant fields are uncommented; expert fields are commented out
+/// with descriptions. This is the starting point for a new deployment.
+fn generate_config_template() {
+    print!(
+        r#"# SAIREN-OS Well Configuration
+# Generated by: sairen-os generate-config
+#
+# Only the fields below need to be set for a standard deployment.
+# All other thresholds are auto-detected from WITS data or use safe defaults.
+
+[well]
+name = "WELL-001"
+field = ""
+rig = ""
+bit_diameter_inches = 8.5
+campaign = "production"       # "production" or "plug_abandonment"
+
+[server]
+addr = "0.0.0.0:8080"
+
+[thresholds.hydraulics]
+normal_mud_weight_ppg = 8.6      # auto-detected from WITS if not set
+fracture_gradient_ppg = 14.0
+
+[thresholds.well_control]
+flow_imbalance_warning_gpm = 10.0   # auto-detected from baseline if not set
+flow_imbalance_critical_gpm = 20.0
+
+# === Expert Configuration (change only with engineering review) ===
+
+# [thresholds.mse]
+# efficiency_warning_percent = 70.0
+# efficiency_poor_percent = 50.0
+
+# [thresholds.mechanical]
+# torque_increase_warning = 0.15
+# torque_increase_critical = 0.25
+# stick_slip_cv_warning = 0.15
+# stick_slip_cv_critical = 0.25
+# packoff_spp_increase_threshold = 0.10
+# packoff_rop_decrease_threshold = 0.20
+# stick_slip_min_samples = 5
+
+# [thresholds.founder]
+# wob_increase_min = 0.02
+# rop_response_min = 0.01
+# severity_warning = 0.3
+# severity_high = 0.7
+# min_samples = 5
+# quick_wob_delta_percent = 0.05
+
+# [thresholds.formation]
+# dexp_decrease_warning = -0.15
+# mse_change_significant = 0.20
+# dxc_trend_threshold = 0.05
+# dxc_pressure_threshold = -0.05
+# mse_pressure_tolerance = 0.10
+
+# [thresholds.rig_state]
+# idle_rpm_max = 5.0
+# circulation_flow_min = 50.0
+# drilling_wob_min = 1.0
+# reaming_depth_offset = 5.0
+# trip_out_hook_load_min = 200.0
+# trip_in_hook_load_max = 50.0
+# tripping_flow_max = 100.0
+
+# [baseline_learning]
+# warning_sigma = 3.0
+# critical_sigma = 5.0
+# min_samples_for_lock = 100
+# min_std_floor = 0.001
+# max_outlier_percentage = 0.05
+# outlier_sigma_threshold = 3.0
+
+# [ensemble_weights]
+# mse = 0.25
+# hydraulic = 0.25
+# well_control = 0.30
+# formation = 0.20
+
+# [advisory]
+# default_cooldown_seconds = 60
+# critical_bypass_cooldown = true
+
+# [physics]
+# formation_hardness_base_psi = 5000.0
+# formation_hardness_multiplier = 8000.0
+# kick_min_indicators = 2
+# loss_min_indicators = 2
+# kick_gas_increase_threshold = 50.0
+# confidence_full_window = 60
+# min_rop_for_mse = 0.1
+
+# [ml]
+# rop_lag_seconds = 60
+# interval_secs = 3600
+"#
+    );
+}
+
+// ============================================================================
+// Setup Wizard
+// ============================================================================
+
+/// Run the setup wizard — a standalone HTTP server with the setup UI.
+async fn run_setup(ports: Option<String>, addr: &str, config_dir: &str) -> Result<()> {
+    let port_ranges = match ports {
+        Some(ref s) => acquisition::scanner::parse_port_ranges(s)
+            .map_err(|e| anyhow::anyhow!("Invalid port ranges: {}", e))?,
+        None => acquisition::scanner::DEFAULT_PORT_RANGES.to_vec(),
+    };
+
+    let state = api::setup::SetupState::new(config_dir.to_string(), port_ranges);
+    let app = api::setup::setup_router(state);
+
+    info!("Starting SAIREN-OS Setup Wizard on {}", addr);
+    info!("");
+    info!("  Open http://{} in a browser to configure this rig.", addr);
+    info!("");
+
+    let listener = tokio::net::TcpListener::bind(addr)
+        .await
+        .with_context(|| format!("Failed to bind to {}", addr))?;
+
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            tokio::signal::ctrl_c().await.ok();
+            info!("Setup wizard shutting down");
+        })
+        .await
+        .context("Setup wizard server error")?;
+
+    Ok(())
+}
+
+// ============================================================================
+// CLI Pairing (headless)
+// ============================================================================
+
+/// Pair with a Fleet Hub using a 6-digit code (headless CLI flow).
+async fn run_pair(hub_url: &str, rig_id: &str, well_id: &str, field: &str, config_dir: &str) -> Result<()> {
+    use rand::Rng;
+    use std::path::Path;
+
+    let hub_url = hub_url.trim_end_matches('/');
+    let code: String = {
+        let mut rng = rand::thread_rng();
+        format!("{:06}", rng.gen_range(0..1_000_000u32))
+    };
+
+    println!("Pairing with Fleet Hub: {}", hub_url);
+    println!();
+
+    // Step 1: Send pairing request
+    let http = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .context("Failed to build HTTP client")?;
+
+    let body = serde_json::json!({
+        "rig_id": rig_id,
+        "well_id": well_id,
+        "field": field,
+        "code": code,
+    });
+
+    let resp = http
+        .post(format!("{}/api/fleet/pair/request", hub_url))
+        .json(&body)
+        .send()
+        .await
+        .context("Failed to send pairing request to hub")?;
+
+    if !resp.status().is_success() && resp.status().as_u16() != 202 {
+        let status = resp.status();
+        let text = resp.text().await.unwrap_or_default();
+        return Err(anyhow::anyhow!("Hub rejected pairing request (HTTP {}): {}", status, text));
+    }
+
+    println!("  Pairing code: {}", code);
+    println!();
+    println!("  Approve this code on the Fleet Hub dashboard.");
+    println!("  Waiting for approval...");
+
+    // Step 2: Poll for approval
+    let poll_interval = std::time::Duration::from_secs(3);
+    let max_wait = std::time::Duration::from_secs(600); // 10 minutes
+    let start = std::time::Instant::now();
+
+    let passphrase = loop {
+        if start.elapsed() > max_wait {
+            return Err(anyhow::anyhow!("Pairing code expired (10 minute timeout)"));
+        }
+
+        tokio::time::sleep(poll_interval).await;
+
+        let status_resp = http
+            .get(format!("{}/api/fleet/pair/status?code={}", hub_url, code))
+            .send()
+            .await;
+
+        match status_resp {
+            Ok(r) if r.status().is_success() => {
+                #[derive(serde::Deserialize)]
+                struct PairStatus {
+                    status: String,
+                    passphrase: Option<String>,
+                }
+
+                if let Ok(s) = r.json::<PairStatus>().await {
+                    match s.status.as_str() {
+                        "approved" => {
+                            if let Some(pass) = s.passphrase {
+                                break pass;
+                            }
+                            return Err(anyhow::anyhow!("Approved but no passphrase returned"));
+                        }
+                        "expired" => {
+                            return Err(anyhow::anyhow!("Pairing code expired"));
+                        }
+                        _ => {
+                            // Still pending, keep polling
+                            print!(".");
+                            use std::io::Write;
+                            std::io::stdout().flush().ok();
+                        }
+                    }
+                }
+            }
+            _ => {
+                // Network error, retry
+                print!("!");
+                use std::io::Write;
+                std::io::stdout().flush().ok();
+            }
+        }
+    };
+
+    println!();
+    println!();
+    println!("  Paired successfully!");
+
+    // Step 3: Write env file
+    let config_path = Path::new(config_dir);
+    if let Err(e) = std::fs::create_dir_all(config_path) {
+        warn!("Failed to create config directory: {}", e);
+    }
+
+    let env_path = config_path.join("env");
+    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
+    let mut updated = existing;
+    updated = update_env_var(&updated, "FLEET_HUB_URL", hub_url);
+    updated = update_env_var(&updated, "FLEET_PASSPHRASE", &passphrase);
+    updated = update_env_var(&updated, "FLEET_RIG_ID", rig_id);
+    updated = update_env_var(&updated, "WELL_ID", well_id);
+    std::fs::write(&env_path, &updated)
+        .with_context(|| format!("Failed to write {}", env_path.display()))?;
+
+    println!("  Fleet env written to {}", env_path.display());
+    println!();
+    println!("  Next step:");
+    println!("    sudo systemctl restart sairen-os");
+    println!();
+
+    Ok(())
+}
+
+// ============================================================================
 // Main Entry Point
 // ============================================================================
 
@@ -990,7 +1277,11 @@ async fn main() -> Result<()> {
     let args = CliArgs::parse();
 
     // Subcommand dispatch
-    #[cfg(feature = "knowledge-base")]
+    if let Some(SubCommand::GenerateConfig) = &args.command {
+        generate_config_template();
+        return Ok(());
+    }
+
     if let Some(SubCommand::MigrateKb { from, to }) = &args.command {
         let from_path = std::path::Path::new(from);
         let to_path = std::path::Path::new(to);
@@ -1000,7 +1291,27 @@ async fn main() -> Result<()> {
         return Ok(());
     }
 
-    #[cfg(feature = "fleet-client")]
+    if let Some(SubCommand::Setup {
+        ports,
+        addr,
+        config_dir,
+    }) = &args.command
+    {
+        let bind_addr = addr.as_deref().unwrap_or("0.0.0.0:8080");
+        return run_setup(ports.clone(), bind_addr, config_dir).await;
+    }
+
+    if let Some(SubCommand::Pair {
+        hub,
+        rig_id,
+        well_id,
+        field,
+        config_dir,
+    }) = &args.command
+    {
+        return run_pair(hub, rig_id, well_id, field, config_dir).await;
+    }
+
     if let Some(SubCommand::Enroll {
         hub,
         passphrase,
@@ -1010,6 +1321,11 @@ async fn main() -> Result<()> {
         config_dir,
     }) = &args.command
     {
+        warn!("'sairen-os enroll' is deprecated — use 'sairen-os setup' or 'sairen-os pair' instead");
+        eprintln!("WARNING: 'sairen-os enroll' is deprecated.");
+        eprintln!("  Use 'sairen-os setup' for the web-based wizard, or");
+        eprintln!("  Use 'sairen-os pair' for headless pairing with a 6-digit code.");
+        eprintln!();
         return run_enroll(hub, passphrase, rig_id, well_id, field, config_dir).await;
     }
 
@@ -1018,22 +1334,97 @@ async fn main() -> Result<()> {
         reset_data_directory()?;
     }
 
-    // Load well configuration
-    let well_config = config::WellConfig::load();
+    // Load well configuration with provenance tracking
+    let (mut well_config, provenance) = config::WellConfig::load_with_provenance();
+
+    // Pre-init auto-detection: infer config values from WITS data before freezing config.
+    // For CSV mode: peek at first 30 packets from the CSV file.
+    // For other modes: restore from cached auto-detected values from a previous run.
+    let preloaded_packets = if let Some(ref csv_path) = args.csv {
+        match load_packets(Some(csv_path.clone())) {
+            Ok(packets) => {
+                // Auto-detect from first N packets
+                let mut detector = config::auto_detect::AutoDetector::new();
+                let peek_count = packets.len().min(30);
+                for packet in &packets[..peek_count] {
+                    detector.observe(packet);
+                }
+                if detector.ready() {
+                    let detected = detector.detect();
+                    if let Some(mw) = detected.normal_mud_weight_ppg {
+                        if !provenance.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg") {
+                            info!("Auto-detected mud weight: {:.1} ppg (from WITS stream)", mw);
+                            well_config.thresholds.hydraulics.normal_mud_weight_ppg = mw;
+                        } else {
+                            info!(
+                                "Mud weight: {:.1} ppg (user-configured, ignoring auto-detected {:.1})",
+                                well_config.thresholds.hydraulics.normal_mud_weight_ppg, mw
+                            );
+                        }
+                    }
+                    // Cache auto-detected values for next restart
+                    if let Err(e) = detected.save() {
+                        warn!("Failed to cache auto-detected values: {}", e);
+                    }
+                }
+                Some(packets)
+            }
+            Err(e) => {
+                error!("Failed to load CSV for auto-detection: {}", e);
+                None
+            }
+        }
+    } else {
+        // For non-CSV modes, try loading cached auto-detected values
+        if let Some(cached) = config::auto_detect::AutoDetectedValues::load_cached() {
+            if let Some(mw) = cached.normal_mud_weight_ppg {
+                if !provenance.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg") {
+                    info!("Restored auto-detected mud weight: {:.1} ppg (from cache)", mw);
+                    well_config.thresholds.hydraulics.normal_mud_weight_ppg = mw;
+                }
+            }
+        }
+        None
+    };
+
     info!(
-        "Well: {} | Rig: {} | Bit: {:.1}\"",
+        "Well: {} | Field: {} | Rig: {} | Mud weight: {:.1} ppg | Bit: {:.1}\"",
         well_config.well.name,
+        if well_config.well.field.is_empty() {
+            "unset"
+        } else {
+            &well_config.well.field
+        },
         if well_config.well.rig.is_empty() {
             "unset"
         } else {
             &well_config.well.rig
         },
+        well_config.thresholds.hydraulics.normal_mud_weight_ppg,
         well_config.well.bit_diameter_inches
     );
-    config::init(well_config);
+    // Log deprecation warnings for env vars consolidated into TOML
+    for (env_var, toml_key) in &[
+        ("CAMPAIGN", "well.campaign"),
+        ("WELL_ID", "well.name"),
+        ("FIELD_NAME", "well.field"),
+        ("SAIREN_SERVER_ADDR", "server.addr"),
+        ("ML_INTERVAL_SECS", "ml.interval_secs"),
+    ] {
+        if std::env::var(env_var).is_ok() {
+            warn!(
+                "Env var {} is deprecated — use TOML key '{}' instead (env var still works as override)",
+                env_var, toml_key
+            );
+        }
+    }
 
-    let app_config = AppConfig::from_env();
-    let server_addr = args.addr.unwrap_or(app_config.server_addr);
+    config::init(well_config, provenance);
+
+    // Server address: CLI > env > TOML > default
+    let server_addr = args.addr
+        .or_else(|| std::env::var("SAIREN_SERVER_ADDR").ok())
+        .unwrap_or_else(|| config::get().server.addr.clone());
 
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("  SAIREN-OS - Strategic AI Rig ENgine");
@@ -1041,24 +1432,13 @@ async fn main() -> Result<()> {
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("");
 
-    #[cfg(feature = "llm")]
-    {
-        let cuda_available = llm::is_cuda_available();
-        if cuda_available {
-            info!("🖥️  Hardware: CUDA detected - LLM inference will use GPU");
-            info!("   Strategic model: Qwen 2.5 7B (GPU, ~800ms)");
-        } else {
-            info!("🖥️  Hardware: CUDA not available - LLM inference will use CPU");
-            info!("   Strategic model: Qwen 2.5 4B (CPU, ~10-30s)");
-        }
-        info!("   Tactical routing: deterministic pattern matching (no LLM)");
-        info!("");
+    let cuda_available = llm::is_cuda_available();
+    if cuda_available {
+        info!("Hardware: CUDA detected - LLM inference will use GPU");
+    } else {
+        info!("Hardware: No CUDA GPU - LLM disabled (template-based advisories)");
     }
-    #[cfg(not(feature = "llm"))]
-    {
-        info!("🖥️  LLM: disabled (template-based advisories)");
-        info!("");
-    }
+    info!("");
 
     // Graceful shutdown via Ctrl+C
     let cancel_token = CancellationToken::new();
@@ -1090,7 +1470,11 @@ async fn main() -> Result<()> {
         run_pipeline(StdinSource::new(), (), "WITS", server_addr, false, cancel_token).await?;
     } else {
         // --- CSV / synthetic mode ---
-        let packets = load_packets(args.csv)?;
+        // Reuse preloaded packets from auto-detection if available, otherwise load fresh
+        let packets = match preloaded_packets {
+            Some(p) => p,
+            None => load_packets(args.csv)?,
+        };
         let delay_ms = if args.speed == 0 {
             0
         } else {

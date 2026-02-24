@@ -806,7 +806,7 @@ mod tests {
     /// Safe to call multiple times; only the first call initializes.
     fn ensure_config() {
         if !crate::config::is_initialized() {
-            crate::config::init(crate::config::WellConfig::default());
+            crate::config::init(crate::config::WellConfig::default(), crate::config::ConfigProvenance::default());
         }
     }
 

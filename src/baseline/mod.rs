@@ -124,6 +124,33 @@ fn cfg_outlier_sigma() -> f64 {
 }
 
 // ============================================================================
+// Baseline Overrides — sigma-derived thresholds for anomaly detection
+// ============================================================================
+
+/// Sigma-derived threshold overrides computed from learned baselines.
+///
+/// After the `ThresholdManager` locks (100+ samples per metric), these overrides
+/// are computed from the learned mean/std and can replace static config defaults
+/// in the physics engine's anomaly detection.
+///
+/// Each field is `Option<f64>` — `None` means the metric wasn't locked or the
+/// baseline data was insufficient to derive a meaningful threshold.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct BaselineOverrides {
+    /// Flow imbalance warning: 3σ of flow_balance std (gpm).
+    /// Uses 3σ for warning because kick detection must avoid false alarms.
+    pub flow_imbalance_warning_gpm: Option<f64>,
+    /// SPP deviation warning: 2σ of spp std (psi).
+    pub spp_deviation_warning_psi: Option<f64>,
+    /// SPP deviation critical: 3σ of spp std (psi).
+    pub spp_deviation_critical_psi: Option<f64>,
+    /// Torque warning: mean + 2σ of torque (fraction increase).
+    pub torque_warning_fraction: Option<f64>,
+    /// Torque critical: mean + 3σ of torque (fraction increase).
+    pub torque_critical_fraction: Option<f64>,
+}
+
+// ============================================================================
 // Error Types
 // ============================================================================
 
@@ -280,6 +307,9 @@ impl DynamicThresholds {
     /// Get effective standard deviation (with floor to avoid divide-by-zero)
     pub fn effective_std(&self) -> f64 {
         let floor = cfg_min_std_floor();
+        if !self.baseline_mean.is_finite() {
+            return floor;
+        }
         let min_std = (self.baseline_mean.abs() * floor).max(floor);
         self.baseline_std.max(min_std)
     }
@@ -383,8 +413,13 @@ impl BaselineAccumulator {
 
     /// Add a sample using Welford's online algorithm
     ///
-    /// Returns true if sample was an outlier (for contamination tracking)
+    /// Returns true if sample was an outlier (for contamination tracking).
+    /// Non-finite values (NaN, Infinity) are rejected to prevent poisoning
+    /// the Welford accumulator — a single NaN permanently corrupts mean/m2.
     pub fn add_sample(&mut self, value: f64) -> bool {
+        if !value.is_finite() {
+            return false;
+        }
         self.count += 1;
 
         // Update min/max
@@ -569,6 +604,9 @@ pub const DEFAULT_STATE_PATH: &str = "data/baseline_state.json";
 struct BaselineState {
     schema_version: u32,
     thresholds: HashMap<String, DynamicThresholds>,
+    /// Sigma-derived overrides computed at lock time (Phase 2 auto-detection).
+    #[serde(default)]
+    overrides: Option<BaselineOverrides>,
 }
 
 // ============================================================================
@@ -588,6 +626,10 @@ pub struct ThresholdManager {
 
     /// Schema version for persistence compatibility
     schema_version: u32,
+
+    /// Sigma-derived overrides computed at lock time, used by physics engine.
+    /// Populated after baselines lock; persisted alongside thresholds.
+    pub overrides: Option<BaselineOverrides>,
 }
 
 impl Default for ThresholdManager {
@@ -603,6 +645,7 @@ impl ThresholdManager {
             thresholds: HashMap::new(),
             accumulators: HashMap::new(),
             schema_version: SCHEMA_VERSION,
+            overrides: None,
         }
     }
 
@@ -698,7 +741,8 @@ impl ThresholdManager {
             warn!(error = %e, "Failed to auto-persist baseline state after lock");
         }
 
-        Ok(self.thresholds.get(&composite_id).expect("just inserted"))
+        self.thresholds.get(&composite_id)
+            .ok_or_else(|| BaselineError::MetricNotFound(format!("{composite_id} (insert failed)")))
     }
 
     /// Force lock baseline even if contaminated
@@ -738,7 +782,8 @@ impl ThresholdManager {
             warn!(error = %e, "Failed to auto-persist baseline state after force-lock");
         }
 
-        Ok(self.thresholds.get(&composite_id).expect("just inserted"))
+        self.thresholds.get(&composite_id)
+            .ok_or_else(|| BaselineError::MetricNotFound(format!("{composite_id} (insert failed)")))
     }
 
     /// Check a value against dynamic thresholds
@@ -831,6 +876,49 @@ impl ThresholdManager {
         info!(metric = %composite_id, "Baseline reset for re-commissioning");
     }
 
+    /// Compute sigma-derived overrides from locked baselines.
+    ///
+    /// Called after baselines lock to derive anomaly detection thresholds
+    /// from the learned mean/std of each WITS metric.
+    pub fn compute_overrides(&self, equipment_id: &str) -> BaselineOverrides {
+        let mut overrides = BaselineOverrides::default();
+
+        // Flow imbalance: 3σ of flow_balance std (absolute deviation from zero)
+        if let Some(t) = self.get_threshold(equipment_id, wits_metrics::FLOW_BALANCE) {
+            let sigma3 = 3.0 * t.effective_std();
+            if sigma3 > 0.0 {
+                overrides.flow_imbalance_warning_gpm = Some(sigma3);
+            }
+        }
+
+        // SPP deviation: 2σ for warning, 3σ for critical
+        if let Some(t) = self.get_threshold(equipment_id, wits_metrics::SPP) {
+            let sigma2 = 2.0 * t.effective_std();
+            let sigma3 = 3.0 * t.effective_std();
+            if sigma2 > 0.0 {
+                overrides.spp_deviation_warning_psi = Some(sigma2);
+                overrides.spp_deviation_critical_psi = Some(sigma3);
+            }
+        }
+
+        // Torque: fraction-based increase thresholds
+        // Anomaly detection checks torque_delta_percent (fractional change).
+        // We derive threshold from (std / mean), scaled by 2σ and 3σ.
+        if let Some(t) = self.get_threshold(equipment_id, wits_metrics::TORQUE) {
+            if t.baseline_mean > 0.0 {
+                let cv = (t.effective_std() / t.baseline_mean).clamp(0.0, 10.0);
+                let warn = 2.0 * cv;
+                let crit = 3.0 * cv;
+                if warn > 0.0 {
+                    overrides.torque_warning_fraction = Some(warn);
+                    overrides.torque_critical_fraction = Some(crit);
+                }
+            }
+        }
+
+        overrides
+    }
+
     /// Count of locked thresholds
     pub fn locked_count(&self) -> usize {
         self.thresholds.len()
@@ -854,6 +942,7 @@ impl ThresholdManager {
         let state = BaselineState {
             schema_version: SCHEMA_VERSION,
             thresholds: self.thresholds.clone(),
+            overrides: self.overrides.clone(),
         };
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -897,11 +986,13 @@ impl ThresholdManager {
             return None;
         }
         let locked = state.thresholds.len();
-        info!(path = %path.display(), locked, "Baseline state loaded");
+        let has_overrides = state.overrides.is_some();
+        info!(path = %path.display(), locked, has_overrides, "Baseline state loaded");
         Some(Self {
             thresholds: state.thresholds,
             accumulators: HashMap::new(),
             schema_version: SCHEMA_VERSION,
+            overrides: state.overrides,
         })
     }
 

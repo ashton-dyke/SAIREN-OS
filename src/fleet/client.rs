@@ -2,11 +2,11 @@
 //!
 //! Handles event uploads, outcome forwarding, and library sync.
 
-#[cfg(feature = "fleet-client")]
+
 use crate::fleet::types::{EventOutcome, FleetEpisode, FleetEvent, IntelligenceSyncResponse};
 
 /// Fleet client errors
-#[cfg(feature = "fleet-client")]
+
 #[derive(Debug, thiserror::Error)]
 pub enum FleetClientError {
     #[error("HTTP error: {0}")]
@@ -22,7 +22,7 @@ pub enum FleetClientError {
 }
 
 /// Library sync response from the hub
-#[cfg(feature = "fleet-client")]
+
 #[derive(Debug, serde::Deserialize)]
 pub struct LibraryResponse {
     pub version: i64,
@@ -32,7 +32,7 @@ pub struct LibraryResponse {
 }
 
 /// HTTP client for hub communication
-#[cfg(feature = "fleet-client")]
+
 #[derive(Clone)]
 pub struct FleetClient {
     http: reqwest::Client,
@@ -41,7 +41,7 @@ pub struct FleetClient {
     rig_id: String,
 }
 
-#[cfg(feature = "fleet-client")]
+
 impl FleetClient {
     /// Create a new fleet client
     pub fn new(hub_url: &str, passphrase: &str, rig_id: &str) -> Self {

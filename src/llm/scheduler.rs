@@ -495,8 +495,8 @@ mod tests {
             enqueued_at: t2,
         });
 
-        heap.push(req2.clone());
-        heap.push(req1.clone());
+        heap.push(req2);
+        heap.push(req1);
 
         // Older request (t1) should come out first
         let first = heap.pop().unwrap();

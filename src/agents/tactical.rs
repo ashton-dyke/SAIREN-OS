@@ -23,7 +23,7 @@
 //! - State filter: Only during Drilling or Reaming
 //! - Cooldown: 60 seconds (CRITICAL bypasses)
 
-use crate::baseline::{wits_metrics, ThresholdManager};
+use crate::baseline::{wits_metrics, BaselineOverrides, ThresholdManager};
 use crate::physics_engine;
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, Campaign, CfcFeatureSurpriseInfo, DrillingMetrics,
@@ -295,6 +295,8 @@ pub struct TacticalAgent {
     equipment_id: String,
     /// Optional shared threshold manager for dynamic thresholds
     threshold_manager: Option<Arc<RwLock<ThresholdManager>>>,
+    /// Sigma-derived overrides computed after baselines lock
+    baseline_overrides: Option<BaselineOverrides>,
     /// ACI conformal interval tracker — second opinion on anomaly severity
     aci_tracker: crate::aci::AciTracker,
     /// Latest ACI result (only during drilling/reaming)
@@ -347,6 +349,7 @@ impl TacticalAgent {
             mode: TacticalMode::FixedThresholds,
             equipment_id: "RIG".to_string(),
             threshold_manager: None,
+            baseline_overrides: None,
             aci_tracker: crate::aci::AciTracker::new(crate::aci::AciConfig::default()),
             aci_result: None,
             cfc_network: crate::cfc::CfcNetwork::new(42),
@@ -374,6 +377,7 @@ impl TacticalAgent {
             mode: TacticalMode::FixedThresholds,
             equipment_id: "RIG".to_string(),
             threshold_manager: None,
+            baseline_overrides: None,
             aci_tracker: crate::aci::AciTracker::new(crate::aci::AciConfig::default()),
             aci_result: None,
             cfc_network: crate::cfc::CfcNetwork::new(42),
@@ -412,18 +416,20 @@ impl TacticalAgent {
         start_in_learning_mode: bool,
         campaign: Campaign,
     ) -> Self {
-        let mode = if start_in_learning_mode {
-            TacticalMode::BaselineLearning
+        let (mode, restored_overrides) = if start_in_learning_mode {
+            (TacticalMode::BaselineLearning, None)
         } else {
             match threshold_manager.read() {
                 Ok(manager) => {
                     if manager.all_wits_locked(equipment_id) {
-                        TacticalMode::DynamicThresholds
+                        // Restore overrides from persisted state if available
+                        let overrides = manager.overrides.clone();
+                        (TacticalMode::DynamicThresholds, overrides)
                     } else {
-                        TacticalMode::BaselineLearning
+                        (TacticalMode::BaselineLearning, None)
                     }
                 }
-                Err(_) => TacticalMode::BaselineLearning,
+                Err(_) => (TacticalMode::BaselineLearning, None),
             }
         };
 
@@ -431,6 +437,7 @@ impl TacticalAgent {
             equipment_id = %equipment_id,
             mode = %mode,
             campaign = %campaign.short_code(),
+            has_overrides = restored_overrides.is_some(),
             "Created tactical agent"
         );
 
@@ -442,6 +449,7 @@ impl TacticalAgent {
             mode,
             equipment_id: equipment_id.to_string(),
             threshold_manager: Some(threshold_manager),
+            baseline_overrides: restored_overrides,
             aci_tracker: crate::aci::AciTracker::new(crate::aci::AciConfig::default()),
             aci_result: None,
             cfc_network: crate::cfc::CfcNetwork::new(42),
@@ -501,7 +509,7 @@ impl TacticalAgent {
         // PHASE 2: Basic Drilling Physics Calculations (target: < 15ms)
         // ====================================================================
         let mut metrics =
-            physics_engine::tactical_update(packet, self.prev_packet.as_ref());
+            physics_engine::tactical_update(packet, self.prev_packet.as_ref(), self.baseline_overrides.as_ref());
 
         // Update metrics with baseline deltas
         metrics.mse_delta_percent = self.baseline.mse_delta_percent(metrics.mse);
@@ -698,12 +706,23 @@ impl TacticalAgent {
             if should_lock {
                 let locked = mgr.try_lock_all_wits(&self.equipment_id, timestamp);
                 if !locked.is_empty() {
+                    // Compute sigma-derived overrides from the newly locked baselines
+                    let overrides = mgr.compute_overrides(&self.equipment_id);
                     info!(
                         equipment_id = %self.equipment_id,
                         locked_metrics = ?locked,
-                        "Auto-locked baselines, switching to DynamicThresholds mode"
+                        flow_imbalance_override = ?overrides.flow_imbalance_warning_gpm,
+                        spp_warning_override = ?overrides.spp_deviation_warning_psi,
+                        torque_warning_override = ?overrides.torque_warning_fraction,
+                        "Auto-locked baselines with overrides, switching to DynamicThresholds mode"
                     );
+                    mgr.overrides = Some(overrides.clone());
+                    // Persist overrides alongside thresholds
+                    if let Err(e) = mgr.save_to_file(std::path::Path::new(crate::baseline::DEFAULT_STATE_PATH)) {
+                        warn!(error = %e, "Failed to persist baseline overrides");
+                    }
                     drop(mgr);
+                    self.baseline_overrides = Some(overrides);
                     self.mode = TacticalMode::DynamicThresholds;
                 }
             }
@@ -1426,7 +1445,7 @@ mod tests {
 
     fn ensure_config() {
         if !crate::config::is_initialized() {
-            crate::config::init(crate::config::WellConfig::default());
+            crate::config::init(crate::config::WellConfig::default(), crate::config::ConfigProvenance::default());
         }
     }
 

@@ -72,7 +72,6 @@ pub struct PipelineCoordinator {
     /// Proactive optimization engine
     optimizer: crate::optimization::ParameterOptimizer,
     /// Structured knowledge base (replaces flat prognosis when available)
-    #[cfg(feature = "knowledge-base")]
     knowledge_base: Option<crate::knowledge_base::KnowledgeBase>,
 }
 
@@ -81,16 +80,12 @@ impl PipelineCoordinator {
     pub fn new() -> Self {
         info!("Initializing Pipeline Coordinator for drilling intelligence");
 
-        #[cfg(feature = "knowledge-base")]
         let knowledge_base = crate::knowledge_base::KnowledgeBase::init();
-        #[cfg(feature = "knowledge-base")]
         let formation_prognosis = if let Some(ref kb) = knowledge_base {
             kb.prognosis()
         } else {
             FormationPrognosis::load()
         };
-        #[cfg(not(feature = "knowledge-base"))]
-        let formation_prognosis = FormationPrognosis::load();
 
         Self {
             tactical_agent: TacticalAgent::new(),
@@ -111,7 +106,6 @@ impl PipelineCoordinator {
             formation_prognosis,
             last_formation_name: None,
             optimizer: crate::optimization::ParameterOptimizer::new(300),
-            #[cfg(feature = "knowledge-base")]
             knowledge_base,
         }
     }
@@ -127,16 +121,12 @@ impl PipelineCoordinator {
             start_in_learning_mode, equipment_id
         );
 
-        #[cfg(feature = "knowledge-base")]
         let knowledge_base = crate::knowledge_base::KnowledgeBase::init();
-        #[cfg(feature = "knowledge-base")]
         let formation_prognosis = if let Some(ref kb) = knowledge_base {
             kb.prognosis()
         } else {
             FormationPrognosis::load()
         };
-        #[cfg(not(feature = "knowledge-base"))]
-        let formation_prognosis = FormationPrognosis::load();
 
         Self {
             tactical_agent: TacticalAgent::new_with_thresholds(
@@ -164,7 +154,6 @@ impl PipelineCoordinator {
             formation_prognosis,
             last_formation_name: None,
             optimizer: crate::optimization::ParameterOptimizer::new(300),
-            #[cfg(feature = "knowledge-base")]
             knowledge_base,
         }
     }
@@ -238,18 +227,11 @@ impl PipelineCoordinator {
         self.update_history_buffer(history_entry.clone());
 
         // Refresh prognosis from knowledge base if available (hot reload)
-        #[cfg(feature = "knowledge-base")]
-        let dynamic_prognosis: Option<FormationPrognosis>;
-        #[cfg(feature = "knowledge-base")]
-        {
-            dynamic_prognosis = if let Some(ref kb) = self.knowledge_base {
-                kb.prognosis()
-            } else {
-                self.formation_prognosis.clone()
-            };
-        }
-        #[cfg(not(feature = "knowledge-base"))]
-        let dynamic_prognosis = self.formation_prognosis.clone();
+        let dynamic_prognosis = if let Some(ref kb) = self.knowledge_base {
+            kb.prognosis()
+        } else {
+            self.formation_prognosis.clone()
+        };
 
         // PHASE OPT: Proactive Optimization (every N packets, independent of tickets)
         let opt_advisory = if let Some(ref prognosis) = dynamic_prognosis {
@@ -279,6 +261,12 @@ impl PipelineCoordinator {
                 }
             } else { None }
         } else { None };
+
+        // Seed the periodic summary timer on first packet to avoid
+        // an immediate spurious summary (timestamp - 0 ≈ 1.7 billion seconds).
+        if self.last_periodic_summary_time == 0 {
+            self.last_periodic_summary_time = packet.timestamp;
+        }
 
         // Check if it's time for a periodic summary (every 10 minutes)
         let time_since_last_summary = packet.timestamp.saturating_sub(self.last_periodic_summary_time);
@@ -916,7 +904,6 @@ impl PipelineCoordinator {
     /// When the knowledge base is active, it dynamically reads from the KB
     /// (which may have been updated by the watcher). Falls back to the static prognosis.
     fn current_formation_context(&self, depth_ft: f64) -> Option<crate::types::FormationInterval> {
-        #[cfg(feature = "knowledge-base")]
         if let Some(ref kb) = self.knowledge_base {
             return kb.formation_at_depth(depth_ft);
         }
@@ -956,7 +943,6 @@ impl PipelineCoordinator {
     }
 
     /// Start the knowledge base watcher (if KB is active)
-    #[cfg(feature = "knowledge-base")]
     pub fn start_kb_watcher(&self) -> Option<tokio::task::JoinHandle<()>> {
         self.knowledge_base.as_ref().map(|kb| kb.start_watcher())
     }

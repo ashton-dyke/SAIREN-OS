@@ -32,6 +32,8 @@
         .badge.active { background: #0d2818; color: #3fb950; }
         .badge.inactive { background: #2d1a00; color: #d29922; }
         .badge.revoked { background: #3d0f0f; color: #f85149; }
+        .btn-approve { padding: 4px 12px; border-radius: 6px; border: 1px solid #238636; background: #238636; color: #fff; font-size: 12px; font-weight: 600; cursor: pointer; }
+        .btn-approve:hover { background: #2ea043; }
         @media (max-width: 900px) { .charts { grid-template-columns: 1fr; } }
     </style>
 </head>
@@ -70,6 +72,19 @@
             <h3>Top Categories by Event Count</h3>
             <canvas id="topCatChart"></canvas>
         </div>
+    </div>
+
+    <div class="rigs-table" id="pairingsSection" style="display:none;">
+        <h3 style="color: #d29922; margin-bottom: 12px;">Pending Pairings</h3>
+        <table>
+            <thead>
+                <tr>
+                    <th>Code</th><th>Rig ID</th><th>Well</th><th>Field</th>
+                    <th>Age</th><th></th>
+                </tr>
+            </thead>
+            <tbody id="pairingsBody"></tbody>
+        </table>
     </div>
 
     <div class="rigs-table">
@@ -196,8 +211,55 @@
             }
         }
 
+        async function refreshPairings() {
+            try {
+                const pairings = await fetchJSON('/api/fleet/pair/pending');
+                const section = document.getElementById('pairingsSection');
+                const tbody = document.getElementById('pairingsBody');
+
+                if (pairings.length === 0) {
+                    section.style.display = 'none';
+                    return;
+                }
+
+                section.style.display = 'block';
+                tbody.innerHTML = pairings.map(p =>
+                    '<tr>' +
+                    '<td><strong style="font-family:monospace;font-size:18px;color:#d29922;letter-spacing:2px;">' + p.code + '</strong></td>' +
+                    '<td>' + p.rig_id + '</td>' +
+                    '<td>' + p.well_id + '</td>' +
+                    '<td>' + p.field + '</td>' +
+                    '<td>' + Math.floor(p.age_secs / 60) + 'm ' + (p.age_secs % 60) + 's</td>' +
+                    '<td><button class="btn-approve" onclick="approvePairing(\'' + p.code + '\')">Approve</button></td>' +
+                    '</tr>'
+                ).join('');
+            } catch (e) {
+                // Pairing endpoint may not exist on older hubs
+            }
+        }
+
+        async function approvePairing(code) {
+            try {
+                const res = await fetch('/api/fleet/pair/approve', {
+                    method: 'POST', headers,
+                    body: JSON.stringify({ code })
+                });
+                if (res.ok) {
+                    refreshPairings();
+                    refreshDashboard();
+                } else {
+                    const data = await res.json().catch(() => ({}));
+                    alert('Approval failed: ' + (data.error || res.status));
+                }
+            } catch (e) {
+                alert('Approval failed: ' + e.message);
+            }
+        }
+
         refreshDashboard();
+        refreshPairings();
         setInterval(refreshDashboard, 60000);
+        setInterval(refreshPairings, 5000);
     </script>
 </body>
 </html>

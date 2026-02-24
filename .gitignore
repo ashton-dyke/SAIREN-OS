@@ -4,9 +4,10 @@
 # Runtime data (baseline state, databases, ML insights)
 /data/
 
-# IDE
+# IDE / Notes
 .idea/
 .vscode/
+.obsidian/
 *.swp
 *.swo
 
@@ -19,3 +20,7 @@ Thumbs.db
 
 # Log files
 *.log
+
+# Dashboard build artifacts
+dashboard/node_modules/
+dashboard/dist/

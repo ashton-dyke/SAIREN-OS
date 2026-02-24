@@ -162,22 +162,48 @@ impl Default for AppState {
 }
 
 impl AppState {
-    /// Build `AppState` from environment variables for production startup.
+    /// Build `AppState` from config and environment for production startup.
     ///
-    /// Reads `CAMPAIGN`, `WELL_ID`, and `FIELD_NAME`.  Falls back to the same
-    /// defaults as [`Default`] when a variable is absent.
+    /// Precedence for each field: env var override > TOML config > default.
+    /// Env vars (`CAMPAIGN`, `WELL_ID`, `FIELD_NAME`) are supported for
+    /// backward compatibility but operators should prefer TOML fields.
     pub fn from_env() -> Self {
+        let cfg = crate::config::get();
+
+        // Campaign: CAMPAIGN env > well.campaign TOML > "production"
         let campaign = match std::env::var("CAMPAIGN").as_deref() {
             Ok("pa") | Ok("PA") | Ok("p&a") | Ok("P&A") | Ok("plug_abandonment") => {
                 crate::types::Campaign::PlugAbandonment
             }
-            _ => crate::types::Campaign::Production,
+            Ok(_) => crate::types::Campaign::Production,
+            Err(_) => {
+                // Fall back to TOML config
+                match cfg.well.campaign.as_str() {
+                    "plug_abandonment" | "pa" | "P&A" => crate::types::Campaign::PlugAbandonment,
+                    _ => crate::types::Campaign::Production,
+                }
+            }
         };
+
+        // WELL_ID env > well.name TOML
+        let well_id = std::env::var("WELL_ID")
+            .unwrap_or_else(|_| cfg.well.name.clone());
+
+        // FIELD_NAME env > well.field TOML
+        let field_name = std::env::var("FIELD_NAME")
+            .unwrap_or_else(|_| {
+                if cfg.well.field.is_empty() {
+                    "DEFAULT".to_string()
+                } else {
+                    cfg.well.field.clone()
+                }
+            });
+
         Self {
             campaign,
             campaign_thresholds: crate::types::CampaignThresholds::for_campaign(campaign),
-            well_id: std::env::var("WELL_ID").unwrap_or_else(|_| "WELL-001".to_string()),
-            field_name: std::env::var("FIELD_NAME").unwrap_or_else(|_| "DEFAULT".to_string()),
+            well_id,
+            field_name,
             ..Self::default()
         }
     }

@@ -16,21 +16,14 @@ use crate::types::{AnalysisResult, Campaign, HourlyDataset, MLInsightsReport};
 
 use super::analyzer::HourlyAnalyzer;
 
-/// Default interval: 1 hour
-const DEFAULT_INTERVAL_SECS: u64 = 3600;
-
-/// Get the ML analysis interval from environment variable
+/// Get the ML analysis interval.
 ///
-/// # Environment Variable
-/// - `ML_INTERVAL_SECS`: Interval in seconds (default: 3600)
-///
-/// # Returns
-/// Interval in seconds
+/// Precedence: `ML_INTERVAL_SECS` env var > `ml.interval_secs` TOML > 3600
 pub fn get_interval_secs() -> u64 {
     std::env::var("ML_INTERVAL_SECS")
         .ok()
         .and_then(|s| s.parse().ok())
-        .unwrap_or(DEFAULT_INTERVAL_SECS)
+        .unwrap_or_else(|| crate::config::get().ml.interval_secs)
 }
 
 /// Get the ML analysis interval as a Duration
@@ -225,8 +218,9 @@ mod tests {
 
     #[test]
     fn test_default_interval() {
-        // Default should be 3600 seconds (1 hour)
-        assert_eq!(DEFAULT_INTERVAL_SECS, 3600);
+        // Default should be 3600 seconds (1 hour) from config
+        let config = crate::config::WellConfig::default();
+        assert_eq!(config.ml.interval_secs, 3600);
     }
 
     #[test]

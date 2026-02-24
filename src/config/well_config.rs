@@ -5,8 +5,33 @@
 //! ensuring zero-change behavior when no config file is present.
 
 use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use tracing::{info, warn};
+
+// ============================================================================
+// Config Provenance — tracks which keys the user explicitly set
+// ============================================================================
+
+/// Tracks which configuration keys were explicitly present in the user's TOML file.
+///
+/// After deserialization, all `#[serde(default)]` fields have values regardless of
+/// whether the user set them. This struct preserves that distinction so auto-detection
+/// can safely override defaults without clobbering explicit user choices.
+#[derive(Debug, Clone, Default)]
+pub struct ConfigProvenance {
+    /// Dotted key paths explicitly present in the user's TOML file
+    pub explicit_keys: HashSet<String>,
+}
+
+impl ConfigProvenance {
+    /// Check whether a dotted key path was explicitly set by the user.
+    ///
+    /// Example: `provenance.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg")`
+    pub fn is_user_set(&self, dotted_key: &str) -> bool {
+        self.explicit_keys.contains(dotted_key)
+    }
+}
 
 // ============================================================================
 // Top-Level Config
@@ -44,9 +69,9 @@ pub struct WellConfig {
     #[serde(default)]
     pub physics: PhysicsConfig,
 
-    /// Campaign-specific overrides
+    /// HTTP server configuration
     #[serde(default)]
-    pub campaign: CampaignOverrides,
+    pub server: ServerConfig,
 
     /// ML engine tuning
     #[serde(default)]
@@ -62,7 +87,7 @@ impl Default for WellConfig {
             advisory: AdvisoryConfig::default(),
             ensemble_weights: EnsembleWeightsConfig::default(),
             physics: PhysicsConfig::default(),
-            campaign: CampaignOverrides::default(),
+            server: ServerConfig::default(),
             ml: MlConfig::default(),
         }
     }
@@ -113,12 +138,82 @@ impl WellConfig {
 
     /// Load from a specific TOML file path.
     pub fn load_from_file(path: &Path) -> Result<Self, ConfigError> {
+        let (config, _provenance) = Self::load_from_file_with_provenance(path)?;
+        Ok(config)
+    }
+
+    /// Load from a specific TOML file path, also returning provenance
+    /// so callers can distinguish user-set values from defaults.
+    pub fn load_from_file_with_provenance(
+        path: &Path,
+    ) -> Result<(Self, ConfigProvenance), ConfigError> {
         let contents = std::fs::read_to_string(path)
             .map_err(|e| ConfigError::Io(path.to_path_buf(), e))?;
+
+        // Two-pass: check for unknown keys first (warnings only)
+        let typo_warnings = super::validation::validate_unknown_keys(&contents);
+        for w in &typo_warnings {
+            warn!("{}", w);
+        }
+
+        // Collect explicit key paths from the raw TOML
+        let provenance = ConfigProvenance {
+            explicit_keys: super::validation::walk_toml_keys(
+                &contents
+                    .parse::<toml::Value>()
+                    .unwrap_or(toml::Value::Table(Default::default())),
+                "",
+            )
+            .into_iter()
+            .collect(),
+        };
+
         let config: Self = toml::from_str(&contents)
             .map_err(|e| ConfigError::Parse(path.to_path_buf(), e))?;
         config.validate()?;
-        Ok(config)
+        Ok((config, provenance))
+    }
+
+    /// Load configuration using standard search order, returning provenance.
+    ///
+    /// Same search order as `load()` but also returns which keys the user
+    /// explicitly set, enabling auto-detection to fill in the rest.
+    pub fn load_with_provenance() -> (Self, ConfigProvenance) {
+        // 1. Check env var
+        if let Ok(path) = std::env::var("SAIREN_CONFIG") {
+            let p = PathBuf::from(&path);
+            if p.exists() {
+                match Self::load_from_file_with_provenance(&p) {
+                    Ok((config, provenance)) => {
+                        info!(path = %p.display(), well = %config.well.name, "Loaded well config from SAIREN_CONFIG");
+                        return (config, provenance);
+                    }
+                    Err(e) => {
+                        warn!(path = %p.display(), error = %e, "Failed to load config from SAIREN_CONFIG, falling back");
+                    }
+                }
+            } else {
+                warn!(path = %path, "SAIREN_CONFIG points to non-existent file, falling back");
+            }
+        }
+
+        // 2. Check ./well_config.toml
+        let local = PathBuf::from("well_config.toml");
+        if local.exists() {
+            match Self::load_from_file_with_provenance(&local) {
+                Ok((config, provenance)) => {
+                    info!(well = %config.well.name, "Loaded well config from ./well_config.toml");
+                    return (config, provenance);
+                }
+                Err(e) => {
+                    warn!(error = %e, "Failed to load ./well_config.toml, using defaults");
+                }
+            }
+        }
+
+        // 3. Defaults — no file, so nothing is user-set
+        info!("No well_config.toml found — using built-in defaults");
+        (Self::default(), ConfigProvenance::default())
     }
 
     /// Serialize the current config to a TOML string.
@@ -270,6 +365,13 @@ impl WellConfig {
             errors.push("physics.confidence_full_window must be > 0".to_string());
         }
 
+        // Physical range validation
+        let (range_errors, range_warnings) = super::validation::validate_physical_ranges(self);
+        errors.extend(range_errors);
+        for w in &range_warnings {
+            warn!("{}", w);
+        }
+
         // Reject NaN/Inf in any config value (sweep all f64 fields via serialization)
         let serialized = toml::to_string(self);
         if let Ok(ref s) = serialized {
@@ -353,13 +455,13 @@ pub struct WellInfo {
     #[serde(default)]
     pub rig: String,
 
-    /// Operator / company
-    #[serde(default)]
-    pub operator: String,
-
     /// Bit diameter in inches (used by physics calculations)
     #[serde(default = "default_bit_diameter")]
     pub bit_diameter_inches: f64,
+
+    /// Campaign type: "production" or "plug_abandonment"
+    #[serde(default = "default_campaign")]
+    pub campaign: String,
 }
 
 fn default_well_name() -> String {
@@ -368,6 +470,9 @@ fn default_well_name() -> String {
 fn default_bit_diameter() -> f64 {
     8.5
 }
+fn default_campaign() -> String {
+    "production".to_string()
+}
 
 impl Default for WellInfo {
     fn default() -> Self {
@@ -375,8 +480,8 @@ impl Default for WellInfo {
             name: default_well_name(),
             field: String::new(),
             rig: String::new(),
-            operator: String::new(),
             bit_diameter_inches: default_bit_diameter(),
+            campaign: default_campaign(),
         }
     }
 }
@@ -519,10 +624,6 @@ impl Default for WellControlThresholds {
 /// Mechanical Specific Energy efficiency classification thresholds.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MseThresholds {
-    /// Efficiency above this is considered optimal (%).
-    #[serde(default = "default_mse_optimal")]
-    pub efficiency_optimal_percent: f64,
-
     /// Efficiency below this triggers an advisory (%).
     #[serde(default = "default_mse_warning")]
     pub efficiency_warning_percent: f64,
@@ -532,14 +633,12 @@ pub struct MseThresholds {
     pub efficiency_poor_percent: f64,
 }
 
-fn default_mse_optimal() -> f64 { 85.0 }
 fn default_mse_warning() -> f64 { 70.0 }
 fn default_mse_poor() -> f64 { 50.0 }
 
 impl Default for MseThresholds {
     fn default() -> Self {
         Self {
-            efficiency_optimal_percent: default_mse_optimal(),
             efficiency_warning_percent: default_mse_warning(),
             efficiency_poor_percent: default_mse_poor(),
         }
@@ -726,10 +825,6 @@ impl Default for FounderThresholds {
 /// D-exponent and MSE-based formation change detection.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FormationThresholds {
-    /// D-exponent increase rate warning (per 100ft) — hard stringer.
-    #[serde(default = "default_dexp_increase")]
-    pub dexp_increase_warning: f64,
-
     /// D-exponent decrease rate warning (per 100ft) — soft stringer / pressure.
     #[serde(default = "default_dexp_decrease")]
     pub dexp_decrease_warning: f64,
@@ -751,7 +846,6 @@ pub struct FormationThresholds {
     pub mse_pressure_tolerance: f64,
 }
 
-fn default_dexp_increase() -> f64 { 0.1 }
 fn default_dexp_decrease() -> f64 { -0.15 }
 fn default_mse_change_significant() -> f64 { 0.20 }
 fn default_dxc_trend_threshold() -> f64 { 0.05 }
@@ -761,7 +855,6 @@ fn default_mse_pressure_tolerance() -> f64 { 0.10 }
 impl Default for FormationThresholds {
     fn default() -> Self {
         Self {
-            dexp_increase_warning: default_dexp_increase(),
             dexp_decrease_warning: default_dexp_decrease(),
             mse_change_significant: default_mse_change_significant(),
             dxc_trend_threshold: default_dxc_trend_threshold(),
@@ -1174,146 +1267,6 @@ impl Default for PhysicsConfig {
 }
 
 // ============================================================================
-// Campaign Overrides
-// ============================================================================
-
-/// Per-campaign threshold overrides.
-///
-/// If `production` or `plug_abandonment` sections are present, their values
-/// override the top-level `[thresholds]` when that campaign is active.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CampaignOverrides {
-    #[serde(default)]
-    pub production: CampaignSpecific,
-
-    #[serde(default)]
-    pub plug_abandonment: CampaignSpecific,
-}
-
-impl Default for CampaignOverrides {
-    fn default() -> Self {
-        Self {
-            production: CampaignSpecific::production_defaults(),
-            plug_abandonment: CampaignSpecific::pa_defaults(),
-        }
-    }
-}
-
-/// Campaign-specific threshold overrides.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CampaignSpecific {
-    /// MSE efficiency warning override (%).
-    #[serde(default)]
-    pub mse_efficiency_warning: Option<f64>,
-
-    /// MSE efficiency poor override (%).
-    #[serde(default)]
-    pub mse_efficiency_poor: Option<f64>,
-
-    /// Flow imbalance warning override (gpm).
-    #[serde(default)]
-    pub flow_imbalance_warning: Option<f64>,
-
-    /// Flow imbalance critical override (gpm).
-    #[serde(default)]
-    pub flow_imbalance_critical: Option<f64>,
-
-    /// Pressure test tolerance (psi) — P&A specific.
-    #[serde(default)]
-    pub pressure_test_tolerance: Option<f64>,
-
-    /// Cement pressure hold (psi) — P&A specific.
-    #[serde(default)]
-    pub cement_pressure_hold: Option<f64>,
-
-    /// Barrier pressure margin (psi) — P&A specific.
-    #[serde(default)]
-    pub barrier_pressure_margin: Option<f64>,
-
-    /// Ensemble weight override for MSE specialist.
-    #[serde(default)]
-    pub weight_mse: Option<f64>,
-
-    /// Ensemble weight override for hydraulic specialist.
-    #[serde(default)]
-    pub weight_hydraulic: Option<f64>,
-
-    /// Ensemble weight override for well control specialist.
-    #[serde(default)]
-    pub weight_well_control: Option<f64>,
-
-    /// Ensemble weight override for formation specialist.
-    #[serde(default)]
-    pub weight_formation: Option<f64>,
-
-    /// Whether cement returns are expected during displacement.
-    #[serde(default)]
-    pub cement_returns_expected: Option<bool>,
-
-    /// Plug depth tolerance in feet.
-    #[serde(default)]
-    pub plug_depth_tolerance: Option<f64>,
-}
-
-impl Default for CampaignSpecific {
-    fn default() -> Self {
-        Self {
-            mse_efficiency_warning: None,
-            mse_efficiency_poor: None,
-            flow_imbalance_warning: None,
-            flow_imbalance_critical: None,
-            pressure_test_tolerance: None,
-            cement_pressure_hold: None,
-            barrier_pressure_margin: None,
-            weight_mse: None,
-            weight_hydraulic: None,
-            weight_well_control: None,
-            weight_formation: None,
-            cement_returns_expected: None,
-            plug_depth_tolerance: None,
-        }
-    }
-}
-
-impl CampaignSpecific {
-    fn production_defaults() -> Self {
-        Self {
-            mse_efficiency_warning: Some(70.0),
-            mse_efficiency_poor: Some(50.0),
-            flow_imbalance_warning: Some(10.0),
-            flow_imbalance_critical: Some(20.0),
-            pressure_test_tolerance: None,
-            cement_pressure_hold: None,
-            barrier_pressure_margin: None,
-            weight_mse: Some(0.25),
-            weight_hydraulic: Some(0.25),
-            weight_well_control: Some(0.30),
-            weight_formation: Some(0.20),
-            cement_returns_expected: None,
-            plug_depth_tolerance: None,
-        }
-    }
-
-    fn pa_defaults() -> Self {
-        Self {
-            mse_efficiency_warning: Some(50.0),
-            mse_efficiency_poor: Some(30.0),
-            flow_imbalance_warning: Some(5.0),
-            flow_imbalance_critical: Some(15.0),
-            pressure_test_tolerance: Some(25.0),
-            cement_pressure_hold: Some(500.0),
-            barrier_pressure_margin: Some(100.0),
-            weight_mse: Some(0.10),
-            weight_hydraulic: Some(0.35),
-            weight_well_control: Some(0.40),
-            weight_formation: Some(0.15),
-            cement_returns_expected: Some(true),
-            plug_depth_tolerance: Some(5.0),
-        }
-    }
-}
-
-// ============================================================================
 // ML Engine Config
 // ============================================================================
 
@@ -1331,14 +1284,49 @@ pub struct MlConfig {
     /// Typical values: 30–90 s depending on well depth and drillstring length.
     #[serde(default = "default_rop_lag_seconds")]
     pub rop_lag_seconds: u64,
+
+    /// ML analysis interval in seconds.
+    ///
+    /// How often the ML scheduler runs its analysis pass.
+    /// Can be overridden by `ML_INTERVAL_SECS` env var for backward compat.
+    #[serde(default = "default_ml_interval_secs")]
+    pub interval_secs: u64,
 }
 
 fn default_rop_lag_seconds() -> u64 { 60 }
+fn default_ml_interval_secs() -> u64 { 3600 }
 
 impl Default for MlConfig {
     fn default() -> Self {
         Self {
             rop_lag_seconds: default_rop_lag_seconds(),
+            interval_secs: default_ml_interval_secs(),
+        }
+    }
+}
+
+// ============================================================================
+// Server Config
+// ============================================================================
+
+/// HTTP server configuration.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ServerConfig {
+    /// HTTP server bind address.
+    ///
+    /// Can be overridden by `SAIREN_SERVER_ADDR` env var or `--addr` CLI flag.
+    #[serde(default = "default_server_addr")]
+    pub addr: String,
+}
+
+fn default_server_addr() -> String {
+    "0.0.0.0:8080".to_string()
+}
+
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            addr: default_server_addr(),
         }
     }
 }
@@ -1361,7 +1349,7 @@ mod tests {
     fn test_empty_toml_produces_defaults() {
         let config: WellConfig = toml::from_str("").expect("empty TOML should parse");
         assert_eq!(config.thresholds.well_control.flow_imbalance_warning_gpm, 10.0);
-        assert_eq!(config.thresholds.mse.efficiency_optimal_percent, 85.0);
+        assert_eq!(config.thresholds.mse.efficiency_warning_percent, 70.0);
         assert_eq!(config.thresholds.hydraulics.normal_mud_weight_ppg, 8.6);
         assert_eq!(config.baseline_learning.warning_sigma, 3.0);
         assert_eq!(config.ensemble_weights.well_control, 0.30);
@@ -1384,7 +1372,7 @@ flow_imbalance_critical_gpm = 50.0
         assert_eq!(config.thresholds.well_control.flow_imbalance_critical_gpm, 50.0);
         // Non-overridden values retain defaults
         assert_eq!(config.thresholds.well_control.pit_gain_warning_bbl, 5.0);
-        assert_eq!(config.thresholds.mse.efficiency_optimal_percent, 85.0);
+        assert_eq!(config.thresholds.mse.efficiency_warning_percent, 70.0);
     }
 
     #[test]
@@ -1457,5 +1445,55 @@ flow_imbalance_critical_gpm = 50.0
         assert!(toml_str.contains("[ensemble_weights]"), "Missing ensemble_weights section");
         assert!(toml_str.contains("[physics]"), "Missing physics section");
         assert!(toml_str.contains("normal_mud_weight_ppg"), "Missing normal_mud_weight_ppg field");
+    }
+
+    // ========================================================================
+    // ConfigProvenance tests
+    // ========================================================================
+
+    #[test]
+    fn test_provenance_tracks_explicit_keys() {
+        let toml_str = r#"
+[thresholds.hydraulics]
+normal_mud_weight_ppg = 9.2
+"#;
+        let value: toml::Value = toml_str.parse().unwrap();
+        let keys: std::collections::HashSet<String> =
+            super::super::validation::walk_toml_keys(&value, "").into_iter().collect();
+        let provenance = ConfigProvenance { explicit_keys: keys };
+
+        assert!(provenance.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg"));
+        assert!(provenance.is_user_set("thresholds.hydraulics"));
+        assert!(!provenance.is_user_set("thresholds.well_control.flow_imbalance_warning_gpm"));
+    }
+
+    #[test]
+    fn test_provenance_default_has_zero_keys() {
+        let provenance = ConfigProvenance::default();
+        assert!(provenance.explicit_keys.is_empty());
+        assert!(!provenance.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg"));
+    }
+
+    #[test]
+    fn test_provenance_partial_toml() {
+        let toml_str = r#"
+[well]
+name = "Test-Well"
+
+[thresholds.well_control]
+flow_imbalance_warning_gpm = 25.0
+"#;
+        let value: toml::Value = toml_str.parse().unwrap();
+        let keys: std::collections::HashSet<String> =
+            super::super::validation::walk_toml_keys(&value, "").into_iter().collect();
+        let provenance = ConfigProvenance { explicit_keys: keys };
+
+        // Explicitly set keys
+        assert!(provenance.is_user_set("well.name"));
+        assert!(provenance.is_user_set("thresholds.well_control.flow_imbalance_warning_gpm"));
+
+        // Not set
+        assert!(!provenance.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg"));
+        assert!(!provenance.is_user_set("baseline_learning.warning_sigma"));
     }
 }

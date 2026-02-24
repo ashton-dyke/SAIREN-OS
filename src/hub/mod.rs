@@ -42,19 +42,24 @@ pub struct HubState {
     /// Embedded LLM backend for intelligence workers (None when not configured)
     #[cfg(feature = "llm")]
     pub llm_backend: Option<Arc<crate::llm::MistralRsBackend>>,
+    /// In-memory store for pending pairing requests (6-digit code -> request)
+    pub pairing_requests: api::pairing::PairingStore,
 }
 
 #[cfg(feature = "fleet-hub")]
 impl HubState {
     /// Create hub state without an LLM backend (curator-only mode).
     pub fn new(db: sqlx::PgPool, config: config::HubConfig) -> Arc<Self> {
-        Arc::new(Self {
+        let state = Arc::new(Self {
             db,
             config,
             library_version: AtomicU64::new(0),
             #[cfg(feature = "llm")]
             llm_backend: None,
-        })
+            pairing_requests: api::pairing::new_pairing_store(),
+        });
+        api::pairing::spawn_pairing_cleanup(Arc::clone(&state.pairing_requests));
+        state
     }
 
     /// Create hub state with an embedded LLM backend for intelligence workers.
@@ -64,11 +69,14 @@ impl HubState {
         config: config::HubConfig,
         backend: Arc<crate::llm::MistralRsBackend>,
     ) -> Arc<Self> {
-        Arc::new(Self {
+        let state = Arc::new(Self {
             db,
             config,
             library_version: AtomicU64::new(0),
             llm_backend: Some(backend),
-        })
+            pairing_requests: api::pairing::new_pairing_store(),
+        });
+        api::pairing::spawn_pairing_cleanup(Arc::clone(&state.pairing_requests));
+        state
     }
 }

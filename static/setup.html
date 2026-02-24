@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SAIREN-OS Setup Wizard</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #0a0e17; color: #e0e0e0; min-height: 100vh; }
+
+        .header { background: linear-gradient(135deg, #1a1f2e, #0d1117); padding: 24px 32px; border-bottom: 1px solid #30363d; }
+        .header h1 { font-size: 28px; color: #58a6ff; margin-bottom: 4px; }
+        .header .sub { font-size: 14px; color: #8b949e; }
+
+        .container { max-width: 800px; margin: 0 auto; padding: 24px 32px; }
+
+        .section { background: #161b22; border: 1px solid #30363d; border-radius: 12px; padding: 24px; margin-bottom: 24px; }
+        .section h2 { font-size: 18px; color: #c9d1d9; margin-bottom: 4px; }
+        .section .desc { font-size: 13px; color: #8b949e; margin-bottom: 16px; }
+
+        .step-num { display: inline-block; width: 28px; height: 28px; border-radius: 50%; background: #1f6feb; color: #fff; text-align: center; line-height: 28px; font-size: 14px; font-weight: 700; margin-right: 8px; vertical-align: middle; }
+
+        /* Scan */
+        .scan-status { padding: 12px 16px; border-radius: 8px; background: #0d1117; margin-bottom: 16px; display: flex; align-items: center; gap: 12px; }
+        .spinner { width: 20px; height: 20px; border: 3px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin 0.8s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Table */
+        table { width: 100%; border-collapse: collapse; margin-bottom: 12px; }
+        th { background: #1a1f2e; color: #8b949e; font-size: 12px; text-transform: uppercase; padding: 10px 14px; text-align: left; letter-spacing: 0.5px; }
+        td { padding: 10px 14px; border-top: 1px solid #21262d; font-size: 14px; }
+        tr:hover { background: #1a1f2e; }
+
+        .badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 12px; font-weight: 600; }
+        .badge.validated { background: #0d2818; color: #3fb950; }
+        .badge.open { background: #2d1a00; color: #d29922; }
+
+        /* Buttons */
+        .btn { display: inline-block; padding: 10px 20px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; cursor: pointer; transition: all 0.15s; }
+        .btn-sm { padding: 6px 14px; font-size: 13px; }
+        .btn-primary { background: #1f6feb; color: #fff; }
+        .btn-primary:hover { background: #388bfd; }
+        .btn-primary:disabled { background: #30363d; color: #8b949e; cursor: not-allowed; }
+        .btn-success { background: #238636; color: #fff; }
+        .btn-success:hover { background: #2ea043; }
+        .btn-success:disabled { background: #30363d; color: #8b949e; cursor: not-allowed; }
+        .btn-outline { background: transparent; border: 1px solid #30363d; color: #c9d1d9; }
+        .btn-outline:hover { border-color: #58a6ff; color: #58a6ff; }
+
+        /* Inputs */
+        .form-row { display: flex; gap: 12px; margin-bottom: 12px; align-items: flex-end; }
+        .form-group { flex: 1; }
+        .form-group label { display: block; font-size: 13px; color: #8b949e; margin-bottom: 4px; }
+        .form-group input { width: 100%; padding: 10px 14px; border-radius: 8px; border: 1px solid #30363d; background: #0d1117; color: #e0e0e0; font-size: 14px; outline: none; }
+        .form-group input:focus { border-color: #58a6ff; }
+
+        /* Manual entry */
+        .manual-row { display: flex; gap: 8px; align-items: flex-end; margin-top: 12px; padding-top: 12px; border-top: 1px solid #21262d; }
+        .manual-row .form-group { flex: 2; }
+        .manual-row .port-group { flex: 1; }
+
+        /* Fleet toggle */
+        .toggle-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; cursor: pointer; }
+        .toggle { width: 44px; height: 24px; border-radius: 12px; background: #30363d; position: relative; transition: background 0.2s; }
+        .toggle.active { background: #1f6feb; }
+        .toggle::after { content: ''; position: absolute; width: 18px; height: 18px; border-radius: 50%; background: #fff; top: 3px; left: 3px; transition: transform 0.2s; }
+        .toggle.active::after { transform: translateX(20px); }
+
+        /* Pairing code display */
+        .code-display { font-size: 48px; font-weight: 700; color: #58a6ff; text-align: center; letter-spacing: 12px; padding: 20px; background: #0d1117; border-radius: 12px; margin: 16px 0; font-family: 'Courier New', monospace; }
+        .pair-status { text-align: center; font-size: 14px; color: #8b949e; }
+        .pair-status.approved { color: #3fb950; }
+        .pair-status.expired { color: #f85149; }
+
+        /* Footer */
+        .footer { margin-top: 8px; }
+        .result-msg { padding: 16px; border-radius: 8px; margin-bottom: 16px; }
+        .result-msg.success { background: #0d2818; color: #3fb950; border: 1px solid #238636; }
+        .result-msg.error { background: #3d0f0f; color: #f85149; border: 1px solid #f85149; }
+
+        /* Selected row */
+        tr.selected { background: #0d2818; }
+        tr.selected td { color: #3fb950; }
+
+        /* Connect result */
+        .connect-result { padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-top: 8px; }
+        .connect-result.ok { background: #0d2818; color: #3fb950; }
+        .connect-result.fail { background: #3d0f0f; color: #f85149; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>SAIREN-OS Setup Wizard</h1>
+        <div class="sub">Configure your drilling intelligence system</div>
+    </div>
+
+    <div class="container">
+        <!-- Section 1: WITS Connection -->
+        <div class="section">
+            <h2><span class="step-num">1</span> WITS Data Connection</h2>
+            <div class="desc">Scanning your local network for WITS Level 0 data streams</div>
+
+            <div class="scan-status" id="scanStatus">
+                <div class="spinner" id="scanSpinner"></div>
+                <span id="scanText">Scanning network...</span>
+            </div>
+
+            <table id="scanTable" style="display:none;">
+                <thead>
+                    <tr><th>IP Address</th><th>Port</th><th>Status</th><th></th></tr>
+                </thead>
+                <tbody id="scanBody"></tbody>
+            </table>
+
+            <div id="connectResult" style="display:none;"></div>
+
+            <div class="manual-row">
+                <div class="form-group">
+                    <label>Or enter address manually</label>
+                    <input type="text" id="manualHost" placeholder="192.168.1.100">
+                </div>
+                <div class="form-group port-group">
+                    <label>Port</label>
+                    <input type="number" id="manualPort" placeholder="5000" value="5000">
+                </div>
+                <button class="btn btn-outline btn-sm" onclick="testManual()">Test</button>
+            </div>
+        </div>
+
+        <!-- Section 2: Well Identity -->
+        <div class="section">
+            <h2><span class="step-num">2</span> Well Identity</h2>
+            <div class="desc">Identify this well and rig for operational records</div>
+
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Well Name</label>
+                    <input type="text" id="wellName" placeholder="WELL-001">
+                </div>
+                <div class="form-group">
+                    <label>Field</label>
+                    <input type="text" id="fieldName" placeholder="North Sea">
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Rig ID</label>
+                    <input type="text" id="rigId" placeholder="RIG-01">
+                </div>
+            </div>
+        </div>
+
+        <!-- Section 3: Fleet Hub (Optional) -->
+        <div class="section">
+            <h2><span class="step-num">3</span> Fleet Hub <span style="color:#8b949e;font-size:14px;">(Optional)</span></h2>
+            <div class="desc">Connect to a Fleet Hub for multi-rig learning and intelligence sharing</div>
+
+            <div class="toggle-row" onclick="toggleFleet()">
+                <div class="toggle" id="fleetToggle"></div>
+                <span>Join a Fleet Hub</span>
+            </div>
+
+            <div id="fleetPanel" style="display:none;">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Fleet Hub URL</label>
+                        <input type="text" id="hubUrl" placeholder="http://fleet-hub:8080">
+                    </div>
+                    <button class="btn btn-primary btn-sm" id="pairBtn" onclick="startPairing()">Pair</button>
+                </div>
+
+                <div id="pairingPanel" style="display:none;">
+                    <div class="code-display" id="pairCode"></div>
+                    <div class="pair-status" id="pairStatus">Approve this code on the Fleet Hub dashboard</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <div id="resultMsg" style="display:none;"></div>
+            <button class="btn btn-success" id="saveBtn" onclick="saveConfig()" style="width:100%;padding:14px;">
+                Save &amp; Start
+            </button>
+        </div>
+    </div>
+
+    <script>
+        // State
+        let selectedStream = null;
+        let fleetEnabled = false;
+        let pairingPollTimer = null;
+        let pairedPassphrase = null;
+
+        // Auto-start scan on page load
+        startScan();
+
+        async function startScan() {
+            document.getElementById('scanSpinner').style.display = 'block';
+            document.getElementById('scanText').textContent = 'Scanning network...';
+            document.getElementById('scanTable').style.display = 'none';
+
+            try {
+                await fetch('/api/setup/scan');
+                pollScan();
+            } catch (e) {
+                document.getElementById('scanText').textContent = 'Scan failed: ' + e.message;
+                document.getElementById('scanSpinner').style.display = 'none';
+            }
+        }
+
+        async function pollScan() {
+            try {
+                const res = await fetch('/api/setup/scan/status');
+                const data = await res.json();
+
+                if (data.status === 'scanning') {
+                    setTimeout(pollScan, 1000);
+                    return;
+                }
+
+                if (data.status === 'complete') {
+                    document.getElementById('scanSpinner').style.display = 'none';
+                    document.getElementById('scanText').textContent =
+                        'Scan complete in ' + (data.elapsed_ms / 1000).toFixed(1) + 's — ' +
+                        data.streams.length + ' stream(s) found';
+
+                    if (data.streams.length > 0) {
+                        renderStreams(data.streams);
+                    }
+                } else {
+                    document.getElementById('scanSpinner').style.display = 'none';
+                    document.getElementById('scanText').textContent = 'No scan results';
+                }
+            } catch (e) {
+                setTimeout(pollScan, 2000);
+            }
+        }
+
+        function renderStreams(streams) {
+            const tbody = document.getElementById('scanBody');
+            tbody.innerHTML = streams.map((s, i) =>
+                '<tr id="row-' + i + '" onclick="selectStream(' + i + ', \'' + s.host + '\', ' + s.port + ')">' +
+                '<td>' + s.host + '</td>' +
+                '<td>' + s.port + '</td>' +
+                '<td><span class="badge ' + (s.validated ? 'validated' : 'open') + '">' +
+                    (s.validated ? 'Validated' : 'Open') + '</span></td>' +
+                '<td><button class="btn btn-outline btn-sm" onclick="event.stopPropagation();testStream(\'' + s.host + '\',' + s.port + ')">Connect</button></td>' +
+                '</tr>'
+            ).join('');
+            document.getElementById('scanTable').style.display = 'table';
+        }
+
+        function selectStream(idx, host, port) {
+            selectedStream = { host, port };
+            document.querySelectorAll('#scanBody tr').forEach(r => r.classList.remove('selected'));
+            const row = document.getElementById('row-' + idx);
+            if (row) row.classList.add('selected');
+            document.getElementById('manualHost').value = host;
+            document.getElementById('manualPort').value = port;
+        }
+
+        async function testStream(host, port) {
+            const resultDiv = document.getElementById('connectResult');
+            resultDiv.style.display = 'block';
+            resultDiv.className = 'connect-result';
+            resultDiv.textContent = 'Testing ' + host + ':' + port + '...';
+
+            try {
+                const res = await fetch('/api/setup/connect', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ host, port })
+                });
+                const data = await res.json();
+                resultDiv.className = 'connect-result ' + (data.success ? 'ok' : 'fail');
+                resultDiv.textContent = data.message;
+
+                if (data.success) {
+                    selectedStream = { host, port };
+                    document.getElementById('manualHost').value = host;
+                    document.getElementById('manualPort').value = port;
+                }
+            } catch (e) {
+                resultDiv.className = 'connect-result fail';
+                resultDiv.textContent = 'Connection test failed: ' + e.message;
+            }
+        }
+
+        function testManual() {
+            const host = document.getElementById('manualHost').value.trim();
+            const port = parseInt(document.getElementById('manualPort').value);
+            if (!host || !port) return;
+            testStream(host, port);
+        }
+
+        // Fleet toggle
+        function toggleFleet() {
+            fleetEnabled = !fleetEnabled;
+            document.getElementById('fleetToggle').classList.toggle('active', fleetEnabled);
+            document.getElementById('fleetPanel').style.display = fleetEnabled ? 'block' : 'none';
+        }
+
+        // Pairing
+        async function startPairing() {
+            const hubUrl = document.getElementById('hubUrl').value.trim();
+            const rigId = document.getElementById('rigId').value.trim() || 'RIG-01';
+            const wellId = document.getElementById('wellName').value.trim() || 'WELL-001';
+            const field = document.getElementById('fieldName').value.trim() || '';
+
+            if (!hubUrl) { alert('Enter a Fleet Hub URL'); return; }
+
+            document.getElementById('pairBtn').disabled = true;
+            document.getElementById('pairBtn').textContent = 'Pairing...';
+
+            try {
+                const res = await fetch('/api/setup/fleet/pair', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ hub_url: hubUrl, rig_id: rigId, well_id: wellId, field })
+                });
+                const data = await res.json();
+
+                if (data.code) {
+                    document.getElementById('pairingPanel').style.display = 'block';
+                    document.getElementById('pairCode').textContent = data.code;
+                    document.getElementById('pairStatus').textContent = 'Approve this code on the Fleet Hub dashboard';
+                    document.getElementById('pairStatus').className = 'pair-status';
+                    pollPairStatus();
+                } else {
+                    alert(data.error || 'Pairing failed');
+                    document.getElementById('pairBtn').disabled = false;
+                    document.getElementById('pairBtn').textContent = 'Pair';
+                }
+            } catch (e) {
+                alert('Failed to reach hub: ' + e.message);
+                document.getElementById('pairBtn').disabled = false;
+                document.getElementById('pairBtn').textContent = 'Pair';
+            }
+        }
+
+        async function pollPairStatus() {
+            try {
+                const res = await fetch('/api/setup/fleet/status');
+                const data = await res.json();
+
+                if (data.status === 'approved' && data.passphrase) {
+                    document.getElementById('pairStatus').textContent = 'Paired successfully!';
+                    document.getElementById('pairStatus').className = 'pair-status approved';
+                    pairedPassphrase = data.passphrase;
+                    document.getElementById('pairBtn').textContent = 'Paired';
+                    return; // Stop polling
+                } else if (data.status === 'expired') {
+                    document.getElementById('pairStatus').textContent = 'Code expired. Try again.';
+                    document.getElementById('pairStatus').className = 'pair-status expired';
+                    document.getElementById('pairBtn').disabled = false;
+                    document.getElementById('pairBtn').textContent = 'Pair';
+                    return;
+                }
+
+                // Still pending — poll again in 3 seconds
+                pairingPollTimer = setTimeout(pollPairStatus, 3000);
+            } catch (e) {
+                pairingPollTimer = setTimeout(pollPairStatus, 5000);
+            }
+        }
+
+        // Save config
+        async function saveConfig() {
+            const host = document.getElementById('manualHost').value.trim();
+            const port = parseInt(document.getElementById('manualPort').value) || 5000;
+            const wellName = document.getElementById('wellName').value.trim() || 'WELL-001';
+            const field = document.getElementById('fieldName').value.trim() || '';
+            const rigId = document.getElementById('rigId').value.trim() || 'RIG-01';
+
+            if (!host) {
+                showResult('Select or enter a WITS data server address', false);
+                return;
+            }
+
+            const body = {
+                wits_host: host,
+                wits_port: port,
+                well_name: wellName,
+                field: field,
+                rig_id: rigId,
+            };
+
+            // Include fleet info if paired
+            if (fleetEnabled && pairedPassphrase) {
+                body.fleet_hub_url = document.getElementById('hubUrl').value.trim();
+                body.fleet_passphrase = pairedPassphrase;
+                body.fleet_rig_id = rigId;
+            }
+
+            document.getElementById('saveBtn').disabled = true;
+            document.getElementById('saveBtn').textContent = 'Saving...';
+
+            try {
+                const res = await fetch('/api/setup/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                const data = await res.json();
+                showResult(data.message, data.success);
+
+                if (data.success) {
+                    document.getElementById('saveBtn').textContent = 'Setup Complete';
+                } else {
+                    document.getElementById('saveBtn').disabled = false;
+                    document.getElementById('saveBtn').textContent = 'Save & Start';
+                }
+            } catch (e) {
+                showResult('Save failed: ' + e.message, false);
+                document.getElementById('saveBtn').disabled = false;
+                document.getElementById('saveBtn').textContent = 'Save & Start';
+            }
+        }
+
+        function showResult(msg, success) {
+            const el = document.getElementById('resultMsg');
+            el.style.display = 'block';
+            el.className = 'result-msg ' + (success ? 'success' : 'error');
+            el.textContent = msg;
+        }
+    </script>
+</body>
+</html>

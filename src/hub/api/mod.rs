@@ -5,6 +5,7 @@ pub mod graph;
 pub mod intelligence;
 pub mod library;
 pub mod metrics;
+pub mod pairing;
 pub mod performance;
 pub mod registry;
 pub mod dashboard;
@@ -56,7 +57,12 @@ pub fn build_router(state: Arc<HubState>) -> Router {
         // Prometheus metrics (item 4.1) — no auth, scraped by Prometheus
         .route("/metrics", axum::routing::get(metrics::get_metrics))
         // Health
-        .route("/health", axum::routing::get(health::get_health));
+        .route("/health", axum::routing::get(health::get_health))
+        // Pairing code flow
+        .route("/pair/request", axum::routing::post(pairing::request_pairing))
+        .route("/pair/approve", axum::routing::post(pairing::approve_pairing))
+        .route("/pair/status", axum::routing::get(pairing::pairing_status))
+        .route("/pair/pending", axum::routing::get(pairing::list_pending));
 
     // Rate limiting: 20 req/s sustained, burst up to 50 per IP (item 4.3)
     let governor_config = Arc::new(

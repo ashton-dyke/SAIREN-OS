@@ -114,7 +114,7 @@ fn main() {
 
     // Initialize config (required before agents)
     if !config::is_initialized() {
-        config::init(WellConfig::default());
+        config::init(WellConfig::default(), config::ConfigProvenance::default());
     }
 
     println!("╔══════════════════════════════════════════════════════════════╗");

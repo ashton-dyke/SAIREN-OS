@@ -12,9 +12,9 @@ use tracing::{info, warn};
 use super::source::{PacketEvent, PacketSource};
 use super::{AppState, PipelineCoordinator, PipelineStats, SystemStatus};
 use crate::config::defaults::ML_HISTORY_BUFFER_SIZE;
-#[cfg(feature = "fleet-client")]
+
 use crate::config::defaults::{ECD_REFERENCE_PPG, MSE_EFFICIENCY_DENOMINATOR};
-#[cfg(feature = "fleet-client")]
+
 use crate::types::Campaign;
 use crate::types::{StrategicAdvisory, WitsPacket};
 
@@ -54,7 +54,7 @@ impl PostProcessHooks for () {
 // ============================================================================
 
 /// Fleet client context for enqueueing advisory events.
-#[cfg(feature = "fleet-client")]
+
 pub struct FleetContext {
     pub queue: Arc<crate::fleet::UploadQueue>,
     pub rig_id: String,
@@ -77,7 +77,7 @@ pub struct ProcessingLoop<H: PostProcessHooks> {
     cancel_token: CancellationToken,
     /// Tracks WOB/RPM changes to stamp `seconds_since_param_change` on every packet.
     param_tracker: crate::ml_engine::param_change_tracker::ParamChangeTracker,
-    #[cfg(feature = "fleet-client")]
+    
     fleet_ctx: Option<FleetContext>,
 }
 
@@ -94,13 +94,13 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
             hooks,
             cancel_token,
             param_tracker: crate::ml_engine::param_change_tracker::ParamChangeTracker::new(),
-            #[cfg(feature = "fleet-client")]
+            
             fleet_ctx: None,
         }
     }
 
     /// Attach fleet client context for advisory uploads.
-    #[cfg(feature = "fleet-client")]
+    
     pub fn with_fleet(mut self, ctx: FleetContext) -> Self {
         self.fleet_ctx = Some(ctx);
         self
@@ -216,7 +216,7 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
                 }
 
                 // Enqueue for fleet upload
-                #[cfg(feature = "fleet-client")]
+                
                 if let Some(ref ctx) = self.fleet_ctx {
                     fleet_enqueue_advisory(
                         &ctx.queue, adv, &packet, &ctx.rig_id, &ctx.well_id, "Volve", campaign,
@@ -297,7 +297,7 @@ fn truncate_str(s: &str, max_len: usize) -> String {
 ///
 /// Only AMBER/RED advisories are uploaded (see `fleet::types::should_upload`).
 /// The event is written to the disk-backed queue; the uploader task drains it.
-#[cfg(feature = "fleet-client")]
+
 fn fleet_enqueue_advisory(
     queue: &crate::fleet::UploadQueue,
     advisory: &StrategicAdvisory,

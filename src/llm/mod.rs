@@ -20,19 +20,32 @@
 //! let parsed  = strategic_llm::parse_response(&raw)?;
 //! ```
 
-// mistralrs backend — only compiled when the `llm` or `cuda` feature is active
-#[cfg(feature = "llm")]
+use anyhow::Result;
+use async_trait::async_trait;
+
+/// Common trait for LLM backends
+#[async_trait]
+pub trait LlmBackend: Send + Sync {
+    /// Generate a response from a prompt
+    async fn generate(&self, prompt: &str) -> Result<String>;
+    /// Backend name for logging
+    fn backend_name(&self) -> &'static str;
+    /// Whether this backend uses GPU acceleration
+    fn uses_gpu(&self) -> bool;
+}
+
+// mistralrs backend — compiled by default (runtime CUDA detection gates inference)
 mod mistral_rs;
-#[cfg(feature = "llm")]
 pub use mistral_rs::MistralRsBackend;
-#[cfg(feature = "llm")]
 pub use mistral_rs::is_cuda_available;
 
-// Tactical LLM (feature-gated, experimental)
-#[cfg(feature = "tactical_llm")]
+// Tactical LLM
 pub mod tactical_llm;
-#[cfg(feature = "tactical_llm")]
 pub use tactical_llm::TacticalLLM;
+
+// LLM inference scheduler (priority queue for dual-model inference)
+pub mod scheduler;
+pub use scheduler::SchedulerHandle;
 
 // Prompt templates and response parsing — always available (no inference required)
 pub mod strategic_llm;

@@ -30,9 +30,13 @@ pub fn api_routes(state: DashboardState) -> Router {
         .route("/ml/history", get(handlers::get_ml_history))
         .route("/ml/optimal", get(handlers::get_ml_optimal))
         // Critical reports endpoint
-        .route("/reports/critical", get(handlers::get_critical_reports))
-        // Test endpoint for creating sample critical report
-        .route("/reports/test", post(handlers::create_test_critical_report))
+        .route("/reports/critical", get(handlers::get_critical_reports));
+
+    // Test endpoint — debug builds only
+    #[cfg(debug_assertions)]
+    let router = router.route("/reports/test", post(handlers::create_test_critical_report));
+
+    let router = router
         // Well configuration endpoints
         .route("/config", get(handlers::get_config))
         .route("/config", post(handlers::update_config))
@@ -45,8 +49,7 @@ pub fn api_routes(state: DashboardState) -> Router {
         // Prometheus metrics (item 4.1)
         .route("/metrics", get(handlers::get_metrics));
 
-    // Fleet intelligence cache endpoint (fleet-client feature)
-    #[cfg(feature = "fleet-client")]
+    // Fleet intelligence cache endpoint
     let router = router.route(
         "/fleet/intelligence",
         get(handlers::get_fleet_intelligence),

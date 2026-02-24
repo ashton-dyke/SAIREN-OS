@@ -1,83 +1,80 @@
 //! REST API module using Axum
 //!
 //! Provides HTTP endpoints for the SAIREN-OS drilling intelligence dashboard:
-//! - Real-time health assessment and operational scoring
-//! - System status and learning progress
-//! - Static file serving for the dashboard
+//! - v2 API with consistent envelope and consolidated live endpoint
+//! - v1 API (deprecated, sunset 2026-09-01) for backward compatibility
+//! - React SPA served via `rust-embed` (compiled into the binary)
 
+pub mod envelope;
 pub mod handlers;
+pub mod middleware;
 mod routes;
+pub mod setup;
+pub mod v2_handlers;
+mod v2_routes;
 
 pub use handlers::DashboardState;
 
-use axum::{response::Html, routing::get, Router};
+use axum::http::{header, StatusCode, Uri};
+use axum::middleware as axum_mw;
+use axum::response::{IntoResponse, Response};
+use axum::Router;
+use rust_embed::Embed;
 use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
 
-/// Dashboard HTML (embedded at compile time)
-const DASHBOARD_HTML: &str = include_str!("../../static/index.html");
+/// Dashboard assets compiled from `dashboard/dist/` via `build.rs`.
+#[derive(Embed)]
+#[folder = "dashboard/dist/"]
+struct DashboardAssets;
 
-/// Reports page HTML (embedded at compile time)
-const REPORTS_HTML: &str = include_str!("../../static/reports.html");
+/// Serve a static asset or fall back to `index.html` for SPA routing.
+async fn serve_asset(uri: Uri) -> Response {
+    let path = uri.path().trim_start_matches('/');
 
-/// Serve the dashboard HTML
-async fn serve_dashboard() -> Html<&'static str> {
-    Html(DASHBOARD_HTML)
+    // Try exact file match first.
+    if let Some(content) = DashboardAssets::get(path) {
+        let mime = mime_guess::from_path(path).first_or_octet_stream();
+        return (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, mime.as_ref())],
+            content.data.into_owned(),
+        )
+            .into_response();
+    }
+
+    // SPA fallback — serve index.html for any non-API, non-file path.
+    if let Some(index) = DashboardAssets::get("index.html") {
+        return (
+            StatusCode::OK,
+            [(header::CONTENT_TYPE, "text/html")],
+            index.data.into_owned(),
+        )
+            .into_response();
+    }
+
+    // If dashboard was not built (CI without Node), return a plain message.
+    (StatusCode::OK, "SAIREN-OS is running. Dashboard not built (npm not available during compile).").into_response()
 }
 
-/// Serve the reports page HTML
-async fn serve_reports() -> Html<&'static str> {
-    Html(REPORTS_HTML)
-}
-
-/// Create the complete application router with API and static files
+/// Create the complete application router with API and SPA serving.
 pub fn create_app(state: DashboardState) -> Router {
-    // CORS configuration (permissive for development)
     let cors = CorsLayer::permissive();
 
     Router::new()
-        // Dashboard at root
-        .route("/", get(serve_dashboard))
-        // Reports page
-        .route("/reports.html", get(serve_reports))
-        // API routes
-        .nest("/api/v1", routes::api_routes(state.clone()))
-        // Legacy health endpoint
+        // v2 API (primary)
+        .nest("/api/v2", v2_routes::v2_api_routes(state.clone()))
+        // v1 API (deprecated — adds Deprecation + Sunset headers)
+        .nest(
+            "/api/v1",
+            routes::api_routes(state.clone())
+                .layer(axum_mw::from_fn(middleware::add_v1_deprecation_headers)),
+        )
+        // Legacy health endpoint at /health
         .merge(routes::legacy_routes(state))
+        // SPA fallback — serves React dashboard or index.html for any unmatched path
+        .fallback(serve_asset)
         // Middleware
         .layer(TraceLayer::new_for_http())
         .layer(CompressionLayer::new())
         .layer(cors)
 }
-
-/// API error type for consistent error responses
-#[derive(Debug)]
-pub struct ApiError {
-    pub status: axum::http::StatusCode,
-    pub message: String,
-    pub code: String,
-}
-
-impl ApiError {
-    #[allow(dead_code)]
-    pub fn bad_request(message: impl Into<String>) -> Self {
-        Self {
-            status: axum::http::StatusCode::BAD_REQUEST,
-            message: message.into(),
-            code: "BAD_REQUEST".to_string(),
-        }
-    }
-}
-
-impl axum::response::IntoResponse for ApiError {
-    fn into_response(self) -> axum::response::Response {
-        let body = serde_json::json!({
-            "error": {
-                "code": self.code,
-                "message": self.message,
-            }
-        });
-
-        (self.status, axum::Json(body)).into_response()
-    }
-}
-

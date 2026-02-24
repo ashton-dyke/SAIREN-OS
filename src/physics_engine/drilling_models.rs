@@ -48,7 +48,11 @@ pub fn calculate_mse(torque: f64, rpm: f64, bit_diameter: f64, rop: f64, wob: f6
     // WOB in klbs, convert to lbs (×1000)
     let axial_component = (4.0 * wob * 1000.0) / (std::f64::consts::PI * d_squared);
 
-    rotary_component + axial_component
+    let result = rotary_component + axial_component;
+    if !result.is_finite() {
+        return 0.0;
+    }
+    result
 }
 
 /// Calculate MSE efficiency as percentage
@@ -62,8 +66,11 @@ pub fn calculate_mse_efficiency(actual_mse: f64, optimal_mse: f64) -> f64 {
         return 0.0; // Not assessable
     }
 
-    let efficiency = (optimal_mse / actual_mse) * 100.0;
-    efficiency.min(100.0).max(0.0)
+    let result = (optimal_mse / actual_mse) * 100.0;
+    if !result.is_finite() {
+        return 0.0;
+    }
+    result.min(100.0).max(0.0)
 }
 
 /// Estimate optimal MSE based on formation hardness
@@ -81,8 +88,12 @@ pub fn estimate_optimal_mse(formation_hardness: f64) -> f64 {
 
     // Linear approximation: base + (hardness * multiplier)
     // Gives range of ~5,000 to ~85,000 psi with defaults
-    cfg.physics.formation_hardness_base_psi
-        + (formation_hardness.clamp(0.0, 10.0) * cfg.physics.formation_hardness_multiplier)
+    let result = cfg.physics.formation_hardness_base_psi
+        + (formation_hardness.clamp(0.0, 10.0) * cfg.physics.formation_hardness_multiplier);
+    if !result.is_finite() {
+        return 0.0;
+    }
+    result
 }
 
 // ============================================================================
@@ -128,7 +139,11 @@ pub fn calculate_d_exponent(rop: f64, rpm: f64, wob: f64, bit_diameter: f64) -> 
         return 0.0;
     }
 
-    numerator / denominator
+    let result = numerator / denominator;
+    if !result.is_finite() {
+        return 0.0;
+    }
+    result
 }
 
 /// Calculate corrected d-exponent (dxc)
@@ -147,7 +162,11 @@ pub fn calculate_dxc(d_exponent: f64, actual_mud_weight: f64, normal_mud_weight:
         return d_exponent;
     }
 
-    d_exponent * (normal_mud_weight / actual_mud_weight)
+    let result = d_exponent * (normal_mud_weight / actual_mud_weight);
+    if !result.is_finite() {
+        return 0.0;
+    }
+    result
 }
 
 // ============================================================================
@@ -173,7 +192,11 @@ pub fn calculate_ecd(mud_weight: f64, annular_pressure_loss: f64, tvd: f64) -> f
         return mud_weight;
     }
 
-    mud_weight + (annular_pressure_loss / (0.052 * tvd))
+    let result = mud_weight + (annular_pressure_loss / (0.052 * tvd));
+    if !result.is_finite() {
+        return mud_weight;
+    }
+    result
 }
 
 /// Estimate annular pressure loss from flow rate and hole geometry
@@ -185,7 +208,11 @@ pub fn calculate_ecd(mud_weight: f64, annular_pressure_loss: f64, tvd: f64) -> f
 pub fn estimate_annular_pressure_loss(flow_rate: f64, depth: f64) -> f64 {
     let cfg = crate::config::get();
 
-    cfg.thresholds.hydraulics.annular_pressure_loss_coefficient * flow_rate * depth / 1000.0
+    let result = cfg.thresholds.hydraulics.annular_pressure_loss_coefficient * flow_rate * depth / 1000.0;
+    if !result.is_finite() {
+        return 0.0;
+    }
+    result
 }
 
 // ============================================================================
@@ -391,6 +418,10 @@ pub fn detect_stick_slip(torque_values: &[f64]) -> (bool, f64) {
     let std_dev = variance.sqrt();
     let cv = std_dev / mean;
 
+    if !cv.is_finite() || cv > 10.0 {
+        return (false, 0.0);
+    }
+
     let is_stick_slip = cv > cv_warning;
     let severity = if cv > cv_critical {
         1.0
@@ -449,6 +480,10 @@ pub fn detect_founder(
     // Normalize trends as percentage of average
     let wob_trend_percent = wob_trend / avg_wob;
     let rop_trend_percent = rop_trend / avg_rop;
+
+    if !wob_trend_percent.is_finite() || !rop_trend_percent.is_finite() {
+        return (false, 0.0, 0.0);
+    }
 
     // Founder condition:
     // - WOB increasing by at least wob_increase_min per sample period
@@ -512,6 +547,10 @@ pub fn detect_founder_quick(
 
     let wob_delta_percent = (curr_wob - prev_wob) / prev_wob;
     let rop_delta_percent = (curr_rop - prev_rop) / prev_rop;
+
+    if !wob_delta_percent.is_finite() || !rop_delta_percent.is_finite() {
+        return (false, 0.0, 0.0);
+    }
 
     // Potential founder: WOB up > quick_wob_delta_percent but ROP not responding or decreasing
     let is_potential = wob_delta_percent > cfg.thresholds.founder.quick_wob_delta_percent && rop_delta_percent <= 0.0;
@@ -857,7 +896,7 @@ mod tests {
 
     fn ensure_config() {
         if !crate::config::is_initialized() {
-            crate::config::init(crate::config::WellConfig::default());
+            crate::config::init(crate::config::WellConfig::default(), crate::config::ConfigProvenance::default());
         }
     }
 
