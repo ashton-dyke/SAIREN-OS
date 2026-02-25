@@ -37,6 +37,69 @@ use crate::config::defaults::{
     MIN_PACKETS_FOR_PERIODIC_SUMMARY, CYCLE_TARGET_GPU_MS,
 };
 
+/// Trend components computed from the history buffer with zero heap allocation.
+struct TrendComponents {
+    avg_mse: f64,
+    mse_trend_pct: f64,
+    dxc_trend_pct: f64,
+    flow_balance_trend: f64,
+    avg_pit_rate: f64,
+}
+
+/// Compute trend components from history using iterator sums (no `collect()`).
+fn compute_trends(history: &[HistoryEntry], fallback_mse: f64) -> TrendComponents {
+    let len = history.len();
+
+    // Average MSE across full history
+    let avg_mse = if len > 0 {
+        history.iter().map(|e| e.metrics.mse).sum::<f64>() / len as f64
+    } else {
+        fallback_mse
+    };
+
+    // MSE trend: compare last 5 vs first 5
+    let mse_trend_pct = if len >= 5 {
+        let recent_avg = history.iter().rev().take(5).map(|e| e.metrics.mse).sum::<f64>() / 5.0;
+        let earlier_avg = history.iter().take(5).map(|e| e.metrics.mse).sum::<f64>() / 5.0;
+        (recent_avg - earlier_avg) / earlier_avg.max(1.0) * 100.0
+    } else {
+        0.0
+    };
+
+    // D-exponent trend
+    let dxc_trend_pct = if len >= 5 {
+        let recent_avg = history.iter().rev().take(5).map(|e| e.metrics.d_exponent).sum::<f64>() / 5.0;
+        let earlier_avg = history.iter().take(5).map(|e| e.metrics.d_exponent).sum::<f64>() / 5.0;
+        (recent_avg - earlier_avg) / earlier_avg.max(0.1) * 100.0
+    } else {
+        0.0
+    };
+
+    // Flow balance trend (absolute difference, not percentage)
+    let flow_balance_trend = if len >= 5 {
+        let recent_avg = history.iter().rev().take(5).map(|e| e.metrics.flow_balance).sum::<f64>() / 5.0;
+        let earlier_avg = history.iter().take(5).map(|e| e.metrics.flow_balance).sum::<f64>() / 5.0;
+        recent_avg - earlier_avg
+    } else {
+        0.0
+    };
+
+    // Average pit rate
+    let avg_pit_rate = if len > 0 {
+        history.iter().map(|e| e.metrics.pit_rate).sum::<f64>() / len as f64
+    } else {
+        0.0
+    };
+
+    TrendComponents {
+        avg_mse,
+        mse_trend_pct,
+        dxc_trend_pct,
+        flow_balance_trend,
+        avg_pit_rate,
+    }
+}
+
 /// Pipeline Coordinator manages the 10-phase processing sequence
 pub struct PipelineCoordinator {
     /// Phase 2-3: Tactical Agent
@@ -233,17 +296,22 @@ impl PipelineCoordinator {
             self.formation_prognosis.clone()
         };
 
+        // Make history buffer contiguous once — O(n) worst case on wrap, O(1) thereafter.
+        // Drop the &mut return value, then re-borrow as shared via as_slices().
+        // All downstream consumers accept &[HistoryEntry], so zero heap allocation.
+        self.history_buffer.make_contiguous();
+        let (history_slice, _) = self.history_buffer.as_slices();
+
         // PHASE OPT: Proactive Optimization (every N packets, independent of tickets)
         let opt_advisory = if let Some(ref prognosis) = dynamic_prognosis {
             if let Some(formation) = prognosis.formation_at_depth(packet.bit_depth).cloned() {
-                let physics = self.compute_physics_for_optimizer(packet, &metrics);
-                let history: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
+                let physics = self.compute_physics_for_optimizer(packet, &metrics, history_slice);
                 let cfc_score = self.tactical_agent.cfc_result()
                     .filter(|r| r.is_calibrated)
                     .map(|r| r.anomaly_score);
 
                 match self.optimizer.evaluate(
-                    packet, &physics, &formation, prognosis, &history, cfc_score, 1.0,
+                    packet, &physics, &formation, prognosis, history_slice, cfc_score, 1.0,
                 ) {
                     Ok(adv) => {
                         info!(
@@ -306,10 +374,16 @@ impl PipelineCoordinator {
 
         // PHASES 5-9: ONLY EXECUTED WHEN TICKET EXISTS
 
-        // CAUSAL: Detect leading indicators before advanced physics
+        // CAUSAL: Detect leading indicators before advanced physics.
+        // Exclude the current packet (last entry) from the causal window to
+        // avoid spurious self-correlations with the anomaly being analysed.
         {
-            let history_snap: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
-            ticket.causal_leads = crate::causal::detect_leads(&history_snap);
+            let causal_window = if history_slice.len() > 1 {
+                &history_slice[..history_slice.len() - 1]
+            } else {
+                history_slice
+            };
+            ticket.causal_leads = crate::causal::detect_leads(causal_window);
             if !ticket.causal_leads.is_empty() {
                 debug!(
                     leads = ticket.causal_leads.len(),
@@ -322,16 +396,15 @@ impl PipelineCoordinator {
         }
 
         // PHASE 5: Advanced Physics
-        let physics = self.run_advanced_physics(&ticket, packet);
+        let physics = self.run_advanced_physics(&ticket, packet, history_slice);
 
         // PHASE 6: Context Lookup
         let context = self.lookup_context(&ticket);
 
         // Run strategic verification
-        let history: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
         let verification_result = self.strategic_agent.verify_ticket(
             &ticket,
-            &history,
+            history_slice,
         );
 
         self.latest_verification = Some(verification_result.clone());
@@ -563,19 +636,19 @@ impl PipelineCoordinator {
             causal_leads: Vec::new(),
         };
 
+        // Make history buffer contiguous for zero-copy slice access
+        self.history_buffer.make_contiguous();
+        let (history_slice, _) = self.history_buffer.as_slices();
+
         // CAUSAL: Attach leading indicators to periodic summary
-        {
-            let history_snap: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
-            summary_ticket.causal_leads = crate::causal::detect_leads(&history_snap);
-        }
+        summary_ticket.causal_leads = crate::causal::detect_leads(history_slice);
 
         // Run through remaining phases
-        let physics = self.run_advanced_physics(&summary_ticket, packet);
+        let physics = self.run_advanced_physics(&summary_ticket, packet, history_slice);
         let context = self.lookup_context(&summary_ticket);
 
         // Strategic verification (summary tickets typically pass)
-        let history: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
-        let verification_result = self.strategic_agent.verify_ticket(&summary_ticket, &history);
+        let verification_result = self.strategic_agent.verify_ticket(&summary_ticket, history_slice);
         self.latest_verification = Some(verification_result.clone());
 
         // Generate explanation
@@ -621,71 +694,22 @@ impl PipelineCoordinator {
         Some(advisory)
     }
 
-    /// Phase 5: Run advanced physics calculations for drilling
-    fn run_advanced_physics(&self, ticket: &AdvisoryTicket, packet: &WitsPacket) -> DrillingPhysicsReport {
+    /// Phase 5: Run advanced physics calculations for drilling.
+    ///
+    /// Accepts a pre-computed history slice to avoid cloning the history buffer.
+    fn run_advanced_physics(
+        &self,
+        ticket: &AdvisoryTicket,
+        packet: &WitsPacket,
+        history: &[HistoryEntry],
+    ) -> DrillingPhysicsReport {
         let start = Instant::now();
 
-        // Calculate MSE statistics from history
-        let mse_values: Vec<f64> = self.history_buffer.iter().map(|e| e.metrics.mse).collect();
-        let avg_mse = if !mse_values.is_empty() {
-            mse_values.iter().sum::<f64>() / mse_values.len() as f64
-        } else {
-            packet.mse
-        };
+        let trends = compute_trends(history, packet.mse);
 
-        // MSE trend (positive = increasing inefficiency)
-        let mse_trend = if mse_values.len() >= 5 {
-            let recent: Vec<f64> = mse_values.iter().rev().take(5).copied().collect();
-            let earlier: Vec<f64> = mse_values.iter().take(5).copied().collect();
-            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
-            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
-            (recent_avg - earlier_avg) / earlier_avg.max(1.0) * 100.0
-        } else {
-            0.0
-        };
-
-        // Calculate optimal MSE for current parameters (estimate formation hardness from d-exponent)
         let formation_hardness = (ticket.current_metrics.d_exponent * 3.0).clamp(1.0, 10.0);
         let optimal_mse = physics_engine::estimate_optimal_mse(formation_hardness);
-        let mse_efficiency = (optimal_mse / avg_mse.max(1.0) * 100.0).min(100.0);
-
-        // D-exponent trend (formation change indicator)
-        let dxc_values: Vec<f64> = self.history_buffer.iter().map(|e| e.metrics.d_exponent).collect();
-        let dxc_trend = if dxc_values.len() >= 5 {
-            let recent: Vec<f64> = dxc_values.iter().rev().take(5).copied().collect();
-            let earlier: Vec<f64> = dxc_values.iter().take(5).copied().collect();
-            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
-            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
-            (recent_avg - earlier_avg) / earlier_avg.max(0.1) * 100.0
-        } else {
-            0.0
-        };
-
-        // Flow balance statistics
-        let flow_balance_values: Vec<f64> = self.history_buffer.iter()
-            .map(|e| e.metrics.flow_balance)
-            .collect();
-
-        // Flow balance trend (positive = increasing gain)
-        let flow_balance_trend = if flow_balance_values.len() >= 5 {
-            let recent: Vec<f64> = flow_balance_values.iter().rev().take(5).copied().collect();
-            let earlier: Vec<f64> = flow_balance_values.iter().take(5).copied().collect();
-            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
-            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
-            recent_avg - earlier_avg
-        } else {
-            0.0
-        };
-
-        // Pit rate trend
-        let pit_rates: Vec<f64> = self.history_buffer.iter()
-            .map(|e| e.metrics.pit_rate)
-            .collect();
-        let avg_pit_rate = if !pit_rates.is_empty() {
-            pit_rates.iter().sum::<f64>() / pit_rates.len() as f64
-        } else {
-            0.0
-        };
+        let mse_efficiency = (optimal_mse / trends.avg_mse.max(1.0) * 100.0).min(100.0);
 
         // Detect drilling dysfunctions based on current metrics
         let mut detected_dysfunctions = Vec::new();
@@ -695,8 +719,7 @@ impl PipelineCoordinator {
             }
         }
 
-        // Confidence based on history depth
-        let confidence = (self.history_buffer.len() as f64 / HISTORY_BUFFER_SIZE as f64).min(1.0);
+        let confidence = (history.len() as f64 / HISTORY_BUFFER_SIZE as f64).min(1.0);
 
         let elapsed = start.elapsed();
         if elapsed.as_millis() > 50 {
@@ -707,33 +730,30 @@ impl PipelineCoordinator {
         }
 
         debug!(
-            avg_mse = avg_mse,
-            mse_trend = mse_trend,
+            avg_mse = trends.avg_mse,
+            mse_trend = trends.mse_trend_pct,
             mse_efficiency = mse_efficiency,
-            flow_balance_trend = flow_balance_trend,
+            flow_balance_trend = trends.flow_balance_trend,
             confidence = confidence,
             "Advanced drilling physics complete"
         );
 
         DrillingPhysicsReport {
-            avg_mse,
-            mse_trend,
+            avg_mse: trends.avg_mse,
+            mse_trend: trends.mse_trend_pct,
             optimal_mse,
             mse_efficiency,
-            dxc_trend,
-            flow_balance_trend,
-            avg_pit_rate,
+            dxc_trend: trends.dxc_trend_pct,
+            flow_balance_trend: trends.flow_balance_trend,
+            avg_pit_rate: trends.avg_pit_rate,
             formation_hardness,
             confidence,
             detected_dysfunctions,
-            // Founder detection fields - not calculated in this code path
-            // (use strategic_drilling_analysis for full founder detection)
             wob_trend: 0.0,
             rop_trend: 0.0,
             founder_detected: false,
             founder_severity: 0.0,
             optimal_wob_estimate: 0.0,
-            // Snapshot current values from packet for LLM prompt
             current_depth: packet.bit_depth,
             current_rop: packet.rop,
             current_wob: packet.wob,
@@ -752,77 +772,30 @@ impl PipelineCoordinator {
 
     /// Lightweight physics computation for the optimization engine.
     ///
-    /// Same MSE stats, trends, and snapshot logic as `run_advanced_physics`
+    /// Same trend math as `run_advanced_physics` via shared `compute_trends()`,
     /// but takes `DrillingMetrics` directly instead of an `AdvisoryTicket`.
     fn compute_physics_for_optimizer(
         &self,
         packet: &WitsPacket,
         metrics: &DrillingMetrics,
+        history: &[HistoryEntry],
     ) -> DrillingPhysicsReport {
-        let mse_values: Vec<f64> = self.history_buffer.iter().map(|e| e.metrics.mse).collect();
-        let avg_mse = if !mse_values.is_empty() {
-            mse_values.iter().sum::<f64>() / mse_values.len() as f64
-        } else {
-            packet.mse
-        };
-
-        let mse_trend = if mse_values.len() >= 5 {
-            let recent: Vec<f64> = mse_values.iter().rev().take(5).copied().collect();
-            let earlier: Vec<f64> = mse_values.iter().take(5).copied().collect();
-            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
-            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
-            (recent_avg - earlier_avg) / earlier_avg.max(1.0) * 100.0
-        } else {
-            0.0
-        };
+        let trends = compute_trends(history, packet.mse);
 
         let formation_hardness = (metrics.d_exponent * 3.0).clamp(1.0, 10.0);
         let optimal_mse = physics_engine::estimate_optimal_mse(formation_hardness);
-        let mse_efficiency = (optimal_mse / avg_mse.max(1.0) * 100.0).min(100.0);
+        let mse_efficiency = (optimal_mse / trends.avg_mse.max(1.0) * 100.0).min(100.0);
 
-        let dxc_values: Vec<f64> = self.history_buffer.iter().map(|e| e.metrics.d_exponent).collect();
-        let dxc_trend = if dxc_values.len() >= 5 {
-            let recent: Vec<f64> = dxc_values.iter().rev().take(5).copied().collect();
-            let earlier: Vec<f64> = dxc_values.iter().take(5).copied().collect();
-            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
-            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
-            (recent_avg - earlier_avg) / earlier_avg.max(0.1) * 100.0
-        } else {
-            0.0
-        };
-
-        let flow_balance_values: Vec<f64> = self.history_buffer.iter()
-            .map(|e| e.metrics.flow_balance)
-            .collect();
-        let flow_balance_trend = if flow_balance_values.len() >= 5 {
-            let recent: Vec<f64> = flow_balance_values.iter().rev().take(5).copied().collect();
-            let earlier: Vec<f64> = flow_balance_values.iter().take(5).copied().collect();
-            let recent_avg: f64 = recent.iter().sum::<f64>() / recent.len() as f64;
-            let earlier_avg: f64 = earlier.iter().sum::<f64>() / earlier.len() as f64;
-            recent_avg - earlier_avg
-        } else {
-            0.0
-        };
-
-        let pit_rates: Vec<f64> = self.history_buffer.iter()
-            .map(|e| e.metrics.pit_rate)
-            .collect();
-        let avg_pit_rate = if !pit_rates.is_empty() {
-            pit_rates.iter().sum::<f64>() / pit_rates.len() as f64
-        } else {
-            0.0
-        };
-
-        let confidence = (self.history_buffer.len() as f64 / HISTORY_BUFFER_SIZE as f64).min(1.0);
+        let confidence = (history.len() as f64 / HISTORY_BUFFER_SIZE as f64).min(1.0);
 
         DrillingPhysicsReport {
-            avg_mse,
-            mse_trend,
+            avg_mse: trends.avg_mse,
+            mse_trend: trends.mse_trend_pct,
             optimal_mse,
             mse_efficiency,
-            dxc_trend,
-            flow_balance_trend,
-            avg_pit_rate,
+            dxc_trend: trends.dxc_trend_pct,
+            flow_balance_trend: trends.flow_balance_trend,
+            avg_pit_rate: trends.avg_pit_rate,
             formation_hardness,
             confidence,
             detected_dysfunctions: Vec::new(),

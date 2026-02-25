@@ -4,14 +4,22 @@
 //! 1. Rig sends `POST /pair/request` with a 6-digit code + identity
 //! 2. Admin approves via `POST /pair/approve` (passphrase-authenticated)
 //! 3. Rig polls `GET /pair/status?code=...` until approved or expired
+//!
+//! ## Security note
+//!
+//! The `/pair/status` endpoint returns the fleet passphrase to approved rigs.
+//! This MUST be served behind TLS (reverse proxy) in production to prevent
+//! passphrase exposure to network observers.
 
+use crate::config::defaults::{MAX_PAIRING_STATUS_FAILURES, PAIRING_RATE_LIMIT_WINDOW_SECS};
 use crate::hub::HubState;
 use crate::hub::auth::api_key::{AdminAuth, ErrorResponse};
-use axum::extract::{Query, State};
+use axum::extract::{ConnectInfo, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use dashmap::DashMap;
 use serde::{Deserialize, Serialize};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Instant;
 use tracing::info;
@@ -31,19 +39,37 @@ pub struct PairingRequest {
 /// In-memory store for pending pairing requests, keyed by 6-digit code.
 pub type PairingStore = Arc<DashMap<String, PairingRequest>>;
 
+/// Per-IP failed pairing lookup tracker (brute-force mitigation).
+pub struct PairingAttemptTracker {
+    pub failed_count: u32,
+    pub window_start: Instant,
+}
+
+/// In-memory store for per-IP failed pairing lookups.
+pub type PairingAttemptStore = Arc<DashMap<std::net::IpAddr, PairingAttemptTracker>>;
+
 /// Create a new pairing store.
 pub fn new_pairing_store() -> PairingStore {
     Arc::new(DashMap::new())
 }
 
-/// Spawn a background task that purges expired pairing requests every 60s.
-pub fn spawn_pairing_cleanup(store: PairingStore) {
+/// Create a new pairing attempt tracker store.
+pub fn new_pairing_attempt_store() -> PairingAttemptStore {
+    Arc::new(DashMap::new())
+}
+
+/// Spawn a background task that purges expired pairing requests and stale
+/// attempt trackers every 60 s.
+pub fn spawn_pairing_cleanup(store: PairingStore, attempts: PairingAttemptStore) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
         loop {
             interval.tick().await;
             let now = Instant::now();
             store.retain(|_code, req| now.duration_since(req.created_at).as_secs() < PAIRING_TTL_SECS);
+            attempts.retain(|_ip, tracker| {
+                tracker.window_start.elapsed().as_secs() < PAIRING_RATE_LIMIT_WINDOW_SECS
+            });
         }
     });
 }
@@ -218,11 +244,30 @@ pub async fn approve_pairing(
 }
 
 /// GET /api/fleet/pair/status?code=... — Rig polls for pairing approval (unauthenticated).
+///
+/// Returns 429 after `MAX_PAIRING_STATUS_FAILURES` failed lookups from the same
+/// IP within a rolling window (brute-force mitigation for the 6-digit code space).
 pub async fn pairing_status(
     State(hub): State<Arc<HubState>>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(params): Query<StatusQuery>,
-) -> Json<PairStatusResponse> {
+) -> Result<Json<PairStatusResponse>, (StatusCode, Json<ErrorResponse>)> {
     let code = params.code.trim().to_string();
+    let ip = addr.ip();
+
+    // Check if this IP is rate-limited
+    if let Some(tracker) = hub.pairing_attempts.get(&ip) {
+        if tracker.failed_count >= MAX_PAIRING_STATUS_FAILURES
+            && tracker.window_start.elapsed().as_secs() < PAIRING_RATE_LIMIT_WINDOW_SECS
+        {
+            return Err((
+                StatusCode::TOO_MANY_REQUESTS,
+                Json(ErrorResponse {
+                    error: "Too many failed pairing lookups, try again later".into(),
+                }),
+            ));
+        }
+    }
 
     match hub.pairing_requests.get(&code) {
         Some(entry) => {
@@ -230,30 +275,59 @@ pub async fn pairing_status(
             if entry.created_at.elapsed().as_secs() > PAIRING_TTL_SECS {
                 drop(entry);
                 hub.pairing_requests.remove(&code);
-                return Json(PairStatusResponse {
+
+                // Expired codes reveal no information — track as failure
+                track_failed_lookup(&hub.pairing_attempts, ip);
+
+                return Ok(Json(PairStatusResponse {
                     status: "expired".to_string(),
                     passphrase: None,
-                });
+                }));
             }
 
             if entry.approved {
                 // Return the fleet passphrase so the rig can configure itself
-                Json(PairStatusResponse {
+                Ok(Json(PairStatusResponse {
                     status: "approved".to_string(),
                     passphrase: Some(hub.config.passphrase.clone()),
-                })
+                }))
             } else {
-                Json(PairStatusResponse {
+                Ok(Json(PairStatusResponse {
                     status: "pending".to_string(),
                     passphrase: None,
-                })
+                }))
             }
         }
-        None => Json(PairStatusResponse {
-            status: "expired".to_string(),
-            passphrase: None,
-        }),
+        None => {
+            // Track failed lookup for brute-force mitigation
+            track_failed_lookup(&hub.pairing_attempts, ip);
+
+            Ok(Json(PairStatusResponse {
+                status: "expired".to_string(),
+                passphrase: None,
+            }))
+        }
     }
+}
+
+/// Record a failed pairing lookup for the given IP, resetting the counter when
+/// the rolling window expires.
+fn track_failed_lookup(attempts: &PairingAttemptStore, ip: std::net::IpAddr) {
+    attempts
+        .entry(ip)
+        .and_modify(|t| {
+            if t.window_start.elapsed().as_secs() >= PAIRING_RATE_LIMIT_WINDOW_SECS {
+                // Window expired — reset
+                t.failed_count = 1;
+                t.window_start = Instant::now();
+            } else {
+                t.failed_count = t.failed_count.saturating_add(1);
+            }
+        })
+        .or_insert(PairingAttemptTracker {
+            failed_count: 1,
+            window_start: Instant::now(),
+        });
 }
 
 /// GET /api/fleet/pair/pending — List pending pairings for the dashboard (admin auth).

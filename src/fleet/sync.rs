@@ -4,6 +4,7 @@
 use crate::context::RAMRecall;
 
 use crate::fleet::client::{FleetClient, FleetClientError};
+use crate::config::defaults::FLEET_SYNC_MAX_BACKOFF_EXPONENT;
 
 use std::sync::Arc;
 
@@ -20,16 +21,15 @@ pub async fn run_library_sync(
     jitter_secs: u64,
 ) {
     let mut last_sync: Option<u64> = None;
+    let mut consecutive_failures: u32 = 0;
 
     loop {
-        // Sleep with jitter to prevent all rigs syncing simultaneously
         let jitter = if jitter_secs > 0 {
             use rand::Rng;
             rand::thread_rng().gen_range(0..jitter_secs)
         } else {
             0
         };
-        tokio::time::sleep(Duration::from_secs(interval_secs + jitter)).await;
 
         match client.sync_library(last_sync).await {
             Ok(library) => {
@@ -51,14 +51,28 @@ pub async fn run_library_sync(
                 }
 
                 last_sync = Some(chrono::Utc::now().timestamp() as u64);
+                consecutive_failures = 0;
             }
             Err(FleetClientError::NotModified) => {
                 debug!("Library sync: no changes");
+                consecutive_failures = 0;
             }
             Err(e) => {
-                warn!(error = %e, "Library sync failed, will retry next cycle");
+                consecutive_failures = consecutive_failures.saturating_add(1);
+                let backoff = 1u64 << consecutive_failures.min(FLEET_SYNC_MAX_BACKOFF_EXPONENT);
+                let backoff_secs = (interval_secs.saturating_mul(backoff)).min(300);
+                warn!(
+                    error = %e,
+                    consecutive_failures,
+                    next_retry_secs = backoff_secs + jitter,
+                    "Library sync failed, backing off"
+                );
+                tokio::time::sleep(Duration::from_secs(backoff_secs + jitter)).await;
+                continue;
             }
         }
+
+        tokio::time::sleep(Duration::from_secs(interval_secs + jitter)).await;
     }
 }
 
@@ -79,9 +93,10 @@ pub async fn run_intelligence_sync(
     jitter_secs: u64,
 ) {
     use crate::fleet::types::IntelligenceOutput;
-    use crate::config::defaults::{FLEET_INTELLIGENCE_MAX_CACHED};
+    use crate::config::defaults::FLEET_INTELLIGENCE_MAX_CACHED;
 
     let mut last_sync: Option<u64> = None;
+    let mut consecutive_failures: u32 = 0;
 
     loop {
         let jitter = if jitter_secs > 0 {
@@ -90,15 +105,17 @@ pub async fn run_intelligence_sync(
         } else {
             0
         };
-        tokio::time::sleep(Duration::from_secs(interval_secs + jitter)).await;
 
         let formation_hint = std::env::var("SAIREN_KB_FIELD").ok();
 
         match client.sync_intelligence(last_sync, formation_hint.as_deref()).await {
             Ok(response) => {
+                consecutive_failures = 0;
+
                 if response.outputs.is_empty() {
                     debug!("Intelligence sync: no new outputs");
                     last_sync = Some(response.synced_at);
+                    tokio::time::sleep(Duration::from_secs(interval_secs + jitter)).await;
                     continue;
                 }
 
@@ -151,9 +168,21 @@ pub async fn run_intelligence_sync(
                 }
             }
             Err(e) => {
-                warn!(error = %e, "Intelligence sync failed, will retry next cycle");
+                consecutive_failures = consecutive_failures.saturating_add(1);
+                let backoff = 1u64 << consecutive_failures.min(FLEET_SYNC_MAX_BACKOFF_EXPONENT);
+                let backoff_secs = (interval_secs.saturating_mul(backoff)).min(300);
+                warn!(
+                    error = %e,
+                    consecutive_failures,
+                    next_retry_secs = backoff_secs + jitter,
+                    "Intelligence sync failed, backing off"
+                );
+                tokio::time::sleep(Duration::from_secs(backoff_secs + jitter)).await;
+                continue;
             }
         }
+
+        tokio::time::sleep(Duration::from_secs(interval_secs + jitter)).await;
     }
 }
 
@@ -170,6 +199,7 @@ pub async fn run_performance_sync(
     jitter_secs: u64,
 ) {
     let mut last_sync: Option<u64> = None;
+    let mut consecutive_failures: u32 = 0;
 
     loop {
         let jitter = if jitter_secs > 0 {
@@ -178,7 +208,6 @@ pub async fn run_performance_sync(
         } else {
             0
         };
-        tokio::time::sleep(Duration::from_secs(interval_secs + jitter)).await;
 
         match crate::knowledge_base::fleet_bridge::sync_performance(&client, &config, last_sync).await {
             Ok(count) => {
@@ -188,10 +217,23 @@ pub async fn run_performance_sync(
                     debug!("Performance sync: no new data");
                 }
                 last_sync = Some(chrono::Utc::now().timestamp() as u64);
+                consecutive_failures = 0;
             }
             Err(e) => {
-                warn!(error = %e, "Performance sync failed, will retry next cycle");
+                consecutive_failures = consecutive_failures.saturating_add(1);
+                let backoff = 1u64 << consecutive_failures.min(FLEET_SYNC_MAX_BACKOFF_EXPONENT);
+                let backoff_secs = (interval_secs.saturating_mul(backoff)).min(300);
+                warn!(
+                    error = %e,
+                    consecutive_failures,
+                    next_retry_secs = backoff_secs + jitter,
+                    "Performance sync failed, backing off"
+                );
+                tokio::time::sleep(Duration::from_secs(backoff_secs + jitter)).await;
+                continue;
             }
         }
+
+        tokio::time::sleep(Duration::from_secs(interval_secs + jitter)).await;
     }
 }

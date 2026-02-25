@@ -172,15 +172,19 @@ impl std::fmt::Display for FinalSeverity {
 }
 
 impl From<f64> for FinalSeverity {
-    /// Convert weighted score (0-4) to severity level
+    /// Convert weighted score (0-4) to severity level.
+    ///
+    /// Uses `>` (not `>=`) at boundaries so exact half-points round down:
+    /// e.g. score 3.5 → High (not Critical). This avoids boundary inflation
+    /// when vote distributions land on exact half-integer sums.
     fn from(score: f64) -> Self {
-        if score >= 3.5 {
+        if score > 3.5 {
             FinalSeverity::Critical
-        } else if score >= 2.5 {
+        } else if score > 2.5 {
             FinalSeverity::High
-        } else if score >= 1.5 {
+        } else if score > 1.5 {
             FinalSeverity::Medium
-        } else if score >= 0.5 {
+        } else if score > 0.5 {
             FinalSeverity::Low
         } else {
             FinalSeverity::Healthy

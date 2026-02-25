@@ -314,7 +314,7 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
                             crate::api::handlers::AcknowledgmentRecord,
                         >(&bytes)
                         {
-                            state.acknowledgments.push(rec);
+                            state.acknowledgments.push_back(rec);
                         }
                     }
                     info!(

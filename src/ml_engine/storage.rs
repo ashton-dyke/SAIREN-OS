@@ -91,32 +91,32 @@ impl MLInsightsStorage {
         Ok(())
     }
 
-    /// Get the latest report for a specific well
+    /// Get the latest report for a specific well.
+    ///
+    /// Uses `scan_prefix()` to restrict iteration to keys matching
+    /// `{field_name}/{well_id}/` instead of a full-table scan.
     pub fn get_latest(
         &self,
+        field_name: &str,
         well_id: &str,
         campaign: Option<Campaign>,
     ) -> Result<Option<MLInsightsReport>, MLStorageError> {
         let mut latest: Option<MLInsightsReport> = None;
         let mut latest_ts: u64 = 0;
 
-        // Scan all entries (inefficient but simple for now)
-        for result in self.db.iter() {
-            let (key, value) = result?;
-            if let Ok(key_str) = std::str::from_utf8(&key) {
-                if key_str.contains(&format!("/{}/", well_id)) {
-                    if let Ok(report) = serde_json::from_slice::<MLInsightsReport>(&value) {
-                        // Filter by campaign if specified
-                        if let Some(c) = campaign {
-                            if report.campaign != c {
-                                continue;
-                            }
-                        }
-                        if report.timestamp > latest_ts {
-                            latest_ts = report.timestamp;
-                            latest = Some(report);
-                        }
+        let prefix = format!("{}/{}/", field_name, well_id);
+        for result in self.db.scan_prefix(prefix.as_bytes()) {
+            let (_, value) = result?;
+            if let Ok(report) = serde_json::from_slice::<MLInsightsReport>(&value) {
+                // Filter by campaign if specified
+                if let Some(c) = campaign {
+                    if report.campaign != c {
+                        continue;
                     }
+                }
+                if report.timestamp > latest_ts {
+                    latest_ts = report.timestamp;
+                    latest = Some(report);
                 }
             }
         }
@@ -124,31 +124,30 @@ impl MLInsightsStorage {
         Ok(latest)
     }
 
-    /// Get history for a specific well
+    /// Get history for a specific well.
     ///
-    /// Returns reports in reverse chronological order (newest first)
+    /// Returns reports in reverse chronological order (newest first).
+    /// Uses `scan_prefix()` to restrict iteration to `{field_name}/{well_id}/`.
     pub fn get_well_history(
         &self,
+        field_name: &str,
         well_id: &str,
         campaign: Option<Campaign>,
         limit: usize,
     ) -> Result<Vec<MLInsightsReport>, MLStorageError> {
         let mut reports: Vec<MLInsightsReport> = Vec::new();
 
-        for result in self.db.iter() {
-            let (key, value) = result?;
-            if let Ok(key_str) = std::str::from_utf8(&key) {
-                if key_str.contains(&format!("/{}/", well_id)) {
-                    if let Ok(report) = serde_json::from_slice::<MLInsightsReport>(&value) {
-                        // Filter by campaign if specified
-                        if let Some(c) = campaign {
-                            if report.campaign != c {
-                                continue;
-                            }
-                        }
-                        reports.push(report);
+        let prefix = format!("{}/{}/", field_name, well_id);
+        for result in self.db.scan_prefix(prefix.as_bytes()) {
+            let (_, value) = result?;
+            if let Ok(report) = serde_json::from_slice::<MLInsightsReport>(&value) {
+                // Filter by campaign if specified
+                if let Some(c) = campaign {
+                    if report.campaign != c {
+                        continue;
                     }
                 }
+                reports.push(report);
             }
         }
 
@@ -193,11 +192,13 @@ impl MLInsightsStorage {
         Ok(reports)
     }
 
-    /// Find reports near a specific depth
+    /// Find reports near a specific depth.
     ///
-    /// Returns reports where the depth range overlaps with the query depth
+    /// Returns reports where the depth range overlaps with the query depth.
+    /// Uses `scan_prefix()` to restrict iteration to `{field_name}/{well_id}/`.
     pub fn find_by_depth(
         &self,
+        field_name: &str,
         well_id: &str,
         depth: f64,
         tolerance: f64,
@@ -205,17 +206,14 @@ impl MLInsightsStorage {
     ) -> Result<Vec<MLInsightsReport>, MLStorageError> {
         let mut reports: Vec<MLInsightsReport> = Vec::new();
 
-        for result in self.db.iter() {
-            let (key, value) = result?;
-            if let Ok(key_str) = std::str::from_utf8(&key) {
-                if key_str.contains(&format!("/{}/", well_id)) {
-                    if let Ok(report) = serde_json::from_slice::<MLInsightsReport>(&value) {
-                        // Check if depth is within range
-                        let (min_depth, max_depth) = report.depth_range;
-                        if depth >= min_depth - tolerance && depth <= max_depth + tolerance {
-                            reports.push(report);
-                        }
-                    }
+        let prefix = format!("{}/{}/", field_name, well_id);
+        for result in self.db.scan_prefix(prefix.as_bytes()) {
+            let (_, value) = result?;
+            if let Ok(report) = serde_json::from_slice::<MLInsightsReport>(&value) {
+                // Check if depth is within range
+                let (min_depth, max_depth) = report.depth_range;
+                if depth >= min_depth - tolerance && depth <= max_depth + tolerance {
+                    reports.push(report);
                 }
             }
         }
@@ -328,7 +326,7 @@ mod tests {
         let report = make_report("WELL-001", "FIELD-A", Campaign::Production, 1000, 5000.0);
         storage.store_report(&report).unwrap();
 
-        let retrieved = storage.get_latest("WELL-001", None).unwrap();
+        let retrieved = storage.get_latest("FIELD-A", "WELL-001", None).unwrap();
         assert!(retrieved.is_some());
 
         let retrieved = retrieved.unwrap();
@@ -349,14 +347,14 @@ mod tests {
 
         // Get latest production
         let latest_prod = storage
-            .get_latest("WELL-001", Some(Campaign::Production))
+            .get_latest("FIELD-A", "WELL-001", Some(Campaign::Production))
             .unwrap();
         assert!(latest_prod.is_some());
         assert_eq!(latest_prod.unwrap().campaign, Campaign::Production);
 
         // Get latest P&A
         let latest_pa = storage
-            .get_latest("WELL-001", Some(Campaign::PlugAbandonment))
+            .get_latest("FIELD-A", "WELL-001", Some(Campaign::PlugAbandonment))
             .unwrap();
         assert!(latest_pa.is_some());
         assert_eq!(latest_pa.unwrap().campaign, Campaign::PlugAbandonment);
@@ -378,7 +376,7 @@ mod tests {
             storage.store_report(&report).unwrap();
         }
 
-        let history = storage.get_well_history("WELL-001", None, 10).unwrap();
+        let history = storage.get_well_history("FIELD-A", "WELL-001", None, 10).unwrap();
         assert_eq!(history.len(), 5);
 
         // Should be in reverse chronological order
@@ -421,7 +419,7 @@ mod tests {
         storage.store_report(&report3).unwrap();
 
         // Search near 5000ft
-        let near_5000 = storage.find_by_depth("WELL-001", 5000.0, 100.0, 10).unwrap();
+        let near_5000 = storage.find_by_depth("FIELD-A", "WELL-001", 5000.0, 100.0, 10).unwrap();
         assert_eq!(near_5000.len(), 1);
         assert!((near_5000[0].depth_range.0 - 4950.0).abs() < 1.0);
     }

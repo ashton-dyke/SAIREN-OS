@@ -13,7 +13,10 @@ use std::collections::BinaryHeap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::{mpsc, oneshot};
+use tokio::time::Duration;
 use tracing::{debug, info, trace, warn};
+
+use crate::config::defaults::LLM_INFERENCE_TIMEOUT_SECS;
 
 use super::mistral_rs::MistralRsBackend;
 
@@ -364,10 +367,28 @@ impl LlmScheduler {
             "Processing request"
         );
 
-        // Run inference with explicit cleanup
-        let result = self
-            .generate_with_cleanup(model, &request.prompt, request.max_tokens, request.temperature)
-            .await;
+        // Run inference with explicit cleanup, bounded by timeout
+        let timeout_duration = Duration::from_secs(LLM_INFERENCE_TIMEOUT_SECS);
+        let result = match tokio::time::timeout(
+            timeout_duration,
+            self.generate_with_cleanup(model, &request.prompt, request.max_tokens, request.temperature),
+        )
+        .await
+        {
+            Ok(inner) => inner,
+            Err(_elapsed) => {
+                warn!(
+                    request_id = self.request_count,
+                    model = %request.model_id,
+                    timeout_secs = LLM_INFERENCE_TIMEOUT_SECS,
+                    "LLM inference timed out"
+                );
+                Err(anyhow::anyhow!(
+                    "inference timed out after {}s",
+                    LLM_INFERENCE_TIMEOUT_SECS
+                ))
+            }
+        };
 
         let inference_time = start.elapsed();
 

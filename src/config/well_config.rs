@@ -589,14 +589,14 @@ pub struct WellControlThresholds {
     pub h2s_critical_ppm: f64,
 }
 
-fn default_flow_imbalance_warning() -> f64 { 10.0 }
-fn default_flow_imbalance_critical() -> f64 { 20.0 }
+fn default_flow_imbalance_warning() -> f64 { 5.0 }
+fn default_flow_imbalance_critical() -> f64 { 10.0 }
 fn default_pit_gain_warning() -> f64 { 5.0 }
 fn default_pit_gain_critical() -> f64 { 10.0 }
 fn default_pit_rate_warning() -> f64 { 5.0 }
 fn default_pit_rate_critical() -> f64 { 15.0 }
 fn default_gas_units_warning() -> f64 { 100.0 }
-fn default_gas_units_critical() -> f64 { 500.0 }
+fn default_gas_units_critical() -> f64 { 250.0 }
 fn default_h2s_warning() -> f64 { 10.0 }
 fn default_h2s_critical() -> f64 { 20.0 }
 
@@ -1348,7 +1348,7 @@ mod tests {
     #[test]
     fn test_empty_toml_produces_defaults() {
         let config: WellConfig = toml::from_str("").expect("empty TOML should parse");
-        assert_eq!(config.thresholds.well_control.flow_imbalance_warning_gpm, 10.0);
+        assert_eq!(config.thresholds.well_control.flow_imbalance_warning_gpm, 5.0);
         assert_eq!(config.thresholds.mse.efficiency_warning_percent, 70.0);
         assert_eq!(config.thresholds.hydraulics.normal_mud_weight_ppg, 8.6);
         assert_eq!(config.baseline_learning.warning_sigma, 3.0);

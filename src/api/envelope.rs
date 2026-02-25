@@ -87,16 +87,13 @@ impl ApiErrorResponse {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::Body;
-    use http_body_util::BodyExt;
 
     #[tokio::test]
     async fn test_ok_response_shape() {
         let resp = ApiResponse::ok(serde_json::json!({"hello": "world"}));
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let body = resp.into_body();
-        let bytes = Body::new(body).collect().await.unwrap().to_bytes();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert!(v.get("data").is_some());
         assert!(v.get("meta").is_some());
@@ -108,8 +105,7 @@ mod tests {
         let resp = ApiErrorResponse::not_found("gone");
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let body = resp.into_body();
-        let bytes = Body::new(body).collect().await.unwrap().to_bytes();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["error"]["code"], "NOT_FOUND");
         assert_eq!(v["error"]["message"], "gone");

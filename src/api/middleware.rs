@@ -34,10 +34,10 @@ pub async fn add_v1_deprecation_headers(
 mod tests {
     use super::*;
     use axum::body::Body;
+    use axum::http::Request;
     use axum::middleware;
     use axum::routing::get;
     use axum::Router;
-    use http::Request;
     use tower::ServiceExt;
 
     #[tokio::test]

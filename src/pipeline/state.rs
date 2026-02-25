@@ -6,6 +6,9 @@
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
 
+/// Maximum acknowledgment records kept in memory.
+pub const MAX_ACKNOWLEDGMENTS: usize = 1000;
+
 // ============================================================================
 // Application State
 // ============================================================================
@@ -86,9 +89,9 @@ pub struct AppState {
 
     // === Advisory Acknowledgment & Shift Tracking ===
 
-    /// Acknowledged advisory audit trail
+    /// Acknowledged advisory audit trail (bounded ring buffer).
     #[serde(skip)]
-    pub acknowledgments: Vec<crate::api::handlers::AcknowledgmentRecord>,
+    pub acknowledgments: std::collections::VecDeque<crate::api::handlers::AcknowledgmentRecord>,
 
     /// Total packets processed (for shift summary)
     pub packets_processed: u64,
@@ -147,7 +150,7 @@ impl Default for AppState {
             bit_depth_drilled: 0.0,
             latest_ml_report: None,
             wits_history: std::collections::VecDeque::with_capacity(7200),
-            acknowledgments: Vec::new(),
+            acknowledgments: std::collections::VecDeque::with_capacity(MAX_ACKNOWLEDGMENTS),
             packets_processed: 0,
             tickets_created: 0,
             tickets_verified: 0,

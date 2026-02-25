@@ -466,7 +466,7 @@ pub async fn reports_hourly(
     State(state): State<DashboardState>,
     Query(q): Query<LimitQuery>,
 ) -> Response {
-    let limit = q.limit.unwrap_or(24);
+    let limit = q.limit.unwrap_or(24).min(1000);
     if let Some(storage) = &state.strategic_storage {
         match storage.get_hourly(limit) {
             Ok(reports) => {
@@ -486,7 +486,7 @@ pub async fn reports_daily(
     State(state): State<DashboardState>,
     Query(q): Query<LimitQuery>,
 ) -> Response {
-    let limit = q.limit.unwrap_or(7);
+    let limit = q.limit.unwrap_or(7).min(1000);
     if let Some(storage) = &state.strategic_storage {
         match storage.get_daily(limit) {
             Ok(reports) => {
@@ -505,7 +505,7 @@ pub async fn reports_daily(
 pub async fn reports_critical(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let limit = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(50);
+    let limit: usize = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(50).min(1000);
     let reports = crate::storage::history::get_critical_reports(limit);
 
     let entries: Vec<super::handlers::CriticalReportEntry> = reports
@@ -576,7 +576,7 @@ pub async fn ml_latest(State(state): State<DashboardState>) -> Response {
 
     if let Some(storage) = &state.ml_storage {
         let history: Vec<super::handlers::MLReportSummary> = storage
-            .get_well_history(&app.well_id, None, 10)
+            .get_well_history(&app.field_name, &app.well_id, None, 10)
             .ok()
             .unwrap_or_default()
             .iter()
@@ -619,7 +619,7 @@ pub async fn ml_optimal(
         return ApiErrorResponse::service_unavailable("ML storage not available");
     };
 
-    match storage.find_by_depth(&app.well_id, depth, 500.0, 5) {
+    match storage.find_by_depth(&app.field_name, &app.well_id, depth, 500.0, 5) {
         Ok(reports) if !reports.is_empty() => {
             for report in &reports {
                 if let crate::types::AnalysisResult::Success(insights) = &report.result {
@@ -764,11 +764,10 @@ pub async fn acknowledge_advisory(
     }
 
     let mut app = state.app_state.write().await;
-    app.acknowledgments.push(record.clone());
-    if app.acknowledgments.len() > 1000 {
-        let drain_count = app.acknowledgments.len() - 1000;
-        app.acknowledgments.drain(..drain_count);
+    if app.acknowledgments.len() >= crate::pipeline::MAX_ACKNOWLEDGMENTS {
+        app.acknowledgments.pop_front();
     }
+    app.acknowledgments.push_back(record.clone());
 
     ApiResponse::ok(record)
 }
@@ -837,11 +836,11 @@ pub async fn debug_ml_history(
     State(state): State<DashboardState>,
     Query(q): Query<LimitQuery>,
 ) -> Response {
-    let limit = q.limit.unwrap_or(24);
+    let limit = q.limit.unwrap_or(24).min(1000);
     let app = state.app_state.read().await;
     if let Some(storage) = &state.ml_storage {
         let history: Vec<super::handlers::MLReportSummary> = storage
-            .get_well_history(&app.well_id, None, limit)
+            .get_well_history(&app.field_name, &app.well_id, None, limit)
             .ok()
             .unwrap_or_default()
             .iter()

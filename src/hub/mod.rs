@@ -44,6 +44,8 @@ pub struct HubState {
     pub llm_backend: Option<Arc<crate::llm::MistralRsBackend>>,
     /// In-memory store for pending pairing requests (6-digit code -> request)
     pub pairing_requests: api::pairing::PairingStore,
+    /// Per-IP failed pairing lookup tracker (brute-force mitigation)
+    pub pairing_attempts: api::pairing::PairingAttemptStore,
 }
 
 #[cfg(feature = "fleet-hub")]
@@ -57,8 +59,12 @@ impl HubState {
             #[cfg(feature = "llm")]
             llm_backend: None,
             pairing_requests: api::pairing::new_pairing_store(),
+            pairing_attempts: api::pairing::new_pairing_attempt_store(),
         });
-        api::pairing::spawn_pairing_cleanup(Arc::clone(&state.pairing_requests));
+        api::pairing::spawn_pairing_cleanup(
+            Arc::clone(&state.pairing_requests),
+            Arc::clone(&state.pairing_attempts),
+        );
         state
     }
 
@@ -75,8 +81,12 @@ impl HubState {
             library_version: AtomicU64::new(0),
             llm_backend: Some(backend),
             pairing_requests: api::pairing::new_pairing_store(),
+            pairing_attempts: api::pairing::new_pairing_attempt_store(),
         });
-        api::pairing::spawn_pairing_cleanup(Arc::clone(&state.pairing_requests));
+        api::pairing::spawn_pairing_cleanup(
+            Arc::clone(&state.pairing_requests),
+            Arc::clone(&state.pairing_attempts),
+        );
         state
     }
 }

@@ -231,6 +231,11 @@ pub struct AnomalyCheckResult {
 // Dynamic Thresholds
 // ============================================================================
 
+/// Build a "equipment:sensor" composite ID string.
+fn make_composite_id(equipment_id: &str, sensor_id: &str) -> String {
+    format!("{}:{}", equipment_id, sensor_id)
+}
+
 /// Dynamic thresholds learned from baseline data for a single metric
 ///
 /// Each metric (e.g., "RIG:mse", "RIG:flow_balance", "RIG:torque")
@@ -242,6 +247,10 @@ pub struct DynamicThresholds {
 
     /// Sensor/metric identifier (e.g., "mse", "flow_balance", "torque")
     pub sensor_id: String,
+
+    /// Cached "equipment:sensor" composite ID (avoids repeated format! allocations)
+    #[serde(default)]
+    pub composite_id: String,
 
     /// Mean value during baseline period
     pub baseline_mean: f64,
@@ -275,6 +284,7 @@ impl DynamicThresholds {
     /// Create new thresholds (unlocked, awaiting baseline learning)
     pub fn new(equipment_id: &str, sensor_id: &str) -> Self {
         Self {
+            composite_id: make_composite_id(equipment_id, sensor_id),
             equipment_id: equipment_id.to_string(),
             sensor_id: sensor_id.to_string(),
             baseline_mean: 0.0,
@@ -289,9 +299,9 @@ impl DynamicThresholds {
         }
     }
 
-    /// Get composite ID (equipment:sensor)
-    pub fn composite_id(&self) -> String {
-        format!("{}:{}", self.equipment_id, self.sensor_id)
+    /// Get cached composite ID (equipment:sensor) — zero allocation.
+    pub fn composite_id(&self) -> &str {
+        &self.composite_id
     }
 
     /// Calculate warning threshold
@@ -331,7 +341,33 @@ impl DynamicThresholds {
         };
 
         AnomalyCheckResult {
-            metric_id: self.composite_id(),
+            metric_id: self.composite_id.clone(),
+            current_value: value,
+            z_score: z,
+            level,
+            baseline_mean: self.baseline_mean,
+            baseline_std: self.effective_std(),
+            warning_threshold: self.warning_threshold(),
+            critical_threshold: self.critical_threshold(),
+        }
+    }
+
+    /// Check a value against thresholds in both directions (for signed metrics
+    /// like flow_balance or SPP delta where deviations in either direction are
+    /// anomalous).
+    pub fn check_bidirectional(&self, value: f64) -> AnomalyCheckResult {
+        let z = self.z_score(value);
+        let abs_z = z.abs();
+        let level = if abs_z >= self.critical_sigma {
+            AnomalyLevel::Critical
+        } else if abs_z >= self.warning_sigma {
+            AnomalyLevel::Warning
+        } else {
+            AnomalyLevel::Normal
+        };
+
+        AnomalyCheckResult {
+            metric_id: self.composite_id.clone(),
             current_value: value,
             z_score: z,
             level,
@@ -368,6 +404,10 @@ pub struct BaselineAccumulator {
     /// Sensor/metric identifier
     pub sensor_id: String,
 
+    /// Cached "equipment:sensor" composite ID (avoids repeated format! allocations)
+    #[serde(default)]
+    pub composite_id: String,
+
     /// Number of samples accumulated
     pub count: usize,
 
@@ -394,6 +434,7 @@ impl BaselineAccumulator {
     /// Create new accumulator for a metric
     pub fn new(equipment_id: &str, sensor_id: &str, started_at: u64) -> Self {
         Self {
+            composite_id: make_composite_id(equipment_id, sensor_id),
             equipment_id: equipment_id.to_string(),
             sensor_id: sensor_id.to_string(),
             count: 0,
@@ -406,9 +447,9 @@ impl BaselineAccumulator {
         }
     }
 
-    /// Get composite ID
-    pub fn composite_id(&self) -> String {
-        format!("{}:{}", self.equipment_id, self.sensor_id)
+    /// Get cached composite ID — zero allocation.
+    pub fn composite_id(&self) -> &str {
+        &self.composite_id
     }
 
     /// Add a sample using Welford's online algorithm
@@ -490,12 +531,10 @@ impl BaselineAccumulator {
     ///
     /// Returns error if contaminated or insufficient samples.
     pub fn finalize(self, timestamp: u64) -> Result<DynamicThresholds, BaselineError> {
-        let composite_id = self.composite_id();
-
         // Check minimum samples
         if !self.has_enough_samples() {
             return Err(BaselineError::InsufficientSamples(
-                composite_id,
+                self.composite_id.clone(),
                 self.count,
                 cfg_min_samples(),
             ));
@@ -505,7 +544,7 @@ impl BaselineAccumulator {
         let outlier_pct = self.outlier_percentage() * 100.0;
         if self.is_contaminated() {
             return Err(BaselineError::Contaminated(
-                composite_id,
+                self.composite_id.clone(),
                 outlier_pct,
                 cfg_max_outlier_pct() * 100.0,
             ));
@@ -515,6 +554,7 @@ impl BaselineAccumulator {
         let std_dev = self.std_dev();
 
         Ok(DynamicThresholds {
+            composite_id: self.composite_id,
             equipment_id: self.equipment_id,
             sensor_id: self.sensor_id,
             baseline_mean: self.mean,
@@ -531,17 +571,17 @@ impl BaselineAccumulator {
 
     /// Force finalize even if contaminated (for manual override)
     pub fn force_finalize(self, timestamp: u64) -> DynamicThresholds {
-        let composite_id = self.composite_id();
         let outlier_pct = self.outlier_percentage() * 100.0;
         let std_dev = self.std_dev();
 
         warn!(
-            metric = %composite_id,
+            metric = %self.composite_id,
             outlier_pct = outlier_pct,
             "Force-finalizing potentially contaminated baseline"
         );
 
         DynamicThresholds {
+            composite_id: self.composite_id,
             equipment_id: self.equipment_id,
             sensor_id: self.sensor_id,
             baseline_mean: self.mean,
@@ -988,8 +1028,20 @@ impl ThresholdManager {
         let locked = state.thresholds.len();
         let has_overrides = state.overrides.is_some();
         info!(path = %path.display(), locked, has_overrides, "Baseline state loaded");
+
+        // Reconstruct cached composite_id for entries deserialized from old state
+        // files that predate the composite_id field.
+        let thresholds: HashMap<String, DynamicThresholds> = state.thresholds.into_iter()
+            .map(|(k, mut t)| {
+                if t.composite_id.is_empty() {
+                    t.composite_id = make_composite_id(&t.equipment_id, &t.sensor_id);
+                }
+                (k, t)
+            })
+            .collect();
+
         Some(Self {
-            thresholds: state.thresholds,
+            thresholds,
             accumulators: HashMap::new(),
             schema_version: SCHEMA_VERSION,
             overrides: state.overrides,
@@ -1191,6 +1243,7 @@ mod tests {
         let threshold = DynamicThresholds {
             equipment_id: "RIG".to_string(),
             sensor_id: "mse".to_string(),
+            composite_id: "RIG:mse".to_string(),
             baseline_mean: 35000.0,
             baseline_std: 5000.0,
             warning_sigma: 3.0,
@@ -1261,6 +1314,7 @@ mod tests {
         let threshold = DynamicThresholds {
             equipment_id: "RIG".to_string(),
             sensor_id: "test".to_string(),
+            composite_id: "RIG:test".to_string(),
             baseline_mean: 0.0,
             baseline_std: 0.0, // Zero std!
             warning_sigma: 3.0,

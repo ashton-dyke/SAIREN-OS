@@ -15,12 +15,14 @@ mod v2_routes;
 
 pub use handlers::DashboardState;
 
-use axum::http::{header, StatusCode, Uri};
+use axum::http::{header, Method, StatusCode, Uri};
 use axum::middleware as axum_mw;
 use axum::response::{IntoResponse, Response};
 use axum::Router;
 use rust_embed::Embed;
-use tower_http::{compression::CompressionLayer, cors::CorsLayer, trace::TraceLayer};
+use tower_http::compression::CompressionLayer;
+use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
 
 /// Dashboard assets compiled from `dashboard/dist/` via `build.rs`.
 #[derive(Embed)]
@@ -56,9 +58,35 @@ async fn serve_asset(uri: Uri) -> Response {
     (StatusCode::OK, "SAIREN-OS is running. Dashboard not built (npm not available during compile).").into_response()
 }
 
+/// Build a CORS layer that is restrictive by default (same-origin only).
+///
+/// Set `SAIREN_CORS_ORIGINS` to a comma-separated list of allowed origins
+/// for development (e.g., `http://localhost:5173` for the Vite dev server).
+fn build_cors_layer() -> CorsLayer {
+    match std::env::var("SAIREN_CORS_ORIGINS") {
+        Ok(origins) => {
+            let allowed: Vec<_> = origins
+                .split(',')
+                .filter_map(|o| o.trim().parse().ok())
+                .collect();
+            tracing::info!(origins = %origins, "CORS: allowing configured origins");
+            CorsLayer::new()
+                .allow_origin(allowed)
+                .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+        }
+        Err(_) => {
+            // No cross-origin allowed — dashboard is same-origin
+            CorsLayer::new()
+                .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+        }
+    }
+}
+
 /// Create the complete application router with API and SPA serving.
 pub fn create_app(state: DashboardState) -> Router {
-    let cors = CorsLayer::permissive();
+    let cors = build_cors_layer();
 
     Router::new()
         // v2 API (primary)

@@ -25,9 +25,7 @@ use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 #[cfg(feature = "llm")]
 use std::sync::Arc;
-use tracing::info;
-#[cfg(feature = "llm")]
-use tracing::warn;
+use tracing::{info, warn};
 
 #[derive(Parser, Debug)]
 #[command(name = "fleet-hub", about = "SAIREN Fleet Hub — fleet-wide learning server")]
@@ -147,6 +145,12 @@ async fn main() -> anyhow::Result<()> {
     // ── HTTP Server ───────────────────────────────────────────────────────────
     let app = hub::api::build_router(state);
     let listener = tokio::net::TcpListener::bind(&config.bind_address).await?;
+    warn!(
+        "Fleet Hub is serving over plain HTTP. \
+         Pairing endpoints transmit the fleet passphrase in cleartext. \
+         Deploy behind a TLS-terminating reverse proxy (nginx, caddy, traefik) \
+         in production."
+    );
     info!(address = %config.bind_address, "Fleet Hub listening");
 
     axum::serve(

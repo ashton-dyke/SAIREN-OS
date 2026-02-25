@@ -81,11 +81,17 @@ fn apply_regime_weights(votes: &mut [SpecialistVote], regime_id: u8) -> &'static
         vote.weight *= mult;
     }
 
-    // Re-normalise so weights still sum to 1.0
+    // Re-normalise so weights still sum to 1.0.
+    // If regime scaling zeroed all weights, fall back to equal weights.
     let total: f64 = votes.iter().map(|v| v.weight).sum();
     if total > 1e-10 {
         for vote in votes.iter_mut() {
             vote.weight /= total;
+        }
+    } else if !votes.is_empty() {
+        let equal = 1.0 / votes.len() as f64;
+        for vote in votes.iter_mut() {
+            vote.weight = equal;
         }
     }
 
@@ -140,13 +146,12 @@ impl Orchestrator {
         // Apply regime-aware weight scaling (Phase 6)
         let regime_label = apply_regime_weights(&mut votes, regime_id);
 
-        // Check for WellControl CRITICAL override (safety critical)
+        // Check for WellControl CRITICAL override (safety critical).
+        // Only WellControl CRITICAL overrides voting — other specialists'
+        // Critical votes are folded into the weighted average normally.
         let well_control_critical = votes.iter().any(|v| {
             v.specialist == "WellControl" && v.vote == TicketSeverity::Critical
         });
-
-        // Check for any CRITICAL
-        let any_critical = votes.iter().any(|v| v.vote == TicketSeverity::Critical);
 
         // Calculate weighted average
         let weighted_sum: f64 = votes
@@ -154,8 +159,8 @@ impl Orchestrator {
             .map(|v| (v.vote as u8) as f64 * v.weight)
             .sum();
 
-        // Final severity: WellControl CRITICAL is highest priority override
-        let final_severity = if well_control_critical || any_critical {
+        // Final severity: only WellControl CRITICAL overrides the weighted vote
+        let final_severity = if well_control_critical {
             FinalSeverity::Critical
         } else {
             FinalSeverity::from(weighted_sum)

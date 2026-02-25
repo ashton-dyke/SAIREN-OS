@@ -27,6 +27,8 @@ pub use drilling_models::{
 };
 
 
+use tracing::warn;
+
 use crate::baseline::BaselineOverrides;
 use crate::types::{
     AnomalyCategory, DrillingMetrics, DrillingPhysicsReport, EnhancedPhysicsReport, HistoryEntry,
@@ -122,8 +124,13 @@ pub fn tactical_update(
         0.0
     };
 
-    // Calculate ECD margin to fracture
+    // Calculate ECD margin to fracture.
+    // Warn once-ish if fracture gradient is unavailable — the 1.5 ppg fallback
+    // silences alarms and could mask a real well control issue.
     let ecd_margin = packet.ecd_margin();
+    if packet.fracture_gradient <= 0.0 && packet.ecd > 0.0 {
+        warn!("Fracture gradient unavailable (0.0) — ECD margin defaulting to 1.5 ppg; alarms suppressed");
+    }
 
     // Calculate deltas from previous packet
     let (torque_delta_percent, spp_delta) = if let Some(prev) = prev_packet {

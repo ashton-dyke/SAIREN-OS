@@ -20,6 +20,7 @@ pub mod sensors;
 // The full storage module (ProcessLock, persistence, etc.) is only
 // available in the binary crate which declares its own `mod storage;`.
 pub mod storage {
+    pub mod acks;
     pub mod history;
     pub mod strategic;
     pub use strategic::StrategicStorage;
@@ -38,6 +39,9 @@ pub mod knowledge_base;
 pub mod volve;
 #[cfg(feature = "fleet-hub")]
 pub mod hub;
+pub mod acquisition;
+pub mod pipeline;
+pub mod api;
 
 // Re-export well configuration
 pub use config::WellConfig;

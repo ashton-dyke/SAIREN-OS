@@ -81,3 +81,29 @@ pub const ECD_REFERENCE_PPG: f64 = 14.0;
 ///
 /// `delay_ms = SIMULATION_BASE_DELAY_MS / speed`
 pub const SIMULATION_BASE_DELAY_MS: u64 = 60_000;
+
+// ============================================================================
+// LLM Scheduler
+// ============================================================================
+
+/// Maximum time to wait for a single LLM inference before aborting (seconds).
+pub const LLM_INFERENCE_TIMEOUT_SECS: u64 = 120;
+
+// ============================================================================
+// Fleet Sync Backoff
+// ============================================================================
+
+/// Maximum backoff multiplier exponent for fleet sync retries.
+///
+/// `2^6 = 64× base interval`, capped at 300 s (~5 min).
+pub const FLEET_SYNC_MAX_BACKOFF_EXPONENT: u32 = 6;
+
+// ============================================================================
+// Pairing Security
+// ============================================================================
+
+/// Maximum failed pairing status lookups per IP before returning 429.
+pub const MAX_PAIRING_STATUS_FAILURES: u32 = 5;
+
+/// Rolling window for pairing status failure tracking (seconds).
+pub const PAIRING_RATE_LIMIT_WINDOW_SECS: u64 = 600;

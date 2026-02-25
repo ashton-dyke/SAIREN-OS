@@ -667,7 +667,14 @@ impl TacticalAgent {
         if let Some(ref manager) = self.threshold_manager {
             let mut mgr = match manager.write() {
                 Ok(m) => m,
-                Err(_) => return,
+                Err(e) => {
+                    tracing::error!(
+                        equipment_id = %self.equipment_id,
+                        error = %e,
+                        "Baseline RwLock poisoned — learning halted"
+                    );
+                    return;
+                }
             };
             let timestamp = packet.timestamp;
 
@@ -692,7 +699,14 @@ impl TacticalAgent {
         if let Some(ref manager) = self.threshold_manager {
             let mut mgr = match manager.write() {
                 Ok(m) => m,
-                Err(_) => return,
+                Err(e) => {
+                    tracing::error!(
+                        equipment_id = %self.equipment_id,
+                        error = %e,
+                        "Baseline RwLock poisoned — auto-lock halted"
+                    );
+                    return;
+                }
             };
 
             let status = mgr.get_status(&self.equipment_id, wits_metrics::MSE);

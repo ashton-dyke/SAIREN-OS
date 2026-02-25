@@ -12,12 +12,39 @@ pub mod dashboard;
 pub mod health;
 
 use crate::hub::HubState;
+use axum::http::{header, Method};
 use axum::Router;
 use std::sync::Arc;
 use tower_governor::{GovernorLayer, governor::GovernorConfigBuilder};
 use tower_http::compression::CompressionLayer;
 use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
+
+/// Build a CORS layer that is restrictive by default (same-origin only).
+///
+/// Set `SAIREN_CORS_ORIGINS` to a comma-separated list of allowed origins
+/// for development (e.g., `http://localhost:5173` for the Vite dev server).
+fn build_cors_layer() -> CorsLayer {
+    match std::env::var("SAIREN_CORS_ORIGINS") {
+        Ok(origins) => {
+            let allowed: Vec<_> = origins
+                .split(',')
+                .filter_map(|o| o.trim().parse().ok())
+                .collect();
+            tracing::info!(origins = %origins, "CORS: allowing configured origins");
+            CorsLayer::new()
+                .allow_origin(allowed)
+                .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+        }
+        Err(_) => {
+            // No cross-origin allowed — dashboard is same-origin
+            CorsLayer::new()
+                .allow_methods([Method::GET, Method::POST, Method::PATCH, Method::DELETE])
+                .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+        }
+    }
+}
 
 /// Build the complete Fleet Hub API router
 ///
@@ -80,6 +107,6 @@ pub fn build_router(state: Arc<HubState>) -> Router {
         .layer(GovernorLayer { config: governor_config })
         .layer(CompressionLayer::new())
         .layer(TraceLayer::new_for_http())
-        .layer(CorsLayer::permissive())
+        .layer(build_cors_layer())
         .with_state(state)
 }

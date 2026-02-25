@@ -17,6 +17,16 @@ Thumbs.db
 
 # Environment files with secrets
 .env
+.env.local
+.env.*.local
+
+# TLS credentials
+*.pem
+*.key
+
+# Secrets / credentials
+credentials.json
+secrets.json
 
 # Log files
 *.log
