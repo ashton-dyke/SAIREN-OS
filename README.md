@@ -31,17 +31,17 @@ Real-time drilling advisory system using WITS Level 0 data and an 11-phase multi
 # 1. Build the system (LLM enabled by default; use 'cuda' for GPU acceleration)
 cargo build --release
 
-# 2. Terminal 1: Start the WITS simulator
-python3 wits_simulator.py
+# 2. Run with the built-in simulator (pipes simulated WITS data via stdin)
+cargo run --bin simulation -- --hours 1 --speed 100 | ./target/release/sairen-os --stdin
 
-# 3. Terminal 2: Run SAIREN-OS
-./target/release/sairen-os --wits-tcp localhost:5000
-
-# 4. View the dashboard
+# 3. View the dashboard
 open http://localhost:8080
+```
 
-# 5. Inject faults in simulator (press in Terminal 1):
-#    K = Kick, S = Stick-slip, P = Pack-off, M = Milling
+Or connect to a real WITS source:
+
+```bash
+./target/release/sairen-os --wits-tcp <wits-host>:5000
 ```
 
 ---
@@ -236,34 +236,31 @@ curl -X POST http://localhost:8080/api/v1/config/validate \
 
 ## Running the System
 
-### With WITS Simulator (Recommended)
+### With Built-In Simulator (Recommended)
+
+The Rust simulator (`src/bin/simulation.rs`) generates realistic WITS data and pipes it via stdin:
 
 ```bash
-# Terminal 1: Start simulator
-python3 wits_simulator.py
-
-# Terminal 2: Run SAIREN-OS
-./target/release/sairen-os --wits-tcp localhost:5000
+# 1-hour simulation at 100x speed (runs through baseline, normal, kick, pack-off, recovery phases)
+cargo run --bin simulation -- --hours 1 --speed 100 | ./target/release/sairen-os --stdin
 ```
+
+Simulator options:
+
+| Argument | Default | Description |
+|----------|---------|-------------|
+| `-H, --hours <N>` | `1` | Simulation duration (1-24 hours) |
+| `-s, --speed <N>` | `100` | Time compression (1 = real-time, 100 = 100x faster) |
+| `-f, --format <fmt>` | `json` | Output format: `json` or `csv` |
+| `--scenario <name>` | `full` | Drilling scenario to simulate |
+| `--seed <N>` | *(random)* | Random seed for reproducibility |
+| `--sample-rate <N>` | `1` | Output sample rate in Hz |
+| `-q, --quiet` | `false` | Suppress mission log (only output sensor data) |
 
 ### With P&A Campaign
 
 ```bash
-# Terminal 1: Simulator in P&A mode
-python3 wits_simulator.py --campaign pa
-
-# Terminal 2: SAIREN-OS in P&A mode
-CAMPAIGN=pa ./target/release/sairen-os --wits-tcp localhost:5000
-```
-
-### Testing P&A Operations
-
-```bash
-# Simulator with milling mode (high torque)
-python3 wits_simulator.py --campaign pa --operation milling
-
-# Simulator with cement drill-out mode (high WOB)
-python3 wits_simulator.py --campaign pa --operation cement-drillout
+CAMPAIGN=pa cargo run --bin simulation -- --hours 1 --speed 100 | ./target/release/sairen-os --stdin
 ```
 
 ### Volve Field Data Replay
@@ -289,66 +286,33 @@ cargo run --bin volve-replay -- --file data/volve/F-12_witsml.csv
 
 ## WITS Simulator
 
-The included `wits_simulator.py` generates realistic WITS Level 0 data with interactive fault injection.
+The built-in Rust simulator (`src/bin/simulation.rs`) generates realistic WITS Level 0 data that pipes into SAIREN-OS via stdin.
 
 ### Basic Usage
 
 ```bash
-# Default (port 5000, production mode)
-python3 wits_simulator.py
+# Full scenario: baseline learning → normal drilling → kick → pack-off → recovery
+cargo run --bin simulation -- --hours 1 --speed 100 | ./target/release/sairen-os --stdin
 
-# Custom port
-python3 wits_simulator.py --port 9100
+# Real-time speed (1x), 2-hour simulation
+cargo run --bin simulation -- --hours 2 --speed 1 | ./target/release/sairen-os --stdin
 
-# P&A campaign mode
-python3 wits_simulator.py --campaign pa
-
-# Faster simulation (10x speed)
-python3 wits_simulator.py --interval 0.1
+# Reproducible run with fixed seed
+cargo run --bin simulation -- --hours 1 --speed 100 --seed 42 | ./target/release/sairen-os --stdin
 ```
 
-### P&A Operation Modes
+### Simulation Phases
 
-```bash
-# Milling simulation (high torque, low ROP)
-python3 wits_simulator.py --campaign pa --operation milling
+The simulator automatically progresses through realistic drilling scenarios:
 
-# Cement drill-out simulation (high WOB)
-python3 wits_simulator.py --campaign pa --operation cement-drillout
-```
-
-| Mode | Simulated Parameters |
-|------|---------------------|
-| **Normal** | Standard drilling physics |
-| **Milling** | Torque: 18-35 kN.m, ROP: 0.3-1.5 m/hr |
-| **Cement Drill-Out** | WOB: 70-140 kN, Torque: 15-25 kN.m, ROP: 2-5 m/hr |
-
-### Interactive Keyboard Controls
-
-| Key | Action |
-|-----|--------|
-| `D` | Start/resume drilling |
-| `T` | Trip out |
-| `I` | Trip in (run in hole) |
-| `K` | Inject kick (well control event) |
-| `S` | Inject stick-slip vibration |
-| `P` | Inject pack-off |
-| `W` | Inject washout |
-| `H` | Inject hard stringer |
-| `L` | Inject lost circulation |
-| `M` | Toggle milling mode (P&A) |
-| `O` | Toggle cement drill-out mode (P&A) |
-| `C` | Clear all faults |
-| `Q` | Quit |
-
-### P&A Simulation States
-
-When running in P&A mode, the simulator cycles through:
-1. **Circulating** - Initial circulation
-2. **Displacing** - Displacing wellbore fluids
-3. **Cementing** - Pumping cement
-4. **Setting Plug** - Waiting for cement to set
-5. **Pressure Testing** - Testing barrier integrity
+| Phase | Progress | Scenario |
+|-------|----------|----------|
+| **Baseline Learning** | 0-40% | System warmup, stable drilling |
+| **Normal Drilling** | 40-55% | Optimal parameters, efficient ROP |
+| **MSE Inefficiency** | 55-70% | Bit wear / formation change |
+| **Kick Event** | 70-80% | Well control event simulation |
+| **Pack-Off** | 80-90% | Mechanical issue (reaming state) |
+| **Recovery** | 90-100% | Return to normal drilling |
 
 ---
 
@@ -359,7 +323,7 @@ SAIREN-OS includes a React SPA dashboard served at `http://localhost:8080`. It u
 **Development mode** (for dashboard contributors):
 ```bash
 cd dashboard && npm run dev   # Vite dev server on :5173
-SAIREN_CORS_ORIGINS=http://localhost:5173 ./target/release/sairen-os --wits-tcp localhost:5000
+SAIREN_CORS_ORIGINS=http://localhost:5173 ./target/release/sairen-os --stdin
 ```
 
 If the dashboard was not built (e.g., CI without Node.js), a fallback message is shown at the root URL.
