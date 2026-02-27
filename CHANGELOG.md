@@ -4,6 +4,52 @@ All notable changes to SAIREN-OS are documented here.
 
 ---
 
+## v3.2 - Ticket Quality: Multi-Gate Pipeline & Founder Debounce
+
+Overhaul of the tactical ticket gate from a single cooldown timer to a 6-rule sequential gate system. Volve F-5 confirmation rate improved from ~58% (v3.1) to **96%** with 272 tickets (4 rejected, 6 uncertain). WellControl tickets unchanged at 258 — safety is never gated.
+
+**Fix 5: Per-Category Cooldown** (`src/agents/tactical.rs`, `src/config/well_config.rs`):
+- Replaced single global `last_ticket_time` with per-category cooldowns tracked by packet count, depth, and time
+- ALL three conditions must be met to suppress (AND logic) — prevents both rapid-fire duplicates and depth-stalled repeats
+- Configurable: `packet_cooldown` (50), `depth_cooldown_ft` (50.0), `critical_packet_cooldown` (20), `critical_depth_cooldown_ft` (10.0)
+
+**Fix 6: ACI Corroboration Gate — RULE 4** (`src/agents/tactical.rs`, `src/aci.rs`):
+- New `aci_corroborates()` method: trigger metric must be outside its ACI conformal interval
+- Category-specific ACI metric mapping (Hydraulics→SPP/ECD, Mechanical→Torque/WOB, Efficiency→MSE, Formation→D-exp/DXC)
+- WellControl always bypasses the gate (safety-critical)
+- ACI minimum half-widths prevent zero-width intervals on constant metrics (e.g., RPM held at 40)
+- Removed CfC formation transition ACI bypass (was permanently disabling the gate on Volve F-5)
+
+**Fix 7: CfC Anomaly Score Gate — RULE 5** (`src/agents/tactical.rs`, `src/cfc/training.rs`):
+- New `cfc_corroborates()` method: anomaly score must be >= 0.3 after calibration
+- During warm-up (< 500 packets): suppresses all non-safety tickets until CfC can distinguish normal from abnormal
+- WellControl always allowed through
+- CfC two-pass backprop fix: recurrent connections (src > dst) now receive gradient correctly via a forward-order residual pass
+
+**Fix 8: Founder Debounce — RULE 6** (`src/agents/tactical.rs`, `src/config/well_config.rs`):
+- Require N consecutive founder-positive packets before creating a ticket (default 3)
+- Filters transient single-packet WOB spikes that the strategic agent would reject anyway
+- Counter updates every packet in `process()`; gate applies at ticket creation in `decide_advisory_ticket()`
+- Configurable: `thresholds.founder.debounce_packets`
+
+**Supporting fixes**:
+- **Active-state delta tracking** — `prev_active_packet` stores last Drilling/Reaming/Circulating packet for delta calculations, preventing false positives from Idle→Drilling state transitions
+- **ROP noise floor** — `rig_state.drilling_rop_min` (default 2.0 ft/hr) prevents low-ROP sensor noise from classifying as Drilling state
+- **Founder WOB floor** — `thresholds.founder.min_wob_klbs` (default 3.0 klbs) prevents off-bottom false positives in `detect_founder_quick()`
+- **D-exponent floor** — `calculate_d_exponent()` clamped to non-negative values
+- **Pit volume delta** — `pit_volume_change` computed from consecutive packets in pipeline coordinator (WITS has no item code for pit volume change)
+
+**Volve F-5 results (v3.2 vs v3.1)**:
+| Metric | v3.1 | v3.2 |
+|--------|------|------|
+| Total tickets | ~590 | 272 |
+| Confirmed | ~340 (58%) | 262 (96%) |
+| Rejected | ~200 (34%) | 4 (1%) |
+| WellControl | 258 | 258 |
+| Mechanical | ~150 | 3 |
+
+---
+
 ## v3.1 - Dashboard, v2 API, Setup Wizard & Safety Audit
 
 **Phase 3: v2 API** (`src/api/v2_handlers.rs`, `src/api/v2_routes.rs`, `src/api/envelope.rs`):

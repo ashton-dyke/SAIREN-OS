@@ -269,6 +269,6 @@ mod tests {
             ..DrillingMetrics::default()
         };
 
-        HistoryEntry { packet, metrics, mse_contribution: mse / 3600.0 }
+        HistoryEntry { packet, metrics }
     }
 }

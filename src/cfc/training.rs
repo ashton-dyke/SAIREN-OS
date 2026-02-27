@@ -281,6 +281,11 @@ pub fn train_step(
 
 /// Backprop through CfC gate equations for one timestep.
 /// Accumulates gradients into `grads` and returns dL/dh_prev.
+///
+/// Uses a two-pass approach to handle both feedforward and recurrent connections:
+/// - Pass 1 (reverse order): Correctly handles feedforward paths (src < dst).
+/// - Pass 2 (forward order): Picks up residual gradients that landed on neurons
+///   after they were already processed in pass 1 (recurrent paths where src > dst).
 fn backprop_cfc_gates(
     grads: &mut GradAccum,
     weights: &CfcWeights,
@@ -292,12 +297,18 @@ fn backprop_cfc_gates(
     let mut d_h = d_h_in.to_vec();
     let mut d_h_prev = vec![0.0; NUM_NEURONS];
 
+    // Snapshot d_h consumed by each neuron during pass 1 so we can detect
+    // late-arriving gradient from recurrent connections.
+    let mut d_h_consumed = vec![0.0f64; NUM_NEURONS];
+
+    // ── Pass 1: Reverse order (handles feedforward paths correctly) ──
     for neuron in (INTER_START..NUM_NEURONS).rev() {
         let n_in = weights.weight_count[neuron];
         if n_in == 0 {
             continue;
         }
 
+        d_h_consumed[neuron] = d_h[neuron];
         let dh = d_h[neuron];
         if dh.abs() < 1e-15 {
             d_h_prev[neuron] += dh * (1.0 - cache.f_gate[neuron]);
@@ -343,6 +354,62 @@ fn backprop_cfc_gates(
             } else {
                 d_h_prev[src] += grad_to_src;
             }
+        }
+
+        grads.d_b_tau[neuron] += decay * d_pre_tau;
+        grads.d_b_f[neuron] += decay * d_pre_f;
+        grads.d_b_g[neuron] += decay * d_pre_g;
+    }
+
+    // ── Pass 2: Forward order (picks up residual gradient from recurrent connections) ──
+    // For recurrent connections (src > dst), pass 1 scattered gradient to d_h[src]
+    // after src was already processed. The residual = d_h[src] - d_h_consumed[src]
+    // must be propagated through src's gates to d_h_prev for temporal credit assignment.
+    for neuron in INTER_START..NUM_NEURONS {
+        let residual = d_h[neuron] - d_h_consumed[neuron];
+        if residual.abs() < 1e-15 {
+            continue;
+        }
+
+        let n_in = weights.weight_count[neuron];
+        if n_in == 0 {
+            continue;
+        }
+
+        let offset = weights.weight_offset[neuron];
+        let f = cache.f_gate[neuron];
+        let g = cache.g_gate[neuron];
+        let h_prev = cache.h_prev[neuron];
+        let dt = cache.dt;
+
+        // Propagate residual through this neuron's gates
+        let df = residual * (g - h_prev);
+        let dg = residual * f;
+
+        d_h_prev[neuron] += residual * (1.0 - f);
+
+        let d_pre_g = dg * (1.0 - g * g);
+        let d_f_input = df * f * (1.0 - f);
+        let tau = cache.tau[neuron];
+        let d_pre_f = d_f_input * (-(dt * tau));
+        let d_tau = d_f_input * (-(dt) * cache.pre_f[neuron]);
+        let d_pre_tau = d_tau * sigmoid(cache.pre_tau[neuron]);
+
+        for (j, &src) in wiring.incoming[neuron].iter().enumerate() {
+            let h_src = cache.h_new[src];
+            let w_idx = offset + j;
+
+            grads.d_w_tau[w_idx] += decay * d_pre_tau * h_src;
+            grads.d_w_f[w_idx] += decay * d_pre_f * h_src;
+            grads.d_w_g[w_idx] += decay * d_pre_g * h_src;
+
+            // In pass 2, route all source gradients to d_h_prev to avoid
+            // unbounded re-propagation. One correction pass is sufficient.
+            let grad_to_src = d_pre_tau * weights.w_tau[w_idx]
+                + d_pre_f * weights.w_f[w_idx]
+                + d_pre_g * weights.w_g[w_idx];
+
+            d_h_prev[src] += grad_to_src;
         }
 
         grads.d_b_tau[neuron] += decay * d_pre_tau;
@@ -505,5 +572,65 @@ mod tests {
     fn test_feature_weights_sum() {
         let sum: f64 = FEATURE_WEIGHTS.iter().sum();
         assert!((sum - 24.0).abs() < 1e-10); // 8*2 + 8*1 = 24
+    }
+
+    #[test]
+    fn test_recurrent_gradient_flow() {
+        // Verify that the two-pass backprop propagates gradients through recurrent
+        // connections (src > dst). Before the fix, neurons processed early in the
+        // reverse pass never received gradient scattered by later-processed neurons.
+        use crate::cfc::wiring::INTER_START;
+
+        let wiring = NcpWiring::generate(42);
+        let weights = CfcWeights::init(&wiring, 123);
+
+        // Identify recurrent connections where src > dst (these were broken before the fix)
+        let mut recurrent_sources: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        for dst in INTER_START..NUM_NEURONS {
+            for &src in &wiring.incoming[dst] {
+                if src > dst && src >= INTER_START {
+                    recurrent_sources.insert(src);
+                }
+            }
+        }
+        assert!(!recurrent_sources.is_empty(),
+            "Expected recurrent connections in the wiring (src > dst)");
+
+        // Run a forward pass with non-trivial inputs to get a cache
+        let input = [0.5; NUM_FEATURES];
+        let h = vec![0.3; NUM_NEURONS]; // Non-zero initial hidden state
+        let (_, _, cache) = CfcCell::forward(&input, &h, 1.0, &weights, &wiring);
+
+        // Create gradient signal at motor neurons (as if from output loss)
+        let mut d_h_in = vec![0.0; NUM_NEURONS];
+        for m in MOTOR_START..NUM_NEURONS {
+            d_h_in[m] = 1.0;
+        }
+
+        let mut grads = GradAccum::new(&weights);
+        let d_h_prev = backprop_cfc_gates(&mut grads, &weights, &cache, &d_h_in, &wiring, 1.0);
+
+        // Check that recurrent source neurons received temporal gradient via d_h_prev.
+        // Without the two-pass fix, these would be zero because the gradient from
+        // downstream neurons (dst < src) arrives after src was already processed.
+        let mut nonzero_count = 0;
+        for &src in &recurrent_sources {
+            if d_h_prev[src].abs() > 1e-15 {
+                nonzero_count += 1;
+            }
+        }
+
+        // At least some recurrent sources should get nonzero d_h_prev
+        assert!(nonzero_count > 0,
+            "No recurrent source neurons received gradient in d_h_prev. \
+             Found {} recurrent sources (src > dst), all had zero gradient.",
+            recurrent_sources.len());
+
+        // Majority should have nonzero gradient (allowing for some that may
+        // coincidentally be near zero due to gate values)
+        let ratio = nonzero_count as f64 / recurrent_sources.len() as f64;
+        assert!(ratio > 0.5,
+            "Only {}/{} ({:.0}%) recurrent source neurons got nonzero d_h_prev gradient",
+            nonzero_count, recurrent_sources.len(), ratio * 100.0);
     }
 }

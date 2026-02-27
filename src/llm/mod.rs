@@ -34,17 +34,24 @@ pub trait LlmBackend: Send + Sync {
     fn uses_gpu(&self) -> bool;
 }
 
-// mistralrs backend — compiled by default (runtime CUDA detection gates inference)
+// mistralrs backend — only compiled when the `llm` feature is enabled
+#[cfg(feature = "llm")]
 mod mistral_rs;
+#[cfg(feature = "llm")]
 pub use mistral_rs::MistralRsBackend;
+#[cfg(feature = "llm")]
 pub use mistral_rs::is_cuda_available;
 
-// Tactical LLM
+// Tactical LLM (requires mistralrs backend)
+#[cfg(feature = "llm")]
 pub mod tactical_llm;
+#[cfg(feature = "llm")]
 pub use tactical_llm::TacticalLLM;
 
-// LLM inference scheduler (priority queue for dual-model inference)
+// LLM inference scheduler (requires mistralrs backend)
+#[cfg(feature = "llm")]
 pub mod scheduler;
+#[cfg(feature = "llm")]
 pub use scheduler::SchedulerHandle;
 
 // Prompt templates and response parsing — always available (no inference required)

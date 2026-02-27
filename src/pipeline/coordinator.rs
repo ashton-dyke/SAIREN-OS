@@ -136,6 +136,8 @@ pub struct PipelineCoordinator {
     optimizer: crate::optimization::ParameterOptimizer,
     /// Structured knowledge base (replaces flat prognosis when available)
     knowledge_base: Option<crate::knowledge_base::KnowledgeBase>,
+    /// Previous pit volume for computing pit_volume_change delta
+    prev_pit_volume: Option<f64>,
 }
 
 impl PipelineCoordinator {
@@ -170,6 +172,7 @@ impl PipelineCoordinator {
             last_formation_name: None,
             optimizer: crate::optimization::ParameterOptimizer::new(300),
             knowledge_base,
+            prev_pit_volume: None,
         }
     }
 
@@ -218,6 +221,7 @@ impl PipelineCoordinator {
             last_formation_name: None,
             optimizer: crate::optimization::ParameterOptimizer::new(300),
             knowledge_base,
+            prev_pit_volume: None,
         }
     }
 
@@ -255,6 +259,16 @@ impl PipelineCoordinator {
         if !quality.usable {
             warn!(issues = ?quality.issues, "Packet rejected by sanitizer — skipping");
             return None;
+        }
+
+        // Compute pit_volume_change from consecutive packets (WITS has no item
+        // code for pit volume *change* — only absolute pit_volume via item 0123).
+        packet.pit_volume_change = match self.prev_pit_volume {
+            Some(prev) if packet.pit_volume > 0.0 => packet.pit_volume - prev,
+            _ => 0.0,
+        };
+        if packet.pit_volume > 0.0 {
+            self.prev_pit_volume = Some(packet.pit_volume);
         }
 
         // Sync tactical agent campaign with AppState campaign
@@ -1038,5 +1052,36 @@ mod tests {
         assert!(stats.packets_processed > 0, "Should have processed packets");
         // Note: Ticket creation depends on baseline lock status and anomaly detection
         // The tactical agent may not create tickets during baseline learning
+    }
+
+    #[tokio::test]
+    async fn test_pit_volume_change_computed() {
+        let mut coordinator = PipelineCoordinator::new();
+
+        // First packet: pit_volume = 800.0, no previous → delta should be 0.0
+        let mut pkt1 = create_test_packet(50.0, 2.0);
+        pkt1.pit_volume = 800.0;
+        coordinator.process_packet(&mut pkt1, Campaign::Production).await;
+        assert_eq!(pkt1.pit_volume_change, 0.0, "First packet should have delta 0.0");
+
+        // Second packet: pit_volume = 808.0 → delta should be 8.0
+        let mut pkt2 = create_test_packet(50.0, 2.0);
+        pkt2.pit_volume = 808.0;
+        coordinator.process_packet(&mut pkt2, Campaign::Production).await;
+        assert!(
+            (pkt2.pit_volume_change - 8.0).abs() < 1e-9,
+            "Second packet should have delta 8.0, got {}",
+            pkt2.pit_volume_change
+        );
+
+        // Third packet: pit_volume = 805.0 → delta should be -3.0
+        let mut pkt3 = create_test_packet(50.0, 2.0);
+        pkt3.pit_volume = 805.0;
+        coordinator.process_packet(&mut pkt3, Campaign::Production).await;
+        assert!(
+            (pkt3.pit_volume_change - (-3.0)).abs() < 1e-9,
+            "Third packet should have delta -3.0, got {}",
+            pkt3.pit_volume_change
+        );
     }
 }

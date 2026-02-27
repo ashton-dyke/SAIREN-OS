@@ -382,7 +382,6 @@ mod tests {
                     current_formation: None,
                     formation_depth_in_ft: None,
                 },
-                mse_contribution: 0.0,
             })
             .collect()
     }

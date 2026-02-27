@@ -90,6 +90,8 @@ pub fn known_config_keys() -> HashSet<&'static str> {
         "thresholds.founder.severity_high",
         "thresholds.founder.min_samples",
         "thresholds.founder.quick_wob_delta_percent",
+        "thresholds.founder.min_wob_klbs",
+        "thresholds.founder.debounce_packets",
         // [thresholds.formation]
         "thresholds.formation",
         "thresholds.formation.dexp_decrease_warning",
@@ -102,6 +104,7 @@ pub fn known_config_keys() -> HashSet<&'static str> {
         "thresholds.rig_state.idle_rpm_max",
         "thresholds.rig_state.circulation_flow_min",
         "thresholds.rig_state.drilling_wob_min",
+        "thresholds.rig_state.drilling_rop_min",
         "thresholds.rig_state.reaming_depth_offset",
         "thresholds.rig_state.trip_out_hook_load_min",
         "thresholds.rig_state.trip_in_hook_load_max",
@@ -140,6 +143,10 @@ pub fn known_config_keys() -> HashSet<&'static str> {
         "advisory",
         "advisory.default_cooldown_seconds",
         "advisory.critical_bypass_cooldown",
+        "advisory.packet_cooldown",
+        "advisory.critical_packet_cooldown",
+        "advisory.depth_cooldown_ft",
+        "advisory.critical_depth_cooldown_ft",
         // [ensemble_weights]
         "ensemble_weights",
         "ensemble_weights.mse",

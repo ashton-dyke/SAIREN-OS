@@ -796,6 +796,17 @@ pub struct FounderThresholds {
     /// WOB delta percent for quick (two-packet) founder check.
     #[serde(default = "default_founder_quick_wob_delta")]
     pub quick_wob_delta_percent: f64,
+
+    /// Minimum WOB (klbs) for founder detection. Below this, the bit
+    /// is off-bottom and percentage deltas are noise.
+    #[serde(default = "default_founder_min_wob")]
+    pub min_wob_klbs: f64,
+
+    /// Consecutive founder-positive packets required before creating a ticket.
+    /// Filters transient single-packet WOB spikes that the strategic agent
+    /// would reject anyway. Matches the operation debounce pattern.
+    #[serde(default = "default_founder_debounce_packets")]
+    pub debounce_packets: u32,
 }
 
 fn default_founder_wob_min() -> f64 { 0.02 }
@@ -804,6 +815,8 @@ fn default_founder_severity_warning() -> f64 { 0.3 }
 fn default_founder_severity_high() -> f64 { 0.7 }
 fn default_founder_min_samples() -> usize { 5 }
 fn default_founder_quick_wob_delta() -> f64 { 0.05 }
+fn default_founder_min_wob() -> f64 { 3.0 }
+fn default_founder_debounce_packets() -> u32 { 3 }
 
 impl Default for FounderThresholds {
     fn default() -> Self {
@@ -814,6 +827,8 @@ impl Default for FounderThresholds {
             severity_high: default_founder_severity_high(),
             min_samples: default_founder_min_samples(),
             quick_wob_delta_percent: default_founder_quick_wob_delta(),
+            min_wob_klbs: default_founder_min_wob(),
+            debounce_packets: default_founder_debounce_packets(),
         }
     }
 }
@@ -898,6 +913,10 @@ pub struct RigStateThresholds {
     /// Maximum flow rate to consider tripping state (gpm).
     #[serde(default = "default_tripping_flow_max")]
     pub tripping_flow_max: f64,
+
+    /// Minimum ROP to enter Drilling state (ft/hr). Prevents flip-flop from sensor noise near zero.
+    #[serde(default = "default_drilling_rop_min")]
+    pub drilling_rop_min: f64,
 }
 
 fn default_idle_rpm_max() -> f64 { 5.0 }
@@ -907,6 +926,7 @@ fn default_reaming_depth_offset() -> f64 { 5.0 }
 fn default_trip_out_hookload() -> f64 { 200.0 }
 fn default_trip_in_hookload() -> f64 { 50.0 }
 fn default_tripping_flow_max() -> f64 { 100.0 }
+fn default_drilling_rop_min() -> f64 { 2.0 }
 
 impl Default for RigStateThresholds {
     fn default() -> Self {
@@ -918,6 +938,7 @@ impl Default for RigStateThresholds {
             trip_out_hook_load_min: default_trip_out_hookload(),
             trip_in_hook_load_max: default_trip_in_hookload(),
             tripping_flow_max: default_tripping_flow_max(),
+            drilling_rop_min: default_drilling_rop_min(),
         }
     }
 }
@@ -1128,16 +1149,40 @@ pub struct AdvisoryConfig {
     /// Whether critical-severity tickets bypass the cooldown.
     #[serde(default = "default_critical_bypass")]
     pub critical_bypass_cooldown: bool,
+
+    /// Minimum packets between tickets of the same category.
+    #[serde(default = "default_packet_cooldown")]
+    pub packet_cooldown: u64,
+
+    /// Minimum packets between CRITICAL tickets of the same category.
+    #[serde(default = "default_critical_packet_cooldown")]
+    pub critical_packet_cooldown: u64,
+
+    /// Minimum depth change (ft) between tickets of the same category.
+    #[serde(default = "default_depth_cooldown")]
+    pub depth_cooldown_ft: f64,
+
+    /// Minimum depth change (ft) between CRITICAL tickets of the same category.
+    #[serde(default = "default_critical_depth_cooldown")]
+    pub critical_depth_cooldown_ft: f64,
 }
 
 fn default_cooldown_seconds() -> u64 { 60 }
 fn default_critical_bypass() -> bool { true }
+fn default_packet_cooldown() -> u64 { 50 }
+fn default_critical_packet_cooldown() -> u64 { 20 }
+fn default_depth_cooldown() -> f64 { 50.0 }
+fn default_critical_depth_cooldown() -> f64 { 10.0 }
 
 impl Default for AdvisoryConfig {
     fn default() -> Self {
         Self {
             default_cooldown_seconds: default_cooldown_seconds(),
             critical_bypass_cooldown: default_critical_bypass(),
+            packet_cooldown: default_packet_cooldown(),
+            critical_packet_cooldown: default_critical_packet_cooldown(),
+            depth_cooldown_ft: default_depth_cooldown(),
+            critical_depth_cooldown_ft: default_critical_depth_cooldown(),
         }
     }
 }

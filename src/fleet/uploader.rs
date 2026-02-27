@@ -44,6 +44,8 @@ pub async fn run_uploader(queue: Arc<UploadQueue>, client: FleetClient, interval
                     break; // Stop on first failure
                 }
             }
+            // Throttle to ~10 req/s so we don't exhaust the hub's rate-limit burst
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
     }
 }

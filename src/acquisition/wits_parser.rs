@@ -446,8 +446,11 @@ impl WitsClient {
 
 /// Classify rig state from drilling parameters
 fn classify_rig_state(rpm: f64, wob: f64, hook_load: f64, rop: f64, block_position: f64) -> RigState {
-    // Drilling: rotation + weight + ROP
-    if rpm > 20.0 && wob > 5.0 && rop > 0.0 {
+    // Minimum ROP threshold to prevent sensor noise flip-flop (matches config default)
+    const ROP_MIN: f64 = 2.0;
+
+    // Drilling: rotation + weight + ROP (above noise floor)
+    if rpm > 20.0 && wob > 5.0 && rop > ROP_MIN {
         return RigState::Drilling;
     }
 

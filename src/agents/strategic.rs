@@ -880,7 +880,6 @@ mod tests {
                 HistoryEntry {
                     packet,
                     metrics,
-                    mse_contribution: 500.0,
                 }
             })
             .collect()

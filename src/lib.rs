@@ -66,6 +66,7 @@ pub use agents::{TacticalAgent, StrategicAgent};
 pub use storage::history::StorageError;
 
 // Re-export LLM components
+#[cfg(feature = "llm")]
 pub use llm::TacticalLLM;
 
 // Re-export baseline components

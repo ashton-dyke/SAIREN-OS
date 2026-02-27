@@ -89,6 +89,8 @@ struct MetricTracker {
     total: u64,
     /// Physical lower bound (e.g. 0.0 for non-negative metrics like MSE, ROP)
     floor: Option<f64>,
+    /// Minimum interval half-width (prevents zero-width intervals for constant metrics)
+    min_half_width: f64,
 }
 
 impl MetricTracker {
@@ -102,6 +104,7 @@ impl MetricTracker {
             hits: 0,
             total: 0,
             floor: None,
+            min_half_width: 0.0,
         }
     }
 
@@ -169,7 +172,7 @@ impl MetricTracker {
     /// Get the current interval for a value
     fn interval(&self, value: f64) -> ConformalInterval {
         let median = self.median();
-        let radius = self.quantile_radius();
+        let radius = self.quantile_radius().max(self.min_half_width);
         let deviation = (value - median).abs();
         let is_outlier = deviation > radius && self.residuals.len() >= 10;
 
@@ -255,6 +258,27 @@ impl AciTracker {
         }
         for id in allow_negative {
             trackers.push((id.to_string(), MetricTracker::new(config.target_coverage)));
+        }
+
+        // Set per-metric minimum half-widths (~1-2% of typical operating range)
+        // to prevent zero-width intervals when a metric is held constant.
+        let min_half_widths: &[(&str, f64)] = &[
+            (metrics::MSE,          5.0),   // ksi² (typical 10-500)
+            (metrics::SPP,          10.0),  // psi (typical 500-5000)
+            (metrics::TORQUE,       0.5),   // kft·lb (typical 5-50)
+            (metrics::ROP,          1.0),   // ft/hr (typical 0-300)
+            (metrics::RPM,          2.0),   // rpm (typical 60-200)
+            (metrics::WOB,          0.5),   // klbs (typical 5-50)
+            (metrics::ECD,          0.02),  // ppg (typical 8-18)
+            (metrics::D_EXPONENT,   0.05),  // dimensionless (typical 0-3)
+            (metrics::DXC,          0.05),  // dimensionless (typical 0-3)
+            (metrics::FLOW_BALANCE, 5.0),   // gpm (typically ±30)
+            (metrics::PIT_RATE,     1.0),   // bbl/hr (typically ±10)
+        ];
+        for &(id, mhw) in min_half_widths {
+            if let Some(pos) = trackers.iter().position(|(name, _)| name == id) {
+                trackers[pos].1.min_half_width = mhw;
+            }
         }
 
         Self { config, trackers }

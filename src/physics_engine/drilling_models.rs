@@ -143,7 +143,7 @@ pub fn calculate_d_exponent(rop: f64, rpm: f64, wob: f64, bit_diameter: f64) -> 
     if !result.is_finite() {
         return 0.0;
     }
-    result
+    result.max(0.0)
 }
 
 /// Calculate corrected d-exponent (dxc)
@@ -540,8 +540,12 @@ pub fn detect_founder_quick(
 ) -> (bool, f64, f64) {
     let cfg = crate::config::get();
 
-    // Guard against zero values
-    if prev_wob <= 0.0 || prev_rop <= 0.0 {
+    // Guard against sub-threshold values — founder is meaningless
+    // when WOB is below on-bottom weight or ROP is zero
+    if prev_wob < cfg.thresholds.founder.min_wob_klbs
+        || curr_wob < cfg.thresholds.founder.min_wob_klbs
+        || prev_rop <= 0.0
+    {
         return (false, 0.0, 0.0);
     }
 
@@ -640,8 +644,10 @@ pub fn classify_rig_state(packet: &WitsPacket) -> RigState {
         return RigState::Connection;
     }
 
-    // Drilling: Rotation + WOB + ROP
-    if rpm > rpm_threshold && wob > wob_min && rop > 0.0 {
+    let rop_min = cfg.thresholds.rig_state.drilling_rop_min;
+
+    // Drilling: Rotation + WOB + ROP (above noise floor)
+    if rpm > rpm_threshold && wob > wob_min && rop > rop_min {
         // Reaming if bit is above hole depth
         if packet.bit_depth < packet.hole_depth - reaming_offset {
             return RigState::Reaming;
@@ -1007,5 +1013,21 @@ mod tests {
 
         let packet = WitsPacket::default();
         assert_eq!(classify_rig_state(&packet), RigState::Idle);
+    }
+
+    #[test]
+    fn test_classify_rig_state_low_rop_not_drilling() {
+        ensure_config();
+
+        let mut packet = WitsPacket::default();
+        packet.rpm = 120.0;
+        packet.wob = 25.0;
+        packet.rop = 0.5; // Below drilling_rop_min threshold (2.0)
+        packet.flow_in = 500.0;
+        packet.bit_depth = 10000.0;
+        packet.hole_depth = 10000.0;
+
+        // Should NOT classify as Drilling — ROP below noise floor
+        assert_ne!(classify_rig_state(&packet), RigState::Drilling);
     }
 }

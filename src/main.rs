@@ -1432,7 +1432,10 @@ async fn main() -> Result<()> {
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("");
 
+    #[cfg(feature = "llm")]
     let cuda_available = llm::is_cuda_available();
+    #[cfg(not(feature = "llm"))]
+    let cuda_available = false;
     if cuda_available {
         info!("Hardware: CUDA detected - LLM inference will use GPU");
     } else {

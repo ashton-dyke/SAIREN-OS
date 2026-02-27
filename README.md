@@ -506,9 +506,9 @@ The Fleet Hub is an optional central server that enables fleet-wide learning acr
 
 ```bash
 # 1. Ensure PostgreSQL is running
-# 2. Set DATABASE_URL
+# 2. Set environment variables
 export DATABASE_URL=postgres://sairen:password@localhost/sairen_fleet
-export FLEET_ADMIN_KEY=your-admin-key
+export FLEET_PASSPHRASE=your-shared-passphrase
 
 # 3. Start the hub (migrations run automatically)
 ./target/release/fleet-hub --port 8080
@@ -520,14 +520,15 @@ open http://localhost:8080
 ### Registering a Rig
 
 ```bash
-# Register a new rig (returns a one-time API key)
-curl -X POST http://hub:8080/api/fleet/rigs/register \
-  -H "Authorization: Bearer $FLEET_ADMIN_KEY" \
+# Enroll a new rig (passphrase auth, X-Rig-ID header required)
+curl -X POST http://hub:8080/api/fleet/enroll \
+  -H "Authorization: Bearer $FLEET_PASSPHRASE" \
+  -H "X-Rig-ID: RIG-001" \
   -H "Content-Type: application/json" \
   -d '{"rig_id": "RIG-001", "well_id": "WELL-A1", "field": "North Sea"}'
 ```
 
-Headless pairing alternative:
+Headless pairing alternative (6-digit code flow):
 ```bash
 sairen-os pair --hub http://hub:8080 --rig RIG-001 --well WELL-A1 --field "North Sea"
 ```
@@ -537,10 +538,12 @@ sairen-os pair --hub http://hub:8080 --rig RIG-001 --well WELL-A1 --field "North
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `DATABASE_URL` | *(required)* | PostgreSQL connection URL |
-| `FLEET_ADMIN_KEY` | `admin-dev-key` | Admin API key for rig registration and dashboard |
+| `FLEET_PASSPHRASE` | *(required)* | Shared passphrase for all hub auth (admin + rig) |
 | `FLEET_MAX_PAYLOAD_SIZE` | `1048576` | Max event upload size in bytes (1 MB) |
 | `FLEET_CURATION_INTERVAL` | `3600` | Curation cycle interval in seconds |
 | `FLEET_LIBRARY_MAX_EPISODES` | `50000` | Maximum episodes before pruning |
+| `SAIREN_LLM_MODEL_PATH` | *(none)* | Path to GGUF model for intelligence workers |
+| `INTELLIGENCE_INTERVAL_SECS` | `60` | Intelligence job poll interval in seconds |
 
 ### Hub CLI Arguments
 
@@ -552,7 +555,7 @@ sairen-os pair --hub http://hub:8080 --rig RIG-001 --well WELL-A1 --field "North
 
 ### Hub API Endpoints
 
-**Event Ingestion** (rig API key):
+**Event Ingestion** (passphrase + `X-Rig-ID` auth):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -560,30 +563,49 @@ sairen-os pair --hub http://hub:8080 --rig RIG-001 --well WELL-A1 --field "North
 | `/api/fleet/events/{id}` | GET | Retrieve an event by ID |
 | `/api/fleet/events/{id}/outcome` | PATCH | Update event outcome |
 
-**Library Sync** (rig API key):
+**Library Sync** (passphrase + `X-Rig-ID` auth):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/fleet/library` | GET | Sync library (delta via `If-Modified-Since`, supports zstd) |
 | `/api/fleet/library/stats` | GET | Library statistics |
 
-**Rig Registry** (admin API key):
+**Rig Registry** (passphrase auth):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/fleet/rigs/register` | POST | Register a new rig (returns one-time API key) |
+| `/api/fleet/enroll` | POST | Enroll a new rig (passphrase + `X-Rig-ID` header) |
 | `/api/fleet/rigs` | GET | List all registered rigs |
 | `/api/fleet/rigs/{id}` | GET | Get rig details |
-| `/api/fleet/rigs/{id}/revoke` | POST | Revoke a rig's API key |
+| `/api/fleet/rigs/{id}/revoke` | POST | Revoke a rig |
 
-**Performance Data** (rig API key):
+**Performance Data** (passphrase + `X-Rig-ID` auth):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/api/fleet/performance` | POST | Upload post-well performance data (zstd) |
 | `/api/fleet/performance` | GET | Query by field (`?field=&since=&exclude_rig=`) |
 
-**Dashboard** (admin API key):
+**Pairing** (code-based rig onboarding):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/fleet/pair/request` | POST | Rig submits 6-digit pairing code (unauthenticated) |
+| `/api/fleet/pair/approve` | POST | Admin approves a pairing code (passphrase auth) |
+| `/api/fleet/pair/status` | GET | Rig polls pairing status (`?code=123456`, unauthenticated) |
+| `/api/fleet/pair/pending` | GET | List pending pairing requests (passphrase auth) |
+
+**Intelligence & Graph** (passphrase auth):
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/fleet/intelligence` | GET | Pull intelligence outputs (`?since=&formation=`) |
+| `/api/fleet/graph/stats` | GET | Knowledge graph statistics |
+| `/api/fleet/graph/formation` | GET | Formation context lookup |
+| `/api/fleet/graph/rebuild` | POST | Rebuild knowledge graph |
+| `/api/fleet/metrics` | GET | Prometheus metrics (no auth) |
+
+**Dashboard** (passphrase auth):
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
@@ -788,7 +810,7 @@ The **Orchestrator** uses 4 trait-based specialists for domain-specific evaluati
 | 1 | WITS Ingestion | Receive 40+ channel WITS Level 0 packets, classify rig state |
 | 2 | Tactical Physics | Calculate MSE, d-exponent, flow balance, pit rate (<15ms) |
 | 2.8 | CfC Network | Self-supervised neural network: predict, compare, train, score |
-| 3 | Decision Gate | Create AdvisoryTicket if thresholds exceeded |
+| 3 | Decision Gate | 6-rule ticket gate (rig state, anomaly, cooldown, ACI, CfC, founder debounce) |
 | 4 | History Buffer | Store last 60 packets for trend analysis |
 | 4.5 | Causal Inference | Cross-correlate parameters against MSE at lags 1-20s |
 | 5 | Advanced Physics | Strategic verification of tickets |
@@ -867,7 +889,7 @@ For developer/ML terms (CfC, NCP, BPTT, ACI, RegimeProfile, etc.), see [ARCHITEC
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-Current version: v3.1
+Current version: v3.2
 
 ---
 

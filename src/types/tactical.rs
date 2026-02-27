@@ -9,7 +9,7 @@ use super::{Operation, RigState};
 // ============================================================================
 
 /// Category of detected anomaly for drilling operations
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash, Default)]
 pub enum AnomalyCategory {
     #[default]
     None,

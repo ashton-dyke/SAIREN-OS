@@ -285,6 +285,9 @@ pub struct TacticalAgent {
     baseline: DrillingBaseline,
     /// Previous packet for rate calculations
     prev_packet: Option<WitsPacket>,
+    /// Previous packet from an active drilling state (Drilling/Reaming/Circulating)
+    /// Used for delta calculations to avoid false positives from state transitions
+    prev_active_packet: Option<WitsPacket>,
     /// Count of packets processed
     packets_processed: u64,
     /// Count of tickets generated
@@ -315,8 +318,10 @@ pub struct TacticalAgent {
     latest_regime_id: u8,
     /// Current regime centroids (k=4, dim=8)
     regime_centroids: [[f64; 8]; 4],
-    /// Last time a ticket was created (for cooldown)
-    last_ticket_time: Option<Instant>,
+    /// Remaining packets to bypass ACI gate after formation transition
+    aci_gate_bypass_remaining: u32,
+    /// Per-category cooldown tracking: (last_packet_count, last_depth, last_time)
+    category_cooldowns: std::collections::HashMap<AnomalyCategory, (u64, f64, Instant)>,
     /// Current campaign type for operation detection
     campaign: Campaign,
     /// Previous operation for transition logging
@@ -325,6 +330,8 @@ pub struct TacticalAgent {
     pending_operation: Option<Operation>,
     /// Count of consecutive packets in pending operation state
     pending_operation_count: u32,
+    /// Count of consecutive founder-positive packets (debounce counter)
+    founder_consecutive_count: u32,
 }
 
 impl std::fmt::Debug for TacticalAgent {
@@ -344,6 +351,7 @@ impl TacticalAgent {
         Self {
             baseline: DrillingBaseline::default(),
             prev_packet: None,
+            prev_active_packet: None,
             packets_processed: 0,
             tickets_generated: 0,
             mode: TacticalMode::FixedThresholds,
@@ -359,11 +367,13 @@ impl TacticalAgent {
             regime_clusterer: crate::cfc::RegimeClusterer::new(),
             latest_regime_id: 0,
             regime_centroids: [[0.0; 8]; 4],
-            last_ticket_time: None,
+            aci_gate_bypass_remaining: 0,
+            category_cooldowns: std::collections::HashMap::new(),
             campaign: Campaign::Production,
             previous_operation: Operation::Static,
             pending_operation: None,
             pending_operation_count: 0,
+            founder_consecutive_count: 0,
         }
     }
 
@@ -372,6 +382,7 @@ impl TacticalAgent {
         Self {
             baseline: DrillingBaseline::default(),
             prev_packet: None,
+            prev_active_packet: None,
             packets_processed: 0,
             tickets_generated: 0,
             mode: TacticalMode::FixedThresholds,
@@ -387,11 +398,13 @@ impl TacticalAgent {
             regime_clusterer: crate::cfc::RegimeClusterer::new(),
             latest_regime_id: 0,
             regime_centroids: [[0.0; 8]; 4],
-            last_ticket_time: None,
+            aci_gate_bypass_remaining: 0,
+            category_cooldowns: std::collections::HashMap::new(),
             campaign,
             previous_operation: Operation::Static,
             pending_operation: None,
             pending_operation_count: 0,
+            founder_consecutive_count: 0,
         }
     }
 
@@ -444,6 +457,7 @@ impl TacticalAgent {
         Self {
             baseline: DrillingBaseline::default(),
             prev_packet: None,
+            prev_active_packet: None,
             packets_processed: 0,
             tickets_generated: 0,
             mode,
@@ -459,11 +473,13 @@ impl TacticalAgent {
             regime_clusterer: crate::cfc::RegimeClusterer::new(),
             latest_regime_id: 0,
             regime_centroids: [[0.0; 8]; 4],
-            last_ticket_time: None,
+            aci_gate_bypass_remaining: 0,
+            category_cooldowns: std::collections::HashMap::new(),
             campaign,
             previous_operation: Operation::Static,
             pending_operation: None,
             pending_operation_count: 0,
+            founder_consecutive_count: 0,
         }
     }
 
@@ -509,7 +525,7 @@ impl TacticalAgent {
         // PHASE 2: Basic Drilling Physics Calculations (target: < 15ms)
         // ====================================================================
         let mut metrics =
-            physics_engine::tactical_update(packet, self.prev_packet.as_ref(), self.baseline_overrides.as_ref());
+            physics_engine::tactical_update(packet, self.prev_active_packet.as_ref(), self.baseline_overrides.as_ref());
 
         // Update metrics with baseline deltas
         metrics.mse_delta_percent = self.baseline.mse_delta_percent(metrics.mse);
@@ -613,14 +629,15 @@ impl TacticalAgent {
             // Reset the EMA baseline so the new formation builds its own reference
             // values from scratch rather than being compared against the previous one.
             self.baseline.reset();
+            // NOTE: No ACI gate bypass here. CfC formation transitions fire
+            // frequently (203× on Volve F-5) and would permanently disable the
+            // ACI gate. ACI adapts organically via its own sliding window.
         }
 
         // Create history entry (ALWAYS stored in Phase 4 buffer)
-        let mse_contribution = self.calculate_mse_contribution(&metrics);
         let history_entry = HistoryEntry {
             packet: packet.clone(),
             metrics: metrics.clone(),
-            mse_contribution,
         };
 
         // Update baseline
@@ -628,6 +645,23 @@ impl TacticalAgent {
 
         // Store packet for next iteration
         self.prev_packet = Some(packet.clone());
+
+        // Only track previous active-state packet for delta calculations
+        // to avoid false positives from Idle→Drilling state transitions
+        if matches!(metrics.state, RigState::Drilling | RigState::Reaming | RigState::Circulating) {
+            self.prev_active_packet = Some(packet.clone());
+        }
+
+        // Update founder debounce counter — must see N consecutive founder-positive
+        // packets before allowing a ticket (filters transient WOB spikes)
+        if metrics.is_anomaly
+            && metrics.anomaly_category == AnomalyCategory::Mechanical
+            && metrics.anomaly_description.as_ref().map_or(false, |d| d.contains("Founder"))
+        {
+            self.founder_consecutive_count += 1;
+        } else {
+            self.founder_consecutive_count = 0;
+        }
 
         // ====================================================================
         // PHASE 3: Advisory Ticket Decision
@@ -762,32 +796,77 @@ impl TacticalAgent {
         // Determine severity and ticket type
         let (severity, ticket_type) = self.determine_severity_and_type(metrics);
 
-        // RULE 3: Cooldown period between tickets
-        // CRITICAL tickets bypass cooldown when configured, otherwise use default
+        // RULE 3: Per-category cooldown (packet count + depth + time)
         let cfg = crate::config::get();
-        if let Some(last_time) = self.last_ticket_time {
+        if let Some(&(last_count, last_depth, last_time)) = self.category_cooldowns.get(&metrics.anomaly_category) {
+            let packets_since = self.packets_processed.saturating_sub(last_count);
+            let depth_change = (packet.bit_depth - last_depth).abs();
             let elapsed = last_time.elapsed().as_secs();
-            let cooldown = if severity == TicketSeverity::Critical
-                && cfg.advisory.critical_bypass_cooldown
-            {
-                0
+
+            let (min_packets, min_depth, min_time) = if severity == TicketSeverity::Critical {
+                (cfg.advisory.critical_packet_cooldown, cfg.advisory.critical_depth_cooldown_ft, 0u64)
             } else {
-                cfg.advisory.default_cooldown_seconds
+                (cfg.advisory.packet_cooldown, cfg.advisory.depth_cooldown_ft, cfg.advisory.default_cooldown_seconds)
             };
 
-            if elapsed < cooldown {
+            // ALL conditions must be met to suppress (packet count AND depth change AND time elapsed)
+            if packets_since < min_packets && depth_change < min_depth && elapsed < min_time.max(1) {
                 debug!(
+                    packets_since = packets_since,
+                    depth_change = depth_change,
                     elapsed_secs = elapsed,
-                    cooldown_secs = cooldown,
+                    category = ?metrics.anomaly_category,
                     severity = ?severity,
-                    "Ticket suppressed - cooldown active"
+                    "Ticket suppressed - per-category cooldown active"
                 );
                 return None;
             }
+        }
 
-            if severity == TicketSeverity::Critical {
-                info!("CRITICAL ticket after {}s cooldown", elapsed);
-            }
+        // RULE 4: ACI corroboration — trigger metric must be outside its
+        // conformal interval (dynamic threshold based on system state)
+        if self.aci_gate_bypass_remaining > 0 {
+            self.aci_gate_bypass_remaining -= 1;
+        } else if !self.aci_corroborates(metrics) {
+            debug!(
+                category = ?metrics.anomaly_category,
+                aci_outliers = self.aci_result.as_ref().map(|r| r.outlier_count).unwrap_or(0),
+                "Ticket vetoed — ACI does not corroborate trigger metric"
+            );
+            return None;
+        }
+
+        // RULE 5: CfC anomaly score gate — neural network must corroborate.
+        // During warm-up (<500 drilling packets): suppresses non-safety tickets.
+        // After calibration: vetoes when CfC scores state as normal (< 0.3).
+        // WellControl is always allowed through (safety-critical).
+        if metrics.anomaly_category != AnomalyCategory::WellControl
+            && !self.cfc_corroborates()
+        {
+            let is_calibrated = self.cfc_result.as_ref().map_or(false, |r| r.is_calibrated);
+            debug!(
+                category = ?metrics.anomaly_category,
+                cfc_calibrated = is_calibrated,
+                cfc_score = self.cfc_result.as_ref().map(|r| r.anomaly_score).unwrap_or(0.0),
+                "Ticket vetoed — CfC {} non-safety ticket",
+                if is_calibrated { "score below threshold, vetoing" } else { "not calibrated, suppressing" }
+            );
+            return None;
+        }
+
+        // RULE 6: Founder debounce — require consecutive founder-positive packets.
+        // Single-packet WOB spikes are transient noise; real founder persists.
+        if metrics.anomaly_category == AnomalyCategory::Mechanical
+            && metrics.anomaly_description.as_ref().map_or(false, |d| d.contains("Founder"))
+            && self.founder_consecutive_count < cfg.thresholds.founder.debounce_packets
+        {
+            debug!(
+                consecutive = self.founder_consecutive_count,
+                required = cfg.thresholds.founder.debounce_packets,
+                "Ticket suppressed — founder debounce (need {} more consecutive packets)",
+                cfg.thresholds.founder.debounce_packets - self.founder_consecutive_count
+            );
+            return None;
         }
 
         // Determine trigger parameter and value
@@ -800,8 +879,11 @@ impl TacticalAgent {
             .clone()
             .unwrap_or_else(|| format!("{} anomaly detected", metrics.anomaly_category));
 
-        // Update cooldown timer
-        self.last_ticket_time = Some(Instant::now());
+        // Update per-category cooldown tracking
+        self.category_cooldowns.insert(
+            metrics.anomaly_category,
+            (self.packets_processed, packet.bit_depth, Instant::now()),
+        );
 
         // Build structured context (replaces tactical LLM description)
         let context = self.build_ticket_context(packet, metrics);
@@ -1024,6 +1106,68 @@ impl TacticalAgent {
             // 0.3 <= score < 0.7: ambiguous → no change
             base
         }
+    }
+
+    /// Check whether ACI conformal intervals corroborate the anomaly.
+    /// Returns true if ticket should proceed, false to veto.
+    /// Well Control is NEVER gated. Bypassed during ACI warm-up.
+    fn aci_corroborates(&self, metrics: &DrillingMetrics) -> bool {
+        use crate::aci::metrics as aci_m;
+
+        // Never gate safety-critical well control
+        if metrics.anomaly_category == AnomalyCategory::WellControl {
+            return true;
+        }
+
+        let aci = match &self.aci_result {
+            Some(r) => r,
+            None => return true, // No ACI data (not drilling) — pass through
+        };
+
+        // Check calibration of relevant metric(s)
+        let calibrated = match metrics.anomaly_category {
+            AnomalyCategory::Hydraulics =>
+                self.aci_tracker.is_calibrated(aci_m::SPP)
+                || self.aci_tracker.is_calibrated(aci_m::ECD),
+            AnomalyCategory::Mechanical =>
+                self.aci_tracker.is_calibrated(aci_m::TORQUE)
+                || self.aci_tracker.is_calibrated(aci_m::WOB),
+            AnomalyCategory::DrillingEfficiency =>
+                self.aci_tracker.is_calibrated(aci_m::MSE),
+            AnomalyCategory::Formation =>
+                self.aci_tracker.is_calibrated(aci_m::D_EXPONENT)
+                || self.aci_tracker.is_calibrated(aci_m::DXC),
+            _ => return true,
+        };
+
+        if !calibrated {
+            return true; // Not enough samples — trust static thresholds
+        }
+
+        // Primary trigger metric must be an ACI outlier
+        match metrics.anomaly_category {
+            AnomalyCategory::Hydraulics => aci.spp.is_outlier || aci.ecd.is_outlier,
+            AnomalyCategory::Mechanical => aci.torque.is_outlier || aci.wob.is_outlier,
+            AnomalyCategory::DrillingEfficiency => aci.mse.is_outlier,
+            AnomalyCategory::Formation => aci.d_exponent.is_outlier || aci.dxc.is_outlier,
+            _ => true,
+        }
+    }
+
+    /// Check whether CfC anomaly score corroborates the anomaly.
+    /// Returns true if ticket should proceed, false to veto.
+    /// During warm-up (<500 packets): vetoes non-safety tickets until the
+    /// network has learned enough to distinguish normal from abnormal.
+    /// WellControl bypass is handled at the RULE 5 call site.
+    fn cfc_corroborates(&self) -> bool {
+        let cfc = match &self.cfc_result {
+            Some(r) if r.is_calibrated => r,
+            _ => return false, // Not calibrated or not drilling — suppress non-safety tickets
+        };
+
+        // CfC confidently says normal → veto
+        // Uses same 0.3 boundary as cfc_adjust_severity()
+        cfc.anomaly_score >= 0.3
     }
 
     /// Determine the primary trigger parameter and its value
@@ -1307,12 +1451,6 @@ impl TacticalAgent {
         }
     }
 
-    /// Calculate MSE contribution for history entry
-    fn calculate_mse_contribution(&self, metrics: &DrillingMetrics) -> f64 {
-        // MSE-hours contribution = MSE * time_interval (assume 1 minute intervals)
-        metrics.mse * (1.0 / 60.0)
-    }
-
     /// Get agent statistics
     /// Get the latest ACI result (only populated during drilling/reaming)
     pub fn aci_result(&self) -> Option<&crate::aci::AciDrillingResult> {
@@ -1367,6 +1505,7 @@ impl TacticalAgent {
         self.tickets_generated = 0;
         self.baseline = DrillingBaseline::default();
         self.prev_packet = None;
+        self.prev_active_packet = None;
         self.aci_tracker = crate::aci::AciTracker::new(crate::aci::AciConfig::default());
         self.aci_result = None;
         self.cfc_network.reset();
@@ -1376,9 +1515,11 @@ impl TacticalAgent {
         self.regime_clusterer.reset();
         self.latest_regime_id = 0;
         self.regime_centroids = [[0.0; 8]; 4];
+        self.aci_gate_bypass_remaining = 0;
         self.previous_operation = Operation::Static;
         self.pending_operation = None;
         self.pending_operation_count = 0;
+        self.founder_consecutive_count = 0;
     }
 
     /// Get current rig state from last processed packet

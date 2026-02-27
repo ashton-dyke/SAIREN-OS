@@ -103,7 +103,7 @@ The **Orchestrator** uses trait-based `Specialist` implementations for domain-sp
 | 1 | WITS Ingestion | Receive 40+ channel WITS Level 0 packets, classify rig state |
 | 2 | Tactical Physics | Calculate MSE, d-exponent, flow balance, pit rate (<15ms) |
 | 2.8 | CfC Network | Self-supervised neural network: predict, compare, train, score, modulate severity; stamp `regime_id` via k-means clusterer |
-| 3 | Decision Gate | Create AdvisoryTicket if thresholds exceeded |
+| 3 | Decision Gate | 6-rule ticket gate: rig state, anomaly, per-category cooldown, ACI corroboration, CfC corroboration, founder debounce |
 | 4 | History Buffer | Store last 60 packets for trend analysis |
 | 4.5 | Causal Inference | Cross-correlate WOB/RPM/Torque/SPP/ROP against MSE at lags 1-20s; attach `CausalLead` results to ticket |
 | 5 | Advanced Physics | Strategic verification of tickets (CfC tiebreaker on Uncertain) |
@@ -112,6 +112,21 @@ The **Orchestrator** uses trait-based `Specialist` implementations for domain-sp
 | 8 | Orchestrator Voting | 4 trait-based specialists vote with regime-adjusted weights -> VotingResult |
 | 9 | Advisory Composition | AdvisoryComposer assembles StrategicAdvisory (CRITICAL cooldown) |
 | 10 | Dashboard API | REST endpoints and web dashboard |
+
+### Phase 3 Ticket Gate (6 Rules)
+
+The tactical agent's `decide_advisory_ticket()` applies 6 sequential rules before creating a ticket. Failing any rule returns `None` without consuming cooldown (except Rule 3 which is the cooldown itself). WellControl tickets bypass Rules 4, 5, and 6 — safety is never gated.
+
+| Rule | Gate | Purpose |
+|------|------|---------|
+| 1 | **Rig state** | Only Drilling or Reaming |
+| 2 | **Anomaly detected** | `metrics.is_anomaly` must be true |
+| 3 | **Per-category cooldown** | Packet count AND depth change AND time elapsed must all be met to suppress (per-category, not global) |
+| 4 | **ACI corroboration** | Trigger metric must be outside its ACI conformal interval; category-specific metric mapping |
+| 5 | **CfC corroboration** | Neural network anomaly score must be >= 0.3; suppresses all non-safety tickets during CfC warm-up |
+| 6 | **Founder debounce** | Mechanical/Founder tickets require N consecutive founder-positive packets (default 3); filters transient WOB spikes |
+
+Delta calculations use `prev_active_packet` (last packet from Drilling/Reaming/Circulating state) rather than the raw previous packet, preventing false positives from Idle-to-Drilling state transitions.
 
 ---
 
@@ -158,7 +173,7 @@ When the CfC detects anomalies, it reports which specific features deviated most
 
 | Well | Packets | Avg Loss | Tickets | Confirmation Rate | Notes |
 |------|---------|----------|---------|-------------------|-------|
-| **F-5** | 181,617 | 0.226 | 144 | 97% | 11 CfC tiebreaker corroborations |
+| **F-5** | 181,617 | 0.205 | 272 | 96% | After ticket quality fixes (ACI gate, CfC gate, founder debounce) |
 | **F-9A** | 87,876 | 0.702 | 3 | 0% (all rejected) | Quiet well, correct behavior |
 | **F-12** (unseen) | 2,423,467 | 0.882 | 222 | 47% | First-time well, CfC calibrated online |
 
@@ -493,7 +508,7 @@ Automatic detection of current drilling operation based on parameters.
 
 | Well | Packets | Drilling | Tickets | Pipeline |
 |------|---------|----------|---------|----------|
-| F-5 | 181,617 | 9,574 | 144 | Full (ACI + CfC + physics + voting) |
+| F-5 | 181,617 | 24,976 | 272 | Full (ACI + CfC + physics + voting) |
 | F-9A | 87,876 | 5,284 | 3 | Full (ACI + CfC + physics + voting) |
 | F-12 | 2,423,467 | 80,888 | 222 | Full (ACI + CfC + physics + voting) |
 

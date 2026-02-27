@@ -14,8 +14,6 @@ use super::{DrillingMetrics, RiskLevel, TicketEvent, TicketSeverity, WitsPacket}
 pub struct HistoryEntry {
     pub packet: WitsPacket,
     pub metrics: DrillingMetrics,
-    /// Cumulative MSE-hours contribution from this packet
-    pub mse_contribution: f64,
 }
 
 // ============================================================================
