@@ -134,7 +134,11 @@ pub fn tactical_update(
 
     // Calculate deltas from previous packet
     let (torque_delta_percent, spp_delta) = if let Some(prev) = prev_packet {
-        let torque_delta = if prev.torque > 0.0 {
+        // Require minimum absolute torque before computing percentage delta.
+        // Near-zero torque (off-bottom, connections) produces huge percentages
+        // from tiny absolute changes (0.01 → 9.0 = 89,900%).
+        let torque_floor_klbs = 3.0;
+        let torque_delta = if prev.torque > torque_floor_klbs {
             (packet.torque - prev.torque) / prev.torque
         } else {
             0.0

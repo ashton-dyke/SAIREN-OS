@@ -936,8 +936,8 @@ impl ThresholdManager {
             let sigma2 = 2.0 * t.effective_std();
             let sigma3 = 3.0 * t.effective_std();
             if sigma2 > 0.0 {
-                overrides.spp_deviation_warning_psi = Some(sigma2);
-                overrides.spp_deviation_critical_psi = Some(sigma3);
+                overrides.spp_deviation_warning_psi = Some(sigma2.max(30.0));
+                overrides.spp_deviation_critical_psi = Some(sigma3.max(50.0));
             }
         }
 
@@ -947,8 +947,8 @@ impl ThresholdManager {
         if let Some(t) = self.get_threshold(equipment_id, wits_metrics::TORQUE) {
             if t.baseline_mean > 0.0 {
                 let cv = (t.effective_std() / t.baseline_mean).clamp(0.0, 10.0);
-                let warn = 2.0 * cv;
-                let crit = 3.0 * cv;
+                let warn = (2.0 * cv).max(0.10); // Never below 10%
+                let crit = (3.0 * cv).max(0.20); // Never below 20%
                 if warn > 0.0 {
                     overrides.torque_warning_fraction = Some(warn);
                     overrides.torque_critical_fraction = Some(crit);

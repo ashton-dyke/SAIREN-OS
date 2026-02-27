@@ -783,6 +783,14 @@ impl TacticalAgent {
         packet: &WitsPacket,
         metrics: &DrillingMetrics,
     ) -> Option<AdvisoryTicket> {
+        // RULE 0: Depth sanity — reject when bit depth is missing/zero.
+        // WITSML data can have gaps where depth channels are empty but other sensors
+        // report values, causing false Drilling classification.
+        // Only check bit_depth: hole_depth is often unpopulated in Kaggle CSV format.
+        if packet.bit_depth <= 0.0 {
+            return None;
+        }
+
         // RULE 1: Only create tickets during active drilling states
         if metrics.state != RigState::Drilling && metrics.state != RigState::Reaming {
             return None;
