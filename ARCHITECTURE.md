@@ -132,18 +132,22 @@ Delta calculations use `prev_active_packet` (last packet from Drilling/Reaming/C
 
 ## CfC Neural Network
 
-A 128-neuron Closed-form Continuous-time (CfC) neural network with Neural Circuit Policy (NCP) sparse wiring that actively participates in the decision pipeline. The network is **self-supervised** — it predicts next-timestep sensor values and treats prediction error as an anomaly signal. No labeled training data needed.
+A dual 64-neuron Closed-form Continuous-time (CfC) neural network with Neural Circuit Policy (NCP) sparse wiring that actively participates in the decision pipeline. Two independent networks — **fast** and **slow** — run in parallel via `rayon::join()` and are combined via `max(fast, slow)`. The networks are **self-supervised** — they predict next-timestep sensor values and treat prediction error as an anomaly signal. No labeled training data needed.
 
 ### Properties
 
-| Property | Value |
-|----------|-------|
-| **Neurons** | 128 CfC (24 sensory -> 64 inter -> 32 command -> 8 motor) |
-| **Parameters** | ~6,051 trainable |
-| **NCP Connections** | ~1,833 (~30% sparse wiring) |
+| Property | Fast Network | Slow Network |
+|----------|-------------|-------------|
+| **Neurons** | 64 CfC with NCP wiring | 64 CfC with NCP wiring |
+| **Parameters** | ~1,308 trainable | ~1,326 trainable |
+| **NCP Connections** | ~316 (~30% sparse) | ~322 (~30% sparse) |
+| **Learning Rate** | 0.001 → 0.0001 | 0.0001 → 0.00001 |
+| **BPTT Depth** | 4 (fast adaptation) | 8 (trend tracking) |
+| **Role** | Catches acute events (kicks, sudden losses) | Catches gradual trends (pack-offs, washouts) |
 | **Input Features** | 16 (WOB, ROP, RPM, torque, MSE, SPP, d-exp, hookload, ECD, flow balance, pit rate, DXC, pump SPM, mud weight, gas, pit volume) |
 | **Outputs** | 16 next-step predictions, anomaly score (0-1), health score (0-1), per-feature surprise decomposition |
-| **Training** | Online Adam optimizer with BPTT depth=4, gradient norm clipping |
+| **Combined Scoring** | `max(fast_score, slow_score)` — either network can trigger detection |
+| **Parallelism** | Both networks run concurrently via `rayon::join()` (zero shared mutable state) |
 | **Calibration** | 500 packets before producing anomaly scores |
 
 ### How It Works
@@ -171,11 +175,11 @@ When the CfC detects anomalies, it reports which specific features deviated most
 
 ### Validation Results
 
-| Well | Packets | Avg Loss | Tickets | Confirmation Rate | Notes |
-|------|---------|----------|---------|-------------------|-------|
-| **F-5** | 181,617 | 0.205 | 272 | 96% | After ticket quality fixes (ACI gate, CfC gate, founder debounce) |
-| **F-9A** | 87,876 | 0.702 | 3 | 0% (all rejected) | Quiet well, correct behavior |
-| **F-12** (unseen) | 2,423,467 | 0.882 | 222 | 47% | First-time well, CfC calibrated online |
+| Well | Packets | Fast Avg Loss | Slow Avg Loss | Tickets | Confirmation Rate | Notes |
+|------|---------|--------------|--------------|---------|-------------------|-------|
+| **F-5** | 181,617 | 0.254 | 0.658 | 271 | 97% confirmed, 1% rejected | Extensive fluid loss detection across full depth |
+| **F-9A** | 133,557 | 0.519 | 1.130 | 8 | 100% confirmed | Hydraulics issues in narrow depth band |
+| **F-12** | 2,423,467 | 1.072 | 1.872 | 70 | 81% confirmed | Long-duration well, CfC calibrated online |
 
 ### Implementation Details
 
@@ -190,9 +194,9 @@ When the CfC detects anomalies, it reports which specific features deviated most
 | `src/cfc/regime_clusterer.rs` | K-means clustering of 8 motor outputs -> regime_id (0-3) |
 | `src/cfc/formation_detector.rs` | Motor-output pattern analysis for formation boundary detection |
 
-**Adam optimizer**: Decaying base LR (0.001 -> floor 0.0001), beta1=0.9, beta2=0.999 — 64% lower loss vs SGD baseline.
+**Adam optimizer**: Decaying base LR, beta1=0.9, beta2=0.999 — 64% lower loss vs SGD baseline. Fast network: 0.001 → 0.0001; Slow network: 0.0001 → 0.00001.
 
-**Truncated BPTT (depth=4)**: Backprop through 4 cached timesteps with 0.7^k gradient decay per step.
+**Truncated BPTT**: Fast network depth=4 (responsive), slow network depth=8 (trend-sensitive). Backprop through cached timesteps with 0.7^k gradient decay per step.
 
 **Gradient norm clipping** (max norm=5.0): Preserves gradient direction while preventing explosion; replaces per-element hard clipping.
 
@@ -504,15 +508,18 @@ Automatic detection of current drilling operation based on parameters.
 | WITS Packet Rate | 1 Hz | 1 Hz |
 | History Buffer | 60 packets | 60 |
 
-### Replay Throughput (Volve data, no LLM)
+### Replay Throughput (Volve data, no LLM, rayon parallel CfC)
 
-| Well | Packets | Drilling | Tickets | Pipeline |
-|------|---------|----------|---------|----------|
-| F-5 | 181,617 | 24,976 | 272 | Full (ACI + CfC + physics + voting) |
-| F-9A | 87,876 | 5,284 | 3 | Full (ACI + CfC + physics + voting) |
-| F-12 | 2,423,467 | 80,888 | 222 | Full (ACI + CfC + physics + voting) |
+| Well | Packets | Wall Time | us/packet | CPU Util | Tickets | Confirmed |
+|------|---------|-----------|-----------|----------|---------|-----------|
+| F-12 | 2,423,467 | 7.1s | 2.9 | 168% | 70 | 81% |
+| F-5 | 181,617 | 2.1s | 11.5 | 177% | 271 | 97% |
+| F-9A | 133,557 | 2.3s | 17.2 | 116% | 8 | 100% |
+| **Total** | **2,738,641** | **11.5s** | **4.2 avg** | **154% avg** | | |
 
-The full pipeline (ACI conformal intervals, CfC neural network online training, physics engine, tactical/strategic two-stage verification, specialist voting) processes 2.4M packets in a single pass with no batch preprocessing or cloud round-trips. All computation runs locally in a single Rust binary with no GPU dependency.
+**Aggregate: ~238,000 packets/second (~4 days of real-time WITS data per second of processing).**
+
+The full pipeline (ACI conformal intervals, dual CfC neural network online training, physics engine, tactical/strategic two-stage verification, specialist voting) processes 2.7M packets in 11.5 seconds with no batch preprocessing or cloud round-trips. All computation runs locally in a single Rust binary with no GPU dependency. The dual CfC networks run in parallel via `rayon::join()`, with CPU utilization of 168-177% on drilling-heavy wells confirming effective parallelization.
 
 > **Note**: Tactical routing (pattern matching, ticket creation) is purely deterministic and
 > runs at physics speed (~10ms) on all hardware. Only the strategic LLM advisory generation

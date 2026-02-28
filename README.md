@@ -841,7 +841,7 @@ Switch campaigns via dashboard dropdown, API (`POST /api/v2/campaign`), or `CAMP
 
 ### CfC Neural Network
 
-128-neuron Closed-form Continuous-time (CfC) network with NCP sparse wiring. Self-supervised — predicts next-timestep sensor values and uses prediction error as anomaly signal. No labeled training data needed. Calibrates after 500 packets. Participates in severity modulation, LLM context enrichment, and strategic tiebreaking.
+Dual 64-neuron Closed-form Continuous-time (CfC) network with NCP sparse wiring. Two networks run in parallel via `rayon::join()`: a **fast network** (LR 0.001, BPTT=4) catches acute events and a **slow network** (LR 0.0001, BPTT=8) catches gradual trends. Combined scoring via `max(fast, slow)`. Self-supervised — predicts next-timestep sensor values and uses prediction error as anomaly signal. No labeled training data needed. Calibrates after 500 packets. Participates in severity modulation, LLM context enrichment, and strategic tiebreaking.
 
 For full CfC architecture, training details, and validation results, see [ARCHITECTURE.md](ARCHITECTURE.md#cfc-neural-network).
 
@@ -889,7 +889,7 @@ For developer/ML terms (CfC, NCP, BPTT, ACI, RegimeProfile, etc.), see [ARCHITEC
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-Current version: v3.2
+Current version: v3.5
 
 ---
 

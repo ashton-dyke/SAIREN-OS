@@ -189,8 +189,10 @@ pub fn update_dual_from_drilling(
     metrics: &DrillingMetrics,
     dt: f64,
 ) -> DualCfcResult {
-    let fast_result = update_from_drilling(&mut dual.fast, packet, metrics, dt);
-    let slow_result = update_from_drilling(&mut dual.slow, packet, metrics, dt);
+    let (fast_result, slow_result) = rayon::join(
+        || update_from_drilling(&mut dual.fast, packet, metrics, dt),
+        || update_from_drilling(&mut dual.slow, packet, metrics, dt),
+    );
 
     let combined_anomaly = fast_result.anomaly_score.max(slow_result.anomaly_score);
 

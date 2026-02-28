@@ -117,6 +117,14 @@ fn main() {
         config::init(WellConfig::default(), config::ConfigProvenance::default());
     }
 
+    // Initialize rayon thread pool for CfC dual-network parallelism.
+    // Offline replay: no tokio runtime, use all available cores.
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(4)
+        .thread_name(|idx| format!("rayon-cfc-{}", idx))
+        .build_global()
+        .expect("Failed to initialize rayon thread pool");
+
     println!("╔══════════════════════════════════════════════════════════════╗");
     println!("║  SAIREN-OS  ·  Volve Field Data Replay                     ║");
     println!("║  CPU-only  ·  No LLM  ·  Physics + ACI + Rule-Based Agents ║");
@@ -161,7 +169,7 @@ fn main() {
     println!("  Tactical Agent:  baseline learning + ACI conformal intervals");
     println!("  Strategic Agent: rule-based verification (no LLM)");
     println!("  ACI:             90% coverage, window=200, γ=0.005 (integrated into tactical)");
-    println!("  CfC Network:     128 neurons, NCP wiring, shadow mode (self-supervised)");
+    println!("  CfC Network:     Dual 64-neuron (fast+slow), NCP wiring, rayon parallel");
     println!();
 
     // Process all packets

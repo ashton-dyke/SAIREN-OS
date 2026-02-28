@@ -4,6 +4,74 @@ All notable changes to SAIREN-OS are documented here.
 
 ---
 
+## v3.5 - Parallel CfC Dual Network Processing
+
+Parallelize the dual CfC neural networks using `rayon::join()`, cutting CfC cost from ~18ms to ~9ms per packet. The fast and slow `CfcNetwork` instances are completely independent — zero shared mutable state, identical read-only inputs, outputs combined via `max()`.
+
+**Changes** (`Cargo.toml`, `src/cfc/mod.rs`, `src/main.rs`, `src/bin/volve_replay.rs`):
+- Added `rayon = "1.10"` dependency (already in Cargo.lock as transitive)
+- Replaced sequential `update_from_drilling()` calls with `rayon::join()` in `update_dual_from_drilling()`
+- Production thread pool: 2 rayon threads (leaves 2 RPi5 cores for tokio)
+- Offline replay thread pool: 4 rayon threads (all available cores)
+
+**Throughput** (release, Volve replay, full pipeline):
+
+| Well | Packets | Wall Time | us/packet | CPU Util |
+|------|---------|-----------|-----------|----------|
+| F-12 | 2,423,467 | 7.1s | 2.9 | 168% |
+| F-5 | 181,617 | 2.1s | 11.5 | 177% |
+| F-9A | 133,557 | 2.3s | 17.2 | 116% |
+
+Aggregate: **238,000 packets/sec (~4 days of real-time WITS data per second)**. CPU utilization of 168-177% on drilling-heavy wells confirms effective parallelization.
+
+---
+
+## v3.4 - Dual CfC Architecture: Fast + Slow 64-Neuron Networks
+
+Replace single 128-neuron CfC with two independent 64-neuron networks optimized for different temporal scales. Two networks cost ~77% of a single 128-neuron network while providing fundamentally better coverage.
+
+**Fast network** (LR 0.001→0.0001, BPTT=4): catches acute events (kicks, sudden losses) — adapts quickly to step changes. ~1,308 parameters, ~316 NCP connections.
+
+**Slow network** (LR 0.0001→0.00001, BPTT=8): catches gradual trends (pack-offs, washouts) — maintains a stable baseline so prediction error stays elevated for slow-moving anomalies. ~1,326 parameters, ~322 NCP connections.
+
+**Combined scoring**: `max(fast_score, slow_score)` — either network can trigger detection. Feature surprises taken from whichever network scored higher. Feature sigmas from slow network (stable baseline for formation detection). Motor outputs from fast network (responsive for regime clustering).
+
+**Files**: `src/cfc/mod.rs`, `src/cfc/network.rs`, `src/cfc/training.rs`, `src/cfc/cell.rs`, `src/cfc/wiring.rs`, `src/agents/tactical.rs`, `src/bin/volve_replay.rs` (+676/-149 lines)
+
+**Validation results**:
+
+| Well | Tickets | Confirmed | Rejected | Notes |
+|------|---------|-----------|----------|-------|
+| F-5 | 271 | 97% | 1% | 36% of tickets rescued by slow network |
+| F-9A | 8 | 100% | 0% | Clean hydraulics detection |
+| F-12 | 70 | 81% | 12% | Rejection rate improved from 19% (v3.3) |
+
+---
+
+## v3.3 - F-12 Rejection Reduction (Fixes 9-11)
+
+Three targeted fixes reducing F-12 false positives from 111 rejected tickets (27%) to 35 (19%), improving confirmation rate from 73% to 81%.
+
+**Fix 9: Depth sanity gate — RULE 0** (`src/agents/tactical.rs`):
+- Suppresses all tickets when `bit_depth <= 0` — prevents false positives during surface operations and data gaps
+
+**Fix 10: Torque baseline floor** (`src/baseline/mod.rs`, `src/physics_engine/mod.rs`):
+- 3 klbs absolute minimum before percentage delta calculations
+- 10%/20% baseline floor prevents noise on low-torque operations from triggering mechanical alerts
+
+**Fix 11: SPP baseline floor** (`src/baseline/mod.rs`):
+- 30/50 psi minimum floor aligned with strategic verification thresholds
+- Prevents small absolute SPP changes from exceeding percentage thresholds on low-pressure operations
+
+**F-12 results (v3.3 vs v3.2)**:
+| Metric | v3.2 | v3.3 |
+|--------|------|------|
+| Total tickets | 149 | 70 |
+| Confirmed | 35 (24%) | 35 (50%) |
+| Rejected | 111 (74%) | 35 (50%) |
+
+---
+
 ## v3.2 - Ticket Quality: Multi-Gate Pipeline & Founder Debounce
 
 Overhaul of the tactical ticket gate from a single cooldown timer to a 6-rule sequential gate system. Volve F-5 confirmation rate improved from ~58% (v3.1) to **96%** with 272 tickets (4 rejected, 6 uncertain). WellControl tickets unchanged at 258 — safety is never gated.

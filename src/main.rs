@@ -1274,6 +1274,14 @@ async fn main() -> Result<()> {
         .with_target(false)
         .init();
 
+    // Initialize rayon thread pool for CfC dual-network parallelism.
+    // 2 threads: leaves 2 cores for tokio (packet loop, API, fleet sync).
+    rayon::ThreadPoolBuilder::new()
+        .num_threads(2)
+        .thread_name(|idx| format!("rayon-cfc-{}", idx))
+        .build_global()
+        .expect("Failed to initialize rayon thread pool");
+
     let args = CliArgs::parse();
 
     // Subcommand dispatch
