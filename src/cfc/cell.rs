@@ -10,7 +10,7 @@
 //!   h_new[i] = f[i] * g[i] + (1 - f[i]) * h[i]
 //! ```
 
-use crate::cfc::wiring::{NcpWiring, NUM_NEURONS, MOTOR_START, MOTOR_END, NUM_MOTOR, NUM_OUTPUTS};
+use crate::cfc::wiring::{NcpWiring, NUM_OUTPUTS};
 use crate::cfc::normalizer::NUM_FEATURES;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
@@ -51,13 +51,15 @@ impl CfcWeights {
     /// Initialize weights with Xavier/Glorot-style random initialization.
     pub fn init(wiring: &NcpWiring, seed: u64) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
+        let n = wiring.config.num_neurons;
+        let num_motor = wiring.config.num_motor();
 
         // Compute offsets for flat weight storage
-        let mut weight_offset = vec![0usize; NUM_NEURONS];
-        let mut weight_count = vec![0usize; NUM_NEURONS];
+        let mut weight_offset = vec![0usize; n];
+        let mut weight_count = vec![0usize; n];
         let mut total_weights = 0usize;
 
-        for i in 0..NUM_NEURONS {
+        for i in 0..n {
             weight_offset[i] = total_weights;
             weight_count[i] = wiring.incoming[i].len();
             total_weights += weight_count[i];
@@ -66,7 +68,7 @@ impl CfcWeights {
         // Xavier init: std = sqrt(2 / (fan_in + fan_out))
         let init_weights = |total: usize, rng: &mut StdRng| -> Vec<f64> {
             let mut w = vec![0.0; total];
-            for i in 0..NUM_NEURONS {
+            for i in 0..n {
                 let fan_in = weight_count[i].max(1);
                 let std = (2.0 / (fan_in + 1) as f64).sqrt();
                 for j in 0..weight_count[i] {
@@ -81,13 +83,13 @@ impl CfcWeights {
         let w_g = init_weights(total_weights, &mut rng);
 
         // Biases initialized to small values
-        let b_tau = vec![0.5; NUM_NEURONS]; // Bias toward moderate time constants
-        let b_f = vec![0.0; NUM_NEURONS];
-        let b_g = vec![0.0; NUM_NEURONS];
+        let b_tau = vec![0.5; n]; // Bias toward moderate time constants
+        let b_f = vec![0.0; n];
+        let b_g = vec![0.0; n];
 
         // Output projection: Xavier init
-        let out_std = (2.0 / (NUM_MOTOR + NUM_OUTPUTS) as f64).sqrt();
-        let w_out: Vec<f64> = (0..NUM_OUTPUTS * NUM_MOTOR)
+        let out_std = (2.0 / (num_motor + NUM_OUTPUTS) as f64).sqrt();
+        let w_out: Vec<f64> = (0..NUM_OUTPUTS * num_motor)
             .map(|_| rng.gen::<f64>() * 2.0 * out_std - out_std)
             .collect();
         let b_out = vec![0.0; NUM_OUTPUTS];
@@ -173,10 +175,14 @@ impl CfcCell {
         weights: &CfcWeights,
         wiring: &NcpWiring,
     ) -> (Vec<f64>, Vec<f64>, ForwardCache) {
+        let n = wiring.config.num_neurons;
+        let inter_start = wiring.config.sensory_end;
+        let motor_start = wiring.config.command_end;
+        let num_motor = wiring.config.num_motor();
         let mut h_new = h.to_vec();
 
         // Inject input features into sensory neurons (variable mapping)
-        let mut sensory_activations = vec![0.0; NUM_NEURONS];
+        let mut sensory_activations = vec![0.0; n];
         let mut w_in_idx = 0;
         for (feat_idx, &val) in input.iter().enumerate() {
             for &neuron_idx in &wiring.input_map[feat_idx] {
@@ -187,17 +193,17 @@ impl CfcCell {
         }
 
         // Allocate cache storage
-        let mut pre_tau = vec![0.0; NUM_NEURONS];
-        let mut pre_f = vec![0.0; NUM_NEURONS];
-        let mut pre_g = vec![0.0; NUM_NEURONS];
-        let mut tau = vec![0.0; NUM_NEURONS];
-        let mut f_gate = vec![0.0; NUM_NEURONS];
-        let mut g_gate = vec![0.0; NUM_NEURONS];
+        let mut pre_tau = vec![0.0; n];
+        let mut pre_f = vec![0.0; n];
+        let mut pre_g = vec![0.0; n];
+        let mut tau = vec![0.0; n];
+        let mut f_gate = vec![0.0; n];
+        let mut g_gate = vec![0.0; n];
         let h_prev = h.to_vec();
 
         // Process neurons in group order (sensory neurons are set from input)
         // Inter, command, and motor neurons use gated update
-        for neuron in crate::cfc::wiring::INTER_START..NUM_NEURONS {
+        for neuron in inter_start..n {
             let n_in = weights.weight_count[neuron];
             if n_in == 0 {
                 continue;
@@ -238,11 +244,11 @@ impl CfcCell {
 
         // Output projection: y = W_out * h_motor + b_out
         let mut output = vec![0.0; NUM_OUTPUTS];
-        let motor_out: Vec<f64> = h_new[MOTOR_START..MOTOR_END].to_vec();
+        let motor_out: Vec<f64> = h_new[motor_start..motor_start + num_motor].to_vec();
         for o in 0..NUM_OUTPUTS {
             let mut sum = weights.b_out[o];
-            for m in 0..NUM_MOTOR {
-                sum += weights.w_out[o * NUM_MOTOR + m] * motor_out[m];
+            for m in 0..num_motor {
+                sum += weights.w_out[o * num_motor + m] * motor_out[m];
             }
             output[o] = sum;
         }
@@ -288,7 +294,7 @@ pub fn softplus(x: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cfc::wiring::NcpWiring;
+    use crate::cfc::wiring::{NcpWiring, NUM_NEURONS};
 
     #[test]
     fn test_forward_pass_shape() {
@@ -334,6 +340,29 @@ mod tests {
         for x in [-10.0, -1.0, 0.0, 1.0, 10.0, 100.0] {
             assert!(softplus(x) >= 0.0);
             assert!(softplus(x).is_finite());
+        }
+    }
+
+    #[test]
+    fn test_forward_pass_64_neurons() {
+        use crate::cfc::wiring::NcpConfig;
+        let cfg = NcpConfig::dual_64();
+        let wiring = NcpWiring::generate_with_config(42, &cfg);
+        let weights = CfcWeights::init(&wiring, 123);
+        let input = [0.5; NUM_FEATURES];
+        let h = vec![0.0; 64];
+
+        let (h_new, output, cache) = CfcCell::forward(&input, &h, 1.0, &weights, &wiring);
+
+        assert_eq!(h_new.len(), 64);
+        assert_eq!(output.len(), NUM_OUTPUTS);
+        assert_eq!(cache.motor_out.len(), 8); // 8 motor neurons
+
+        for &v in &h_new {
+            assert!(v.is_finite(), "h_new contains non-finite: {}", v);
+        }
+        for &v in &output {
+            assert!(v.is_finite(), "output contains non-finite: {}", v);
         }
     }
 }

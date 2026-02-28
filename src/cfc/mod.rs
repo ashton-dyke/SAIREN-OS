@@ -1,21 +1,29 @@
-//! CfC (Closed-form Continuous-time) Neural Network Operations Specialist.
+//! CfC (Closed-form Continuous-time) Neural Network — Dual Architecture.
 //!
-//! A 128-neuron CfC/NCP neural network that runs in **shadow mode**:
-//! it logs predictions alongside the rule-based system but does not
-//! influence ticket severity decisions.
+//! Two 64-neuron CfC/NCP networks running in parallel:
 //!
-//! The network is **self-supervised** — it predicts next-timestep sensor
-//! values and treats prediction error as an anomaly signal. No labeled
+//! - **Fast network** (LR 0.001→0.0001, BPTT=4): catches acute events
+//!   (kicks, sudden losses) — adapts quickly to step changes.
+//! - **Slow network** (LR 0.0001→0.00001, BPTT=8): catches gradual trends
+//!   (pack-offs, washouts) — maintains a stable baseline so prediction error
+//!   stays elevated for slow-moving anomalies.
+//!
+//! Combined scoring: `max(fast_score, slow_score)` — either network can
+//! trigger detection. Two 64-neuron networks cost ~77% of a single 128-neuron
+//! network while providing fundamentally better coverage.
+//!
+//! The networks are **self-supervised** — they predict next-timestep sensor
+//! values and treat prediction error as an anomaly signal. No labeled
 //! training data is needed.
 //!
-//! ## Architecture
+//! ## Architecture (per network)
 //!
-//! - 128 CfC neurons with NCP sparse wiring (~30% connectivity)
-//! - 12 input features: WOB, ROP, RPM, torque, MSE, SPP, d-exponent,
-//!   hookload, ECD, flow_balance, pit_rate, DXC
-//! - NCP groups: 24 sensory → 64 inter → 32 command → 8 motor
-//! - Outputs: 12 next-step predictions, anomaly score (0-1), health score (0-1)
-//! - Online training: forward → predict → compare → backprop → SGD, every packet
+//! - 64 CfC neurons with NCP sparse wiring (~30% connectivity)
+//! - 16 input features: WOB, ROP, RPM, torque, MSE, SPP, d-exponent,
+//!   hookload, ECD, flow_balance, pit_rate, DXC, pump_spm, MW, gas, pit_vol
+//! - NCP groups: 24 sensory → 20 inter → 12 command → 8 motor
+//! - Outputs: 16 next-step predictions, anomaly score (0-1), health score (0-1)
+//! - Online training: forward → predict → compare → backprop → Adam, every packet
 
 pub mod normalizer;
 pub mod wiring;
@@ -25,13 +33,13 @@ pub mod network;
 pub mod formation_detector;
 pub mod regime_clusterer;
 
-pub use network::{CfcNetwork, FeatureSurprise};
+pub use network::{CfcNetwork, CfcNetworkConfig, FeatureSurprise};
 pub use normalizer::NUM_FEATURES;
 pub use regime_clusterer::RegimeClusterer;
 
 use crate::types::{DrillingMetrics, WitsPacket};
 
-/// Result of CfC processing for one packet (shadow mode output).
+/// Result of CfC processing for one packet (single-network output).
 #[derive(Debug, Clone)]
 pub struct CfcDrillingResult {
     /// Anomaly score from CfC (0.0 = normal, 1.0 = highly anomalous).
@@ -56,6 +64,54 @@ pub struct CfcDrillingResult {
     /// Motor neuron outputs (8-dimensional) from the CfC NCP motor layer.
     /// Used for regime clustering. Empty if no forward pass has been computed.
     pub motor_outputs: Vec<f64>,
+}
+
+/// Combined result from the dual CfC network architecture.
+#[derive(Debug, Clone)]
+pub struct DualCfcResult {
+    /// Combined anomaly score: max(fast, slow).
+    pub anomaly_score: f64,
+    /// Combined health score: 1.0 - anomaly_score.
+    pub health_score: f64,
+    /// Per-network results.
+    pub fast: CfcDrillingResult,
+    pub slow: CfcDrillingResult,
+    /// Either network is calibrated.
+    pub is_calibrated: bool,
+    /// Per-feature surprises from whichever network scored higher.
+    pub feature_surprises: Vec<FeatureSurprise>,
+    /// Feature sigmas from slow network (stable baseline for formation detection).
+    pub feature_sigmas: Vec<(usize, &'static str, f64)>,
+    /// Motor outputs from fast network (responsive for regime clustering).
+    pub motor_outputs: Vec<f64>,
+    /// Fast network's learning rate.
+    pub learning_rate: f64,
+    /// Total packets processed (from fast network — both see same count).
+    pub packets_processed: u64,
+}
+
+/// Dual CfC network: fast + slow running in parallel.
+#[derive(Debug, Clone)]
+pub struct DualCfcNetwork {
+    pub fast: CfcNetwork,
+    pub slow: CfcNetwork,
+}
+
+impl DualCfcNetwork {
+    /// Create a new dual network with fast and slow configs.
+    /// Uses offset seeds so the two networks have different initial weights.
+    pub fn new(seed: u64) -> Self {
+        Self {
+            fast: CfcNetwork::with_config(seed, CfcNetworkConfig::fast()),
+            slow: CfcNetwork::with_config(seed + 100, CfcNetworkConfig::slow()),
+        }
+    }
+
+    /// Reset both networks from scratch.
+    pub fn reset(&mut self) {
+        self.fast.reset();
+        self.slow.reset();
+    }
 }
 
 /// Extract the 16 CfC input features from a WITS packet and drilling metrics.
@@ -102,7 +158,7 @@ pub fn extract_features(packet: &WitsPacket, metrics: &DrillingMetrics) -> [f64;
     ]
 }
 
-/// Update the CfC network with a new packet and return the shadow result.
+/// Update a single CfC network with a new packet and return the result.
 pub fn update_from_drilling(
     network: &mut CfcNetwork,
     packet: &WitsPacket,
@@ -123,6 +179,47 @@ pub fn update_from_drilling(
         feature_surprises: network.feature_surprises(),
         feature_sigmas: network.all_feature_sigmas(),
         motor_outputs: network.latest_motor_outputs().map(|s| s.to_vec()).unwrap_or_default(),
+    }
+}
+
+/// Update the dual CfC network and return the combined result.
+pub fn update_dual_from_drilling(
+    dual: &mut DualCfcNetwork,
+    packet: &WitsPacket,
+    metrics: &DrillingMetrics,
+    dt: f64,
+) -> DualCfcResult {
+    let fast_result = update_from_drilling(&mut dual.fast, packet, metrics, dt);
+    let slow_result = update_from_drilling(&mut dual.slow, packet, metrics, dt);
+
+    let combined_anomaly = fast_result.anomaly_score.max(slow_result.anomaly_score);
+
+    // Feature surprises from whichever network scored higher
+    let feature_surprises = if fast_result.anomaly_score >= slow_result.anomaly_score {
+        fast_result.feature_surprises.clone()
+    } else {
+        slow_result.feature_surprises.clone()
+    };
+
+    // Feature sigmas from slow network (stable baseline for formation detection)
+    let feature_sigmas = slow_result.feature_sigmas.clone();
+
+    // Motor outputs from fast network (responsive for regime clustering)
+    let motor_outputs = fast_result.motor_outputs.clone();
+
+    let is_calibrated = fast_result.is_calibrated || slow_result.is_calibrated;
+
+    DualCfcResult {
+        anomaly_score: combined_anomaly,
+        health_score: 1.0 - combined_anomaly,
+        fast: fast_result,
+        slow: slow_result,
+        is_calibrated,
+        feature_surprises,
+        feature_sigmas,
+        motor_outputs,
+        learning_rate: dual.fast.learning_rate(),
+        packets_processed: dual.fast.packets_processed(),
     }
 }
 
@@ -220,5 +317,67 @@ mod tests {
 
         assert_eq!(net.packets_processed(), 10);
         assert!(net.avg_loss().is_finite());
+    }
+
+    #[test]
+    fn test_dual_network_basic() {
+        let mut dual = DualCfcNetwork::new(42);
+        let packet = make_test_packet();
+        let metrics = make_test_metrics();
+
+        let result = update_dual_from_drilling(&mut dual, &packet, &metrics, 1.0);
+
+        assert!(!result.is_calibrated);
+        assert_eq!(result.anomaly_score, 0.0); // Not calibrated yet
+        assert_eq!(result.health_score, 1.0);
+        assert_eq!(result.packets_processed, 1);
+    }
+
+    #[test]
+    fn test_dual_network_processes_both() {
+        let mut dual = DualCfcNetwork::new(42);
+        let packet = make_test_packet();
+        let metrics = make_test_metrics();
+
+        for _ in 0..10 {
+            let result = update_dual_from_drilling(&mut dual, &packet, &metrics, 1.0);
+            assert!(result.anomaly_score >= 0.0 && result.anomaly_score <= 1.0);
+            assert_eq!(result.fast.packets_processed, result.slow.packets_processed);
+        }
+
+        assert_eq!(dual.fast.packets_processed(), 10);
+        assert_eq!(dual.slow.packets_processed(), 10);
+    }
+
+    #[test]
+    fn test_dual_network_combined_score_is_max() {
+        let mut dual = DualCfcNetwork::new(42);
+        let packet = make_test_packet();
+        let metrics = make_test_metrics();
+
+        // Process enough packets so scores can be meaningful
+        for _ in 0..10 {
+            let result = update_dual_from_drilling(&mut dual, &packet, &metrics, 1.0);
+            // Combined score should be max of the two (both 0.0 when uncalibrated)
+            assert!(
+                (result.anomaly_score - result.fast.anomaly_score.max(result.slow.anomaly_score)).abs() < 1e-12,
+                "Combined score should be max(fast, slow)"
+            );
+        }
+    }
+
+    #[test]
+    fn test_dual_network_reset() {
+        let mut dual = DualCfcNetwork::new(42);
+        let packet = make_test_packet();
+        let metrics = make_test_metrics();
+
+        for _ in 0..5 {
+            update_dual_from_drilling(&mut dual, &packet, &metrics, 1.0);
+        }
+
+        dual.reset();
+        assert_eq!(dual.fast.packets_processed(), 0);
+        assert_eq!(dual.slow.packets_processed(), 0);
     }
 }

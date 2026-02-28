@@ -304,10 +304,10 @@ pub struct TacticalAgent {
     aci_tracker: crate::aci::AciTracker,
     /// Latest ACI result (only during drilling/reaming)
     aci_result: Option<crate::aci::AciDrillingResult>,
-    /// CfC neural network (shadow mode — logs predictions, doesn't influence decisions)
-    cfc_network: crate::cfc::CfcNetwork,
+    /// Dual CfC neural networks (fast + slow, shadow mode)
+    cfc_network: crate::cfc::DualCfcNetwork,
     /// Latest CfC result (only during drilling/reaming)
-    cfc_result: Option<crate::cfc::CfcDrillingResult>,
+    cfc_result: Option<crate::cfc::DualCfcResult>,
     /// CfC-based formation transition detector
     cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector,
     /// Latest CfC formation transition event (if any)
@@ -360,7 +360,7 @@ impl TacticalAgent {
             baseline_overrides: None,
             aci_tracker: crate::aci::AciTracker::new(crate::aci::AciConfig::default()),
             aci_result: None,
-            cfc_network: crate::cfc::CfcNetwork::new(42),
+            cfc_network: crate::cfc::DualCfcNetwork::new(42),
             cfc_result: None,
             cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
             latest_formation_transition: None,
@@ -391,7 +391,7 @@ impl TacticalAgent {
             baseline_overrides: None,
             aci_tracker: crate::aci::AciTracker::new(crate::aci::AciConfig::default()),
             aci_result: None,
-            cfc_network: crate::cfc::CfcNetwork::new(42),
+            cfc_network: crate::cfc::DualCfcNetwork::new(42),
             cfc_result: None,
             cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
             latest_formation_transition: None,
@@ -466,7 +466,7 @@ impl TacticalAgent {
             baseline_overrides: restored_overrides,
             aci_tracker: crate::aci::AciTracker::new(crate::aci::AciConfig::default()),
             aci_result: None,
-            cfc_network: crate::cfc::CfcNetwork::new(42),
+            cfc_network: crate::cfc::DualCfcNetwork::new(42),
             cfc_result: None,
             cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
             latest_formation_transition: None,
@@ -585,10 +585,10 @@ impl TacticalAgent {
         };
 
         // ====================================================================
-        // PHASE 2.8: CfC Neural Network Update (shadow mode, drilling/reaming)
+        // PHASE 2.8: Dual CfC Neural Network Update (shadow mode, drilling/reaming)
         // ====================================================================
         self.cfc_result = if metrics.state == RigState::Drilling || metrics.state == RigState::Reaming {
-            Some(crate::cfc::update_from_drilling(&mut self.cfc_network, packet, &metrics, 1.0))
+            Some(crate::cfc::update_dual_from_drilling(&mut self.cfc_network, packet, &metrics, 1.0))
         } else {
             None
         };
@@ -932,7 +932,8 @@ impl TacticalAgent {
         // Log CfC neural network state
         if let Some(cfc) = &self.cfc_result {
             ticket.log_info(TicketStage::TacticalCreation,
-                format!("CfC: anomaly={:.3} calibrated={} surprises={}",
+                format!("CfC: fast={:.3} slow={:.3} combined={:.3} calibrated={} surprises={}",
+                    cfc.fast.anomaly_score, cfc.slow.anomaly_score,
                     cfc.anomaly_score, cfc.is_calibrated, cfc.feature_surprises.len()));
         }
 
@@ -1471,7 +1472,7 @@ impl TacticalAgent {
     }
 
     /// Get the latest CfC result (shadow mode, only during drilling/reaming)
-    pub fn cfc_result(&self) -> Option<&crate::cfc::CfcDrillingResult> {
+    pub fn cfc_result(&self) -> Option<&crate::cfc::DualCfcResult> {
         self.cfc_result.as_ref()
     }
 
@@ -1480,8 +1481,8 @@ impl TacticalAgent {
         self.latest_formation_transition.as_ref()
     }
 
-    /// Get a reference to the CfC network for diagnostics
-    pub fn cfc_network(&self) -> &crate::cfc::CfcNetwork {
+    /// Get a reference to the dual CfC network for diagnostics
+    pub fn cfc_network(&self) -> &crate::cfc::DualCfcNetwork {
         &self.cfc_network
     }
 

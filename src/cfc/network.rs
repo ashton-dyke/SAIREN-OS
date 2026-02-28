@@ -1,5 +1,5 @@
 //! CfC Network: the top-level struct that orchestrates forward pass,
-//! online training with BPTT depth=4, anomaly scoring, and calibration.
+//! online training with BPTT, anomaly scoring, and calibration.
 //!
 //! The network is self-supervised: it predicts next-timestep sensor values
 //! and treats prediction error as an anomaly signal.
@@ -7,8 +7,8 @@
 use std::collections::VecDeque;
 use crate::cfc::cell::{CfcCell, CfcWeights, ForwardCache};
 use crate::cfc::normalizer::{OnlineNormalizer, NUM_FEATURES, FEATURE_NAMES};
-use crate::cfc::training::{AdamOptimizer, train_step, BPTT_DEPTH};
-use crate::cfc::wiring::{NcpWiring, NUM_NEURONS, NUM_OUTPUTS};
+use crate::cfc::training::{AdamOptimizer, train_step_with_config, TrainingConfig};
+use crate::cfc::wiring::{NcpConfig, NcpWiring, NUM_OUTPUTS};
 
 /// Calibration window: number of packets before the network is considered
 /// calibrated enough to produce meaningful anomaly scores.
@@ -32,9 +32,46 @@ pub struct FeatureSurprise {
     pub sigma: f64,
 }
 
+/// Full configuration for a CfC network instance.
+#[derive(Debug, Clone)]
+pub struct CfcNetworkConfig {
+    pub ncp: NcpConfig,
+    pub training: TrainingConfig,
+    pub error_ema_alpha: f64,
+    pub calibration_window: u64,
+}
+
+impl CfcNetworkConfig {
+    /// Fast network: 64 neurons, high LR, BPTT=4, alpha=0.01.
+    /// Catches acute events (kicks, losses).
+    pub fn fast() -> Self {
+        Self {
+            ncp: NcpConfig::dual_64(),
+            training: TrainingConfig::fast(),
+            error_ema_alpha: 0.01,
+            calibration_window: 500,
+        }
+    }
+
+    /// Slow network: 64 neurons, low LR, BPTT=8, alpha=0.005.
+    /// Catches gradual trends (pack-offs, washouts).
+    pub fn slow() -> Self {
+        Self {
+            ncp: NcpConfig::dual_64(),
+            training: TrainingConfig::slow(),
+            error_ema_alpha: 0.005,
+            calibration_window: 750,
+        }
+    }
+}
+
 /// CfC neural network for drilling anomaly detection.
 #[derive(Debug, Clone)]
 pub struct CfcNetwork {
+    /// Network configuration (stored for reset).
+    config: CfcNetworkConfig,
+    /// Seed used for initialization (stored for reset).
+    seed: u64,
     /// NCP sparse wiring topology.
     wiring: NcpWiring,
     /// Network weights and biases.
@@ -43,7 +80,7 @@ pub struct CfcNetwork {
     normalizer: OnlineNormalizer,
     /// Adam optimizer with decaying LR.
     optimizer: AdamOptimizer,
-    /// Current hidden state [NUM_NEURONS].
+    /// Current hidden state [num_neurons].
     hidden: Vec<f64>,
     /// Ring buffer of recent forward caches for BPTT (most recent first).
     cache_history: VecDeque<ForwardCache>,
@@ -70,19 +107,35 @@ pub struct CfcNetwork {
 }
 
 impl CfcNetwork {
-    /// Create a new CfC network with deterministic initialization.
+    /// Create a new CfC network with the legacy 128-neuron layout.
     pub fn new(seed: u64) -> Self {
-        let wiring = NcpWiring::generate(seed);
+        let config = CfcNetworkConfig {
+            ncp: NcpConfig::default_128(),
+            training: TrainingConfig::fast(),
+            error_ema_alpha: ERROR_EMA_ALPHA,
+            calibration_window: CALIBRATION_WINDOW,
+        };
+        Self::with_config(seed, config)
+    }
+
+    /// Create a new CfC network from a full configuration.
+    pub fn with_config(seed: u64, config: CfcNetworkConfig) -> Self {
+        let wiring = NcpWiring::generate_with_config(seed, &config.ncp);
         let weights = CfcWeights::init(&wiring, seed.wrapping_add(1));
         let num_params = weights.num_params();
+        let optimizer = AdamOptimizer::with_config(num_params, &config.training);
+        let bptt_depth = config.training.bptt_depth;
+        let n = config.ncp.num_neurons;
 
         Self {
+            config,
+            seed,
             wiring,
             weights,
             normalizer: OnlineNormalizer::new(),
-            optimizer: AdamOptimizer::new(num_params),
-            hidden: vec![0.0; NUM_NEURONS],
-            cache_history: VecDeque::with_capacity(BPTT_DEPTH + 1),
+            optimizer,
+            hidden: vec![0.0; n],
+            cache_history: VecDeque::with_capacity(bptt_depth + 1),
             has_prev: false,
             packets_processed: 0,
             error_ema: 0.0,
@@ -101,12 +154,13 @@ impl CfcNetwork {
     /// Returns (predictions, training_loss).
     pub fn process(&mut self, raw_features: &[f64; NUM_FEATURES], dt: f64) -> (Vec<f64>, Option<f64>) {
         self.packets_processed += 1;
+        let ema_alpha = self.config.error_ema_alpha;
 
         // Normalize current features (and update running stats)
         let normalized = self.normalizer.normalize_and_update(raw_features);
 
         // ====================================================================
-        // Train: backprop through cached timesteps (BPTT depth up to 4)
+        // Train: backprop through cached timesteps (BPTT)
         // ====================================================================
         let train_loss = if self.has_prev {
             // Target is current normalized values (what we should have predicted)
@@ -120,22 +174,23 @@ impl CfcNetwork {
 
                     // Update per-feature error EMAs
                     let abs_err = err.abs();
-                    self.feature_error_ema[i] = self.feature_error_ema[i] * (1.0 - ERROR_EMA_ALPHA)
-                        + abs_err * ERROR_EMA_ALPHA;
-                    self.feature_error_sq_ema[i] = self.feature_error_sq_ema[i] * (1.0 - ERROR_EMA_ALPHA)
-                        + (abs_err * abs_err) * ERROR_EMA_ALPHA;
+                    self.feature_error_ema[i] = self.feature_error_ema[i] * (1.0 - ema_alpha)
+                        + abs_err * ema_alpha;
+                    self.feature_error_sq_ema[i] = self.feature_error_sq_ema[i] * (1.0 - ema_alpha)
+                        + (abs_err * abs_err) * ema_alpha;
                 }
             }
 
             // Build cache slice for BPTT (most recent first)
             let cache_vec: Vec<ForwardCache> = self.cache_history.iter().cloned().collect();
 
-            let loss = train_step(
+            let loss = train_step_with_config(
                 &mut self.weights,
                 &cache_vec,
                 &target,
                 &self.wiring,
                 &mut self.optimizer,
+                Some(&self.config.training),
             );
 
             self.total_loss += loss;
@@ -144,10 +199,10 @@ impl CfcNetwork {
             // Update error EMA for anomaly scoring
             let rmse = loss.sqrt();
             self.last_rmse = rmse;
-            self.error_ema = self.error_ema * (1.0 - ERROR_EMA_ALPHA)
-                + rmse * ERROR_EMA_ALPHA;
-            self.error_sq_ema = self.error_sq_ema * (1.0 - ERROR_EMA_ALPHA)
-                + (rmse * rmse) * ERROR_EMA_ALPHA;
+            self.error_ema = self.error_ema * (1.0 - ema_alpha)
+                + rmse * ema_alpha;
+            self.error_sq_ema = self.error_sq_ema * (1.0 - ema_alpha)
+                + (rmse * rmse) * ema_alpha;
 
             Some(loss)
         } else {
@@ -168,8 +223,9 @@ impl CfcNetwork {
         self.hidden = h_new;
 
         // Push to cache history (most recent at front)
+        let bptt_depth = self.config.training.bptt_depth;
         self.cache_history.push_front(cache);
-        if self.cache_history.len() > BPTT_DEPTH {
+        if self.cache_history.len() > bptt_depth {
             self.cache_history.pop_back();
         }
         self.has_prev = true;
@@ -215,8 +271,8 @@ impl CfcNetwork {
 
                 // Only include if current error is notably above average
                 if avg_err > 1e-10 && abs_err > avg_err * 1.5 {
-                    let variance = self.feature_error_sq_ema[i] - avg_err * avg_err;
-                    let std = if variance > 0.0 { variance.sqrt() } else { 1e-10 };
+                    let variance = (self.feature_error_sq_ema[i] - avg_err * avg_err).max(1e-12);
+                    let std = variance.sqrt();
                     let sigma = (abs_err - avg_err) / std;
                     Some(FeatureSurprise {
                         index: i,
@@ -248,8 +304,8 @@ impl CfcNetwork {
             .map(|i| {
                 let abs_err = self.last_feature_errors[i].abs();
                 let avg = self.feature_error_ema[i];
-                let var = self.feature_error_sq_ema[i] - avg * avg;
-                let std = if var > 0.0 { var.sqrt() } else { 1e-10 };
+                let var = (self.feature_error_sq_ema[i] - avg * avg).max(1e-12);
+                let std = var.sqrt();
                 let sigma = if avg > 1e-10 {
                     (abs_err - avg) / std
                 } else {
@@ -267,7 +323,7 @@ impl CfcNetwork {
 
     /// Whether the network has processed enough data to be calibrated.
     pub fn is_calibrated(&self) -> bool {
-        self.packets_processed >= CALIBRATION_WINDOW
+        self.packets_processed >= self.config.calibration_window
     }
 
     /// Number of packets processed.
@@ -304,7 +360,7 @@ impl CfcNetwork {
         self.train_steps
     }
 
-    /// Current BPTT depth being used (actual cache size, up to BPTT_DEPTH).
+    /// Current BPTT depth being used (actual cache size, up to configured bptt_depth).
     pub fn current_bptt_depth(&self) -> usize {
         self.cache_history.len()
     }
@@ -317,7 +373,8 @@ impl CfcNetwork {
 
     /// Reset network state (hidden state and training history, but keep weights).
     pub fn reset_state(&mut self) {
-        self.hidden = vec![0.0; NUM_NEURONS];
+        let n = self.config.ncp.num_neurons;
+        self.hidden = vec![0.0; n];
         self.cache_history.clear();
         self.has_prev = false;
         self.error_ema = 0.0;
@@ -328,9 +385,9 @@ impl CfcNetwork {
         self.last_feature_errors = [0.0; NUM_FEATURES];
     }
 
-    /// Full reset (new network from scratch).
+    /// Full reset (new network from scratch with stored config).
     pub fn reset(&mut self) {
-        *self = Self::new(42);
+        *self = Self::with_config(self.seed, self.config.clone());
     }
 }
 
@@ -377,7 +434,7 @@ mod tests {
         net.process(&features, 1.0);
         assert_eq!(net.current_bptt_depth(), 4);
 
-        // Should cap at BPTT_DEPTH
+        // Should cap at BPTT_DEPTH (4 for legacy config)
         net.process(&features, 1.0);
         assert_eq!(net.current_bptt_depth(), 4);
     }
@@ -426,5 +483,28 @@ mod tests {
         }
 
         assert!(net.learning_rate() < lr0);
+    }
+
+    #[test]
+    fn test_with_config_fast() {
+        let mut net = CfcNetwork::with_config(42, CfcNetworkConfig::fast());
+        assert_eq!(net.config.ncp.num_neurons, 64);
+
+        let features = [10.0; NUM_FEATURES];
+        let (preds, _) = net.process(&features, 1.0);
+        assert_eq!(preds.len(), NUM_OUTPUTS);
+    }
+
+    #[test]
+    fn test_with_config_slow() {
+        let mut net = CfcNetwork::with_config(42, CfcNetworkConfig::slow());
+        assert_eq!(net.config.ncp.num_neurons, 64);
+        assert_eq!(net.config.calibration_window, 750);
+
+        let features = [10.0; NUM_FEATURES];
+        for _ in 0..10 {
+            net.process(&features, 1.0);
+        }
+        assert!(net.learning_rate() > 0.0);
     }
 }

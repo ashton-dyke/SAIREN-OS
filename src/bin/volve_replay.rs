@@ -229,15 +229,16 @@ fn main() {
             println!();
         }
 
-        // Announce CfC calibration
-        if !cfc_calibrated_announced && tactical.cfc_network().is_calibrated() {
+        // Announce CfC calibration (fast network calibrates first at 500 packets)
+        if !cfc_calibrated_announced && tactical.cfc_network().fast.is_calibrated() {
             cfc_calibrated_announced = true;
             println!(
-                "  ✓ CfC CALIBRATED at packet {} (depth {:.0} ft) — {} params, {} connections, avg loss: {:.6}",
+                "  ✓ CfC CALIBRATED at packet {} (depth {:.0} ft) — fast: {} params/{} conn, slow: {} params/{} conn",
                 i, packet.bit_depth,
-                tactical.cfc_network().num_params(),
-                tactical.cfc_network().num_connections(),
-                tactical.cfc_network().avg_loss()
+                tactical.cfc_network().fast.num_params(),
+                tactical.cfc_network().fast.num_connections(),
+                tactical.cfc_network().slow.num_params(),
+                tactical.cfc_network().slow.num_connections(),
             );
             println!();
         }
@@ -252,7 +253,8 @@ fn main() {
                 // CfC shadow info
                 let cfc_info = if let Some(ref cfc_r) = tactical.cfc_result() {
                     if cfc_r.is_calibrated {
-                        format!(" | CfC anom={:.2} lr={:.5}", cfc_r.anomaly_score, cfc_r.learning_rate)
+                        format!(" | CfC fast={:.2} slow={:.2} combined={:.2}",
+                            cfc_r.fast.anomaly_score, cfc_r.slow.anomaly_score, cfc_r.anomaly_score)
                     } else {
                         format!(" | CfC calibrating ({}/500)", cfc_r.packets_processed)
                     }
@@ -375,9 +377,9 @@ fn main() {
             // Print CfC shadow context alongside ticket
             if let Some(ref cfc_r) = tactical.cfc_result() {
                 if cfc_r.is_calibrated {
-                    println!("    └─ CfC shadow: anomaly={:.3} health={:.3} loss={:.6}",
-                        cfc_r.anomaly_score, cfc_r.health_score,
-                        cfc_r.training_loss.unwrap_or(0.0));
+                    println!("    └─ CfC shadow: fast={:.3} slow={:.3} combined={:.3}",
+                        cfc_r.fast.anomaly_score, cfc_r.slow.anomaly_score,
+                        cfc_r.anomaly_score);
                     if !cfc_r.feature_surprises.is_empty() {
                         let top: Vec<String> = cfc_r.feature_surprises.iter()
                             .take(5)
@@ -505,17 +507,24 @@ fn main() {
 
     // CfC Neural Network Summary
     println!();
-    println!("CfC Neural Network (Shadow Mode):");
-    let cfc_net = tactical.cfc_network();
-    println!("  Parameters:           {}", cfc_net.num_params());
-    println!("  NCP connections:      {}", cfc_net.num_connections());
-    println!("  Packets processed:    {}", cfc_net.packets_processed());
-    println!("  Training steps:       {}", cfc_net.train_steps());
-    println!("  Calibrated:           {}", cfc_net.is_calibrated());
-    println!("  Average loss:         {:.6}", cfc_net.avg_loss());
-    println!("  Final learning rate:  {:.6}", cfc_net.learning_rate());
-    println!("  Final anomaly score:  {:.4}", cfc_net.anomaly_score());
-    println!("  Final health score:   {:.4}", cfc_net.health_score());
+    println!("CfC Dual Neural Network (Shadow Mode):");
+    let cfc_dual = tactical.cfc_network();
+    println!("  Fast network:");
+    println!("    Parameters:         {}", cfc_dual.fast.num_params());
+    println!("    NCP connections:    {}", cfc_dual.fast.num_connections());
+    println!("    Packets processed:  {}", cfc_dual.fast.packets_processed());
+    println!("    Calibrated:         {}", cfc_dual.fast.is_calibrated());
+    println!("    Average loss:       {:.6}", cfc_dual.fast.avg_loss());
+    println!("    Final LR:           {:.6}", cfc_dual.fast.learning_rate());
+    println!("    Final anomaly:      {:.4}", cfc_dual.fast.anomaly_score());
+    println!("  Slow network:");
+    println!("    Parameters:         {}", cfc_dual.slow.num_params());
+    println!("    NCP connections:    {}", cfc_dual.slow.num_connections());
+    println!("    Packets processed:  {}", cfc_dual.slow.packets_processed());
+    println!("    Calibrated:         {}", cfc_dual.slow.is_calibrated());
+    println!("    Average loss:       {:.6}", cfc_dual.slow.avg_loss());
+    println!("    Final LR:           {:.6}", cfc_dual.slow.learning_rate());
+    println!("    Final anomaly:      {:.4}", cfc_dual.slow.anomaly_score());
 
     if let Some(locked_at) = stats.baseline_locked_at_packet {
         println!();

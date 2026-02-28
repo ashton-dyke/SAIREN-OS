@@ -8,7 +8,10 @@
 //! Primary drilling features (WOB, ROP, torque, SPP) are weighted 2x.
 
 use crate::cfc::cell::{CfcWeights, ForwardCache, sigmoid};
-use crate::cfc::wiring::{NcpWiring, MOTOR_START, NUM_MOTOR, NUM_OUTPUTS, INTER_START, NUM_NEURONS};
+use crate::cfc::wiring::{NcpWiring, NUM_OUTPUTS};
+
+#[cfg(test)]
+use crate::cfc::wiring::NUM_NEURONS;
 
 /// Maximum BPTT depth (number of timesteps to backprop through).
 pub const BPTT_DEPTH: usize = 4;
@@ -18,6 +21,43 @@ const BPTT_DECAY: f64 = 0.7;
 
 /// Max gradient norm for global gradient clipping.
 const MAX_GRAD_NORM: f64 = 5.0;
+
+/// Training hyperparameters for a CfC network.
+#[derive(Debug, Clone)]
+pub struct TrainingConfig {
+    pub bptt_depth: usize,
+    pub bptt_decay: f64,
+    pub max_grad_norm: f64,
+    pub initial_lr: f64,
+    pub lr_decay: f64,
+    pub lr_floor: f64,
+}
+
+impl TrainingConfig {
+    /// Fast network config: BPTT=4, LR 0.001→0.0001 — catches acute events.
+    pub fn fast() -> Self {
+        Self {
+            bptt_depth: 4,
+            bptt_decay: 0.7,
+            max_grad_norm: 5.0,
+            initial_lr: 0.001,
+            lr_decay: 0.9999,
+            lr_floor: 0.0001,
+        }
+    }
+
+    /// Slow network config: BPTT=8, LR 0.0001→0.00001 — catches gradual trends.
+    pub fn slow() -> Self {
+        Self {
+            bptt_depth: 8,
+            bptt_decay: 0.85,
+            max_grad_norm: 5.0,
+            initial_lr: 0.0001,
+            lr_decay: 0.9999,
+            lr_floor: 0.00001,
+        }
+    }
+}
 
 /// Per-output feature weights for loss computation.
 /// Primary features (0-7) get weight 2.0, supplementary (8-15) get weight 1.0.
@@ -40,14 +80,14 @@ struct GradAccum {
 }
 
 impl GradAccum {
-    fn new(weights: &CfcWeights) -> Self {
+    fn new(weights: &CfcWeights, num_neurons: usize) -> Self {
         Self {
             d_w_tau: vec![0.0; weights.w_tau.len()],
             d_w_f: vec![0.0; weights.w_f.len()],
             d_w_g: vec![0.0; weights.w_g.len()],
-            d_b_tau: vec![0.0; NUM_NEURONS],
-            d_b_f: vec![0.0; NUM_NEURONS],
-            d_b_g: vec![0.0; NUM_NEURONS],
+            d_b_tau: vec![0.0; num_neurons],
+            d_b_f: vec![0.0; num_neurons],
+            d_b_g: vec![0.0; num_neurons],
             d_w_out: vec![0.0; weights.w_out.len()],
             d_b_out: vec![0.0; NUM_OUTPUTS],
             d_w_in: vec![0.0; weights.w_in.len()],
@@ -108,6 +148,21 @@ impl AdamOptimizer {
             lr: 0.001,
             decay: 0.9999,
             lr_floor: 0.0001,
+            beta1: 0.9,
+            beta2: 0.999,
+            eps: 1e-8,
+            steps: 0,
+            m: vec![0.0; num_params],
+            v: vec![0.0; num_params],
+        }
+    }
+
+    /// Create an optimizer from a TrainingConfig.
+    pub fn with_config(num_params: usize, config: &TrainingConfig) -> Self {
+        Self {
+            lr: config.initial_lr,
+            decay: config.lr_decay,
+            lr_floor: config.lr_floor,
             beta1: 0.9,
             beta2: 0.999,
             eps: 1e-8,
@@ -212,12 +267,34 @@ pub fn train_step(
     wiring: &NcpWiring,
     optimizer: &mut AdamOptimizer,
 ) -> f64 {
+    train_step_with_config(weights, cache_history, target, wiring, optimizer, None)
+}
+
+/// Train with truncated BPTT, optionally using a TrainingConfig for hyperparameters.
+///
+/// When `config` is None, uses the legacy constants (BPTT_DEPTH=4, BPTT_DECAY=0.7, MAX_GRAD_NORM=5.0).
+pub fn train_step_with_config(
+    weights: &mut CfcWeights,
+    cache_history: &[ForwardCache],
+    target: &[f64],
+    wiring: &NcpWiring,
+    optimizer: &mut AdamOptimizer,
+    config: Option<&TrainingConfig>,
+) -> f64 {
     if cache_history.is_empty() {
         return 0.0;
     }
 
+    let bptt_depth = config.map_or(BPTT_DEPTH, |c| c.bptt_depth);
+    let bptt_decay = config.map_or(BPTT_DECAY, |c| c.bptt_decay);
+    let max_grad_norm = config.map_or(MAX_GRAD_NORM, |c| c.max_grad_norm);
+    let n = wiring.config.num_neurons;
+    let num_motor = wiring.config.num_motor();
+    let motor_start = wiring.config.command_end;
+    let inter_start = wiring.config.sensory_end;
+
     let most_recent = &cache_history[0];
-    let mut grads = GradAccum::new(weights);
+    let mut grads = GradAccum::new(weights, n);
 
     // ========================================================================
     // 1. Compute feature-weighted output loss
@@ -236,27 +313,27 @@ pub fn train_step(
     // ========================================================================
     // 2. Backprop through output projection: y = W_out * h_motor + b_out
     // ========================================================================
-    let mut d_h = vec![0.0; NUM_NEURONS];
+    let mut d_h = vec![0.0; n];
 
     for o in 0..NUM_OUTPUTS {
         grads.d_b_out[o] += d_output[o];
-        for m in 0..NUM_MOTOR {
-            let w_idx = o * NUM_MOTOR + m;
+        for m in 0..num_motor {
+            let w_idx = o * num_motor + m;
             grads.d_w_out[w_idx] += d_output[o] * most_recent.motor_out[m];
-            d_h[MOTOR_START + m] += d_output[o] * weights.w_out[w_idx];
+            d_h[motor_start + m] += d_output[o] * weights.w_out[w_idx];
         }
     }
 
     // ========================================================================
-    // 3. BPTT: backprop through up to BPTT_DEPTH cached timesteps
+    // 3. BPTT: backprop through up to bptt_depth cached timesteps
     // ========================================================================
-    let depth = cache_history.len().min(BPTT_DEPTH);
+    let depth = cache_history.len().min(bptt_depth);
 
     for step in 0..depth {
         let cache = &cache_history[step];
-        let decay = BPTT_DECAY.powi(step as i32);
+        let decay = bptt_decay.powi(step as i32);
 
-        d_h = backprop_cfc_gates(&mut grads, weights, cache, &d_h, wiring, decay);
+        d_h = backprop_cfc_gates(&mut grads, weights, cache, &d_h, wiring, decay, n, inter_start);
         backprop_input_projection(&mut grads, cache, &d_h, wiring, decay);
     }
 
@@ -264,8 +341,8 @@ pub fn train_step(
     // 4. Gradient norm clipping
     // ========================================================================
     let norm = grads.grad_norm();
-    if norm > MAX_GRAD_NORM {
-        grads.scale(MAX_GRAD_NORM / norm);
+    if norm > max_grad_norm {
+        grads.scale(max_grad_norm / norm);
     }
 
     // ========================================================================
@@ -293,16 +370,18 @@ fn backprop_cfc_gates(
     d_h_in: &[f64],
     wiring: &NcpWiring,
     decay: f64,
+    num_neurons: usize,
+    inter_start: usize,
 ) -> Vec<f64> {
     let mut d_h = d_h_in.to_vec();
-    let mut d_h_prev = vec![0.0; NUM_NEURONS];
+    let mut d_h_prev = vec![0.0; num_neurons];
 
     // Snapshot d_h consumed by each neuron during pass 1 so we can detect
     // late-arriving gradient from recurrent connections.
-    let mut d_h_consumed = vec![0.0f64; NUM_NEURONS];
+    let mut d_h_consumed = vec![0.0f64; num_neurons];
 
     // ── Pass 1: Reverse order (handles feedforward paths correctly) ──
-    for neuron in (INTER_START..NUM_NEURONS).rev() {
+    for neuron in (inter_start..num_neurons).rev() {
         let n_in = weights.weight_count[neuron];
         if n_in == 0 {
             continue;
@@ -349,7 +428,7 @@ fn backprop_cfc_gates(
                 + d_pre_f * weights.w_f[w_idx]
                 + d_pre_g * weights.w_g[w_idx];
 
-            if src >= INTER_START {
+            if src >= inter_start {
                 d_h[src] += grad_to_src;
             } else {
                 d_h_prev[src] += grad_to_src;
@@ -365,7 +444,7 @@ fn backprop_cfc_gates(
     // For recurrent connections (src > dst), pass 1 scattered gradient to d_h[src]
     // after src was already processed. The residual = d_h[src] - d_h_consumed[src]
     // must be propagated through src's gates to d_h_prev for temporal credit assignment.
-    for neuron in INTER_START..NUM_NEURONS {
+    for neuron in inter_start..num_neurons {
         let residual = d_h[neuron] - d_h_consumed[neuron];
         if residual.abs() < 1e-15 {
             continue;
@@ -555,8 +634,9 @@ mod tests {
 
     #[test]
     fn test_gradient_norm_clipping() {
-        let weights = CfcWeights::init(&NcpWiring::generate(42), 123);
-        let mut grads = GradAccum::new(&weights);
+        let wiring = NcpWiring::generate(42);
+        let weights = CfcWeights::init(&wiring, 123);
+        let mut grads = GradAccum::new(&weights, wiring.num_neurons());
         // Set huge gradients
         for v in grads.d_w_tau.iter_mut() {
             *v = 100.0;
@@ -579,16 +659,18 @@ mod tests {
         // Verify that the two-pass backprop propagates gradients through recurrent
         // connections (src > dst). Before the fix, neurons processed early in the
         // reverse pass never received gradient scattered by later-processed neurons.
-        use crate::cfc::wiring::INTER_START;
 
         let wiring = NcpWiring::generate(42);
         let weights = CfcWeights::init(&wiring, 123);
+        let n = wiring.num_neurons();
+        let inter_start = wiring.config.sensory_end;
+        let motor_start = wiring.config.command_end;
 
         // Identify recurrent connections where src > dst (these were broken before the fix)
         let mut recurrent_sources: std::collections::HashSet<usize> = std::collections::HashSet::new();
-        for dst in INTER_START..NUM_NEURONS {
+        for dst in inter_start..n {
             for &src in &wiring.incoming[dst] {
-                if src > dst && src >= INTER_START {
+                if src > dst && src >= inter_start {
                     recurrent_sources.insert(src);
                 }
             }
@@ -598,17 +680,17 @@ mod tests {
 
         // Run a forward pass with non-trivial inputs to get a cache
         let input = [0.5; NUM_FEATURES];
-        let h = vec![0.3; NUM_NEURONS]; // Non-zero initial hidden state
+        let h = vec![0.3; n]; // Non-zero initial hidden state
         let (_, _, cache) = CfcCell::forward(&input, &h, 1.0, &weights, &wiring);
 
         // Create gradient signal at motor neurons (as if from output loss)
-        let mut d_h_in = vec![0.0; NUM_NEURONS];
-        for m in MOTOR_START..NUM_NEURONS {
+        let mut d_h_in = vec![0.0; n];
+        for m in motor_start..n {
             d_h_in[m] = 1.0;
         }
 
-        let mut grads = GradAccum::new(&weights);
-        let d_h_prev = backprop_cfc_gates(&mut grads, &weights, &cache, &d_h_in, &wiring, 1.0);
+        let mut grads = GradAccum::new(&weights, n);
+        let d_h_prev = backprop_cfc_gates(&mut grads, &weights, &cache, &d_h_in, &wiring, 1.0, n, inter_start);
 
         // Check that recurrent source neurons received temporal gradient via d_h_prev.
         // Without the two-pass fix, these would be zero because the gradient from
@@ -632,5 +714,48 @@ mod tests {
         assert!(ratio > 0.5,
             "Only {}/{} ({:.0}%) recurrent source neurons got nonzero d_h_prev gradient",
             nonzero_count, recurrent_sources.len(), ratio * 100.0);
+    }
+
+    #[test]
+    fn test_training_config_slow() {
+        let cfg = TrainingConfig::slow();
+        assert_eq!(cfg.bptt_depth, 8);
+        assert_eq!(cfg.initial_lr, 0.0001);
+        assert_eq!(cfg.lr_floor, 0.00001);
+        assert!((cfg.bptt_decay - 0.85).abs() < 1e-10);
+    }
+
+    #[test]
+    fn test_optimizer_with_config() {
+        let cfg = TrainingConfig::slow();
+        let mut opt = AdamOptimizer::with_config(10, &cfg);
+        assert!((opt.current_lr() - 0.0001).abs() < 1e-10);
+        assert!((opt.lr_floor - 0.00001).abs() < 1e-10);
+
+        let mut w = vec![0.0; 10];
+        let g = vec![0.1; 10];
+        opt.apply(&mut w, &g);
+        assert!(opt.current_lr() < 0.0001);
+    }
+
+    #[test]
+    fn test_train_step_with_config_64_neurons() {
+        use crate::cfc::wiring::NcpConfig;
+        let cfg = NcpConfig::dual_64();
+        let wiring = NcpWiring::generate_with_config(42, &cfg);
+        let mut weights = CfcWeights::init(&wiring, 123);
+        let training_cfg = TrainingConfig::slow();
+        let mut optimizer = AdamOptimizer::with_config(weights.num_params(), &training_cfg);
+
+        let input = [0.5; NUM_FEATURES];
+        let h = vec![0.0; 64];
+        let target = [0.1; NUM_FEATURES];
+
+        let (_, _, cache) = CfcCell::forward(&input, &h, 1.0, &weights, &wiring);
+        let loss = train_step_with_config(
+            &mut weights, &[cache], &target, &wiring, &mut optimizer, Some(&training_cfg)
+        );
+        assert!(loss.is_finite());
+        assert!(loss >= 0.0);
     }
 }
