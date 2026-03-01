@@ -4,6 +4,99 @@ All notable changes to SAIREN-OS are documented here.
 
 ---
 
+## v4.0-dev - Features 1-6 Complete
+
+Nine-feature roadmap execution: hot config reload, operator feedback loop, predictive lookahead advisor, stick-slip active damping, federated CfC weight sharing, and RigWatch v2 CfC integration — all with backend, API, and dashboard (where applicable) complete.
+
+### Feature 1: Hot Config Reload — DONE
+
+- **Polling-based file watcher** on `well_config.toml` — mtime-based polling every 2s with 500ms debounce (`src/config/watcher.rs`)
+- **Atomic config swap** via `ArcSwap` — lock-free reads, full validation before swap
+- **Diff logging** — recursive TOML tree diff detects additions, removals, changes per field
+- **REST API** — `GET/POST /api/v2/config`, `POST /api/v2/config/validate`, `POST /api/v2/config/reload`
+- Scope boundaries: all thresholds, ensemble weights, advisory cooldowns are hot-reloadable; non-reloadable fields emit restart-required warnings
+
+### Feature 2: Operator Feedback Loop — DONE
+
+**Backend:**
+- `POST /api/v2/advisory/feedback/:timestamp` — submit operator feedback (confirmed/false_positive/unclear)
+- `GET /api/v2/advisory/feedback/stats` — per-category confirmation rates
+- `GET /api/v2/config/suggestions` — threshold adjustment suggestions from feedback data
+- Threshold suggestion engine: <50% confirmation over 10+ rated → tighten; >90% over 20+ → loosen; ±25% clamp
+
+**Dashboard:**
+- Feedback buttons (Confirmed / False Positive / Unclear) on critical report detail pane
+- Feedback Analytics page (`/feedback`) with per-category confirmation rate bars and threshold suggestion cards
+- TypeScript types and API client methods for `CategoryStats`, `ThresholdSuggestion`, `FeedbackRecord`
+
+**Files**: `src/storage/feedback.rs`, `src/storage/suggestions.rs`, `src/api/v2_handlers.rs`, `dashboard/src/components/feedback/FeedbackView.tsx`, `dashboard/src/components/reports/CriticalReports.tsx`
+
+### Feature 3: Predictive Lookahead Advisor — DONE
+
+**Backend:**
+- Formation lookahead query (`src/optimization/look_ahead.rs`) — estimates time-to-next-formation using current ROP + prognosis
+- Offset well performance overlay — `OffsetPerformance` type with avg/best ROP, MSE, best params
+- Lookahead advisory generation with one-shot cooldown per formation boundary
+- Configuration: `[lookahead]` section with `enabled` and `window_minutes`
+
+**CfC Depth-Ahead Prediction:**
+- `DepthAheadNetwork` in `src/cfc/depth_ahead.rs` — 64-neuron CfC (seed=1042, BPTT=6, LR 0.0005→0.00005)
+- 8 real features (wob, rop, rpm, torque, mse, d_exponent, depth_into_formation, formation_hardness) zero-padded into 16-element arrays — zero changes to existing CfC infrastructure
+- Integrated as Phase 2.8.2 in tactical agent; resets state on formation transitions
+- `cfc_confidence` field on `LookAheadAdvisory` for depth-ahead prediction annotation
+- 6 unit tests
+
+**Dashboard:**
+- `LookAheadPanel` component polls `/api/v2/lookahead/status` every 10s
+- Shows formation name, ETA, depth remaining, parameter changes, hazards, offset notes
+- Yellow accent border (advisory styling), red when < 10 minutes
+- Integrated into LiveView between WellControl and charts
+
+**Files**: `src/cfc/depth_ahead.rs`, `src/optimization/look_ahead.rs`, `src/types/optimization.rs`, `src/agents/tactical.rs`, `src/pipeline/coordinator.rs`, `dashboard/src/components/live/LookAheadPanel.tsx`
+
+### Feature 4: Stick-Slip Active Damping — Iteration 2 Done
+
+**Iteration 1 (Deterministic):**
+- Torque oscillation characterization — zero-crossing frequency, stick-slip vs torsional classification
+- Parameter recommendation engine — severity-scaled WOB/RPM adjustments with safe envelope clamping
+- Coordinator enrichment — damping recommendation attached to stick-slip tickets
+- Strategic template enhancement — specific "WOB 25.0 → 21.3 klbs (-15%)" formatting
+
+**Iteration 2 (Closed-Loop):**
+- Feedback monitoring loop — tracks torque CV after recommendation with Success/Escalated/Retracted outcomes
+- Per-formation recipe library — successful damping actions stored in sled, blended (70% recipe, 30% lookup) on repeat
+- `GET /api/v2/damping/status` and `GET /api/v2/damping/recipes` endpoints
+- Configuration: `[damping]` section with monitoring parameters
+
+**Files**: `src/physics_engine/drilling_models.rs`, `src/pipeline/coordinator.rs`, `src/storage/damping_recipes.rs`, `src/strategic/templates.rs`, `src/api/v2_handlers.rs`, `src/config/well_config.rs`
+
+### Feature 5: Federated CfC Weight Sharing — DONE
+
+- `DualCfcCheckpoint` with atomic disk save/load (`src/cfc/checkpoint.rs`)
+- Spoke-side background tasks: `run_checkpoint_upload`, `run_federation_pull` with watch channels (`src/fleet/federation.rs`)
+- Hub-side `federated_average()` with weighted averaging, parallel Welford combination, fresh Adam reset (`src/hub/federation.rs`)
+- Hub API: `POST /federation/checkpoint` (UPSERT + re-aggregate), `GET /federation/model` (`src/hub/api/federation.rs`)
+- Direct serde derives on all CfC types — no wrapper types
+- Watch channels (not `Arc<RwLock>`) — CfcNetwork stays on the processing task without a lock
+- ~40KB per checkpoint (JSON+zstd), opt-in disabled by default
+- 9 tests (5 checkpoint + 4 hub federation)
+
+### Feature 6: RigWatch v2 (CfC Integration) — DONE
+
+- Ported dual CfC architecture into RigWatch (`/home/ashton/rigwatch`)
+- 16-feature equipment sensor mapping (8 FFT/bearing primary + 8 sensor/derived supplementary)
+- Template diagnostic backend for Pi deployment (no GPU/LLM needed)
+- Full pipeline integration with checkpoint persistence
+- 48 new CfC + 6 template backend tests passing
+
+### Verification
+
+- `cargo test --lib` — 396 passed, 0 failed
+- `cargo check` — clean (pre-existing warnings only)
+- `cd dashboard && npm run build` — 0 TypeScript errors
+
+---
+
 ## v3.5 - Parallel CfC Dual Network Processing
 
 Parallelize the dual CfC neural networks using `rayon::join()`, cutting CfC cost from ~18ms to ~9ms per packet. The fast and slow `CfcNetwork` instances are completely independent — zero shared mutable state, identical read-only inputs, outputs combined via `max()`.

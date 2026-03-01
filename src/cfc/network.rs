@@ -33,7 +33,7 @@ pub struct FeatureSurprise {
 }
 
 /// Full configuration for a CfC network instance.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CfcNetworkConfig {
     pub ncp: NcpConfig,
     pub training: TrainingConfig,
@@ -388,6 +388,63 @@ impl CfcNetwork {
     /// Full reset (new network from scratch with stored config).
     pub fn reset(&mut self) {
         *self = Self::with_config(self.seed, self.config.clone());
+    }
+
+    // -- Checkpoint accessors (used by cfc::checkpoint) -----------------------
+
+    /// Network configuration reference.
+    pub fn config(&self) -> &CfcNetworkConfig {
+        &self.config
+    }
+
+    /// Seed used for wiring initialization.
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+
+    /// Current weights reference.
+    pub fn weights(&self) -> &CfcWeights {
+        &self.weights
+    }
+
+    /// Current normalizer reference.
+    pub fn normalizer(&self) -> &OnlineNormalizer {
+        &self.normalizer
+    }
+
+    /// Current optimizer reference.
+    pub fn optimizer(&self) -> &AdamOptimizer {
+        &self.optimizer
+    }
+
+    /// EMA of prediction error.
+    pub fn error_ema(&self) -> f64 {
+        self.error_ema
+    }
+
+    /// Replace weights (for checkpoint restore / federated averaging).
+    pub fn set_weights(&mut self, weights: CfcWeights) {
+        self.weights = weights;
+    }
+
+    /// Replace normalizer state.
+    pub fn set_normalizer(&mut self, normalizer: OnlineNormalizer) {
+        self.normalizer = normalizer;
+    }
+
+    /// Replace optimizer state.
+    pub fn set_optimizer(&mut self, optimizer: AdamOptimizer) {
+        self.optimizer = optimizer;
+    }
+
+    /// Set packets processed counter.
+    pub fn set_packets_processed(&mut self, count: u64) {
+        self.packets_processed = count;
+    }
+
+    /// Set error EMA value.
+    pub fn set_error_ema(&mut self, ema: f64) {
+        self.error_ema = ema;
     }
 }
 

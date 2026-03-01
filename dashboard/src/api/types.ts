@@ -176,3 +176,46 @@ export interface CriticalReport {
   digital_signature: string;
   signature_timestamp: string;
 }
+
+// Feedback types
+export type FeedbackOutcome = 'confirmed' | 'false_positive' | 'unclear';
+
+export interface FeedbackRecord {
+  advisory_timestamp: number;
+  outcome: FeedbackOutcome;
+  category: string;
+  trigger_parameter: string;
+  trigger_value: number;
+  threshold_value: number;
+  submitted_by: string;
+  submitted_at: number;
+  notes: string;
+}
+
+export interface CategoryStats {
+  category: string;
+  total: number;
+  confirmed: number;
+  false_positives: number;
+  unclear: number;
+  confirmation_rate: number;
+}
+
+export interface ThresholdSuggestion {
+  category: string;
+  threshold_key: string;
+  current_value: number;
+  suggested_value: number;
+  rationale: string;
+  confidence: number;
+}
+
+export interface LookaheadStatus {
+  enabled: boolean;
+  next_formation: string | null;
+  depth_remaining_ft: number | null;
+  estimated_minutes: number | null;
+  hazards: string[];
+  parameter_changes: string[];
+  offset_notes: string | null;
+}

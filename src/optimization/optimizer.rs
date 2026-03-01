@@ -153,7 +153,7 @@ impl ParameterOptimizer {
         }
 
         // 11. Check look-ahead
-        let look_ahead = check_look_ahead(prognosis, packet.bit_depth, packet.rop, formation);
+        let look_ahead = check_look_ahead(prognosis, packet.bit_depth, packet.rop, formation, super::look_ahead::LOOK_AHEAD_THRESHOLD_MINUTES);
 
         // 12. Need at least one recommendation or a look-ahead to produce an advisory
         if recommendations.is_empty() && look_ahead.is_none() {

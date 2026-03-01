@@ -279,6 +279,7 @@ mod tests {
             cfc_anomaly_score: None,
             cfc_feature_surprises: Vec::new(),
             causal_leads: Vec::new(),
+            damping_recommendation: None,
         }
     }
 

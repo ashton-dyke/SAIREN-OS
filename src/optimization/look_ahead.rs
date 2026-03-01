@@ -3,16 +3,17 @@
 use crate::types::{FormationInterval, FormationPrognosis, LookAheadAdvisory};
 
 /// Default look-ahead threshold in minutes
-const LOOK_AHEAD_THRESHOLD_MINUTES: f64 = 30.0;
+pub const LOOK_AHEAD_THRESHOLD_MINUTES: f64 = 30.0;
 
 /// Check if the bit is approaching a formation boundary and generate a look-ahead advisory.
 ///
-/// Triggers if the estimated time to the next formation is less than 30 minutes.
+/// Triggers if the estimated time to the next formation is less than `window_minutes`.
 pub fn check_look_ahead(
     prognosis: &FormationPrognosis,
     current_depth_ft: f64,
     current_rop_ft_hr: f64,
     current_formation: &FormationInterval,
+    window_minutes: f64,
 ) -> Option<LookAheadAdvisory> {
     if current_rop_ft_hr <= 0.0 {
         return None;
@@ -28,7 +29,7 @@ pub fn check_look_ahead(
     let hours_to_next = depth_remaining / current_rop_ft_hr;
     let minutes_to_next = hours_to_next * 60.0;
 
-    if minutes_to_next > LOOK_AHEAD_THRESHOLD_MINUTES {
+    if minutes_to_next > window_minutes {
         return None;
     }
 
@@ -78,6 +79,7 @@ pub fn check_look_ahead(
         parameter_changes,
         hazards: next.hazards.clone(),
         offset_notes: next.offset_performance.notes.clone(),
+        cfc_confidence: None,
     })
 }
 
@@ -160,7 +162,7 @@ mod tests {
     fn triggers_within_30_minutes() {
         let (prognosis, current_fm) = make_prognosis();
         // At 3950 ft, 50 ft from boundary, at 120 ft/hr → 25 min
-        let result = check_look_ahead(&prognosis, 3950.0, 120.0, &current_fm);
+        let result = check_look_ahead(&prognosis, 3950.0, 120.0, &current_fm, 30.0);
         assert!(result.is_some(), "Should trigger within 30 min");
         let adv = result.unwrap();
         assert_eq!(adv.formation_name, "Balder");
@@ -173,21 +175,21 @@ mod tests {
     fn silent_when_far_from_boundary() {
         let (prognosis, current_fm) = make_prognosis();
         // At 2500 ft, 1500 ft from boundary, at 120 ft/hr → 750 min
-        let result = check_look_ahead(&prognosis, 2500.0, 120.0, &current_fm);
+        let result = check_look_ahead(&prognosis, 2500.0, 120.0, &current_fm, 30.0);
         assert!(result.is_none(), "Should not trigger far from boundary");
     }
 
     #[test]
     fn handles_zero_rop() {
         let (prognosis, current_fm) = make_prognosis();
-        let result = check_look_ahead(&prognosis, 3950.0, 0.0, &current_fm);
+        let result = check_look_ahead(&prognosis, 3950.0, 0.0, &current_fm, 30.0);
         assert!(result.is_none(), "Should not trigger with zero ROP");
     }
 
     #[test]
     fn includes_parameter_changes() {
         let (prognosis, current_fm) = make_prognosis();
-        let result = check_look_ahead(&prognosis, 3990.0, 200.0, &current_fm);
+        let result = check_look_ahead(&prognosis, 3990.0, 200.0, &current_fm, 30.0);
         let adv = result.unwrap();
         // WOB optimal changes from 20 to 30 → should appear
         assert!(
@@ -201,5 +203,16 @@ mod tests {
             "Should recommend RPM change: {:?}",
             adv.parameter_changes
         );
+    }
+
+    #[test]
+    fn respects_custom_window_minutes() {
+        let (prognosis, current_fm) = make_prognosis();
+        // At 3950 ft, 50 ft from boundary, at 120 ft/hr → 25 min ETA
+        // Should NOT trigger with 15 min window
+        assert!(check_look_ahead(&prognosis, 3950.0, 120.0, &current_fm, 15.0).is_none());
+        // At 3980 ft, 20 ft from boundary, at 120 ft/hr → 10 min ETA
+        // SHOULD trigger with 15 min window
+        assert!(check_look_ahead(&prognosis, 3980.0, 120.0, &current_fm, 15.0).is_some());
     }
 }

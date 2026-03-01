@@ -2,7 +2,7 @@
 //!
 //! All handlers return `Response` via [`ApiResponse::ok`] or [`ApiErrorResponse`].
 
-use axum::extract::{Query, State};
+use axum::extract::{Path, Query, State};
 use axum::response::Response;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -647,10 +647,10 @@ pub async fn ml_optimal(
 
 /// GET /api/v2/config — returns typed WellConfig.
 pub async fn get_config() -> Response {
-    ApiResponse::ok(crate::config::get().clone())
+    ApiResponse::ok((*crate::config::get_arc()).clone())
 }
 
-/// POST /api/v2/config — update config (save to disk).
+/// POST /api/v2/config — update config (save to disk and hot-reload).
 pub async fn update_config(
     axum::Json(request): axum::Json<super::handlers::UpdateConfigRequest>,
 ) -> Response {
@@ -666,13 +666,29 @@ pub async fn update_config(
         }
     }
 
-    let save_path = std::path::PathBuf::from("well_config.toml");
-    match request.config.save_to_file(&save_path) {
-        Ok(()) => ApiResponse::ok(serde_json::json!({
-            "success": true,
-            "message": "Config saved. Restart SAIREN-OS to apply."
+    let save_path = crate::config::config_path()
+        .cloned()
+        .unwrap_or_else(|| std::path::PathBuf::from("well_config.toml"));
+
+    if let Err(e) = request.config.save_to_file(&save_path) {
+        return ApiErrorResponse::internal(format!("Failed to save: {e}"));
+    }
+
+    // Hot-reload the saved config
+    match crate::config::reload() {
+        Ok(changes) => {
+            let warnings = crate::config::check_non_reloadable(&changes);
+            ApiResponse::ok(serde_json::json!({
+                "reloaded": true,
+                "changes": changes,
+                "warnings": warnings,
+                "message": format!("{} field(s) updated", changes.len())
+            }))
+        }
+        Err(e) => ApiResponse::ok(serde_json::json!({
+            "reloaded": false,
+            "message": format!("Config saved but reload failed: {e}. Restart to apply.")
         })),
-        Err(e) => ApiErrorResponse::internal(format!("Failed to save: {e}")),
     }
 }
 
@@ -816,6 +832,492 @@ pub async fn shift_summary(
         "acknowledgments_in_period": acks_in_period,
         "well_name": well_name,
     }))
+}
+
+/// POST /api/v2/config/reload — trigger a hot-reload from disk.
+pub async fn reload_config() -> Response {
+    match crate::config::reload() {
+        Ok(changes) => {
+            let warnings = crate::config::check_non_reloadable(&changes);
+            ApiResponse::ok(serde_json::json!({
+                "reloaded": true,
+                "changes": changes,
+                "warnings": warnings,
+                "message": format!("{} field(s) updated", changes.len())
+            }))
+        }
+        Err(e) => ApiErrorResponse::internal(format!("Reload failed: {e}")),
+    }
+}
+
+// ============================================================================
+// Feedback endpoints
+// ============================================================================
+
+/// Request body for submitting feedback on an advisory.
+#[derive(Debug, Deserialize)]
+pub struct SubmitFeedbackRequest {
+    pub outcome: crate::storage::feedback::FeedbackOutcome,
+    #[serde(default)]
+    pub submitted_by: String,
+    #[serde(default)]
+    pub notes: String,
+}
+
+/// POST /api/v2/advisory/feedback/:timestamp — submit operator feedback on an advisory.
+pub async fn submit_feedback(
+    Path(timestamp): Path<u64>,
+    axum::Json(body): axum::Json<SubmitFeedbackRequest>,
+) -> Response {
+    // Look up the advisory to denormalize its fields
+    let report = match crate::storage::history::get_by_timestamp(timestamp) {
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return ApiErrorResponse::not_found(format!(
+                "No advisory found with timestamp {}",
+                timestamp
+            ));
+        }
+        Err(e) => {
+            return ApiErrorResponse::internal(format!("Storage error: {}", e));
+        }
+    };
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
+    let record = crate::storage::feedback::FeedbackRecord {
+        advisory_timestamp: timestamp,
+        outcome: body.outcome,
+        category: report.category,
+        trigger_parameter: report.trigger_parameter.clone(),
+        trigger_value: report.trigger_value,
+        threshold_value: report.threshold_value,
+        submitted_by: if body.submitted_by.is_empty() {
+            "anonymous".to_string()
+        } else {
+            body.submitted_by
+        },
+        submitted_at: now,
+        notes: body.notes,
+    };
+
+    if let Err(e) = crate::storage::feedback::persist(&record) {
+        return ApiErrorResponse::internal(format!("Failed to persist feedback: {}", e));
+    }
+
+    ApiResponse::ok(record)
+}
+
+/// GET /api/v2/advisory/feedback/stats — per-category confirmation rates.
+pub async fn feedback_stats() -> Response {
+    let records = crate::storage::feedback::load_all();
+    let stats = crate::storage::suggestions::compute_stats(&records);
+    ApiResponse::ok(stats)
+}
+
+/// GET /api/v2/config/suggestions — threshold adjustment suggestions based on feedback.
+pub async fn config_suggestions() -> Response {
+    let records = crate::storage::feedback::load_all();
+    let config = crate::config::get();
+    let suggestions = crate::storage::suggestions::compute_suggestions(&records, &config);
+    ApiResponse::ok(suggestions)
+}
+
+// ============================================================================
+// Lookahead endpoint
+// ============================================================================
+
+/// Current formation lookahead status.
+#[derive(Debug, Serialize)]
+pub struct LookaheadStatus {
+    pub enabled: bool,
+    pub next_formation: Option<String>,
+    pub depth_remaining_ft: Option<f64>,
+    pub estimated_minutes: Option<f64>,
+    pub hazards: Vec<String>,
+    pub parameter_changes: Vec<String>,
+    pub offset_notes: Option<String>,
+}
+
+/// GET /api/v2/lookahead/status — current formation lookahead state.
+pub async fn lookahead_status(State(state): State<DashboardState>) -> Response {
+    let config = crate::config::get();
+    let enabled = config.lookahead.enabled;
+
+    if !enabled {
+        return ApiResponse::ok(LookaheadStatus {
+            enabled: false,
+            next_formation: None,
+            depth_remaining_ft: None,
+            estimated_minutes: None,
+            hazards: Vec::new(),
+            parameter_changes: Vec::new(),
+            offset_notes: None,
+        });
+    }
+
+    let app = state.app_state.read().await;
+    let (bit_depth, rop) = match &app.latest_wits_packet {
+        Some(pkt) => (pkt.bit_depth, pkt.rop),
+        None => {
+            return ApiResponse::ok(LookaheadStatus {
+                enabled: true,
+                next_formation: None,
+                depth_remaining_ft: None,
+                estimated_minutes: None,
+                hazards: Vec::new(),
+                parameter_changes: Vec::new(),
+                offset_notes: None,
+            });
+        }
+    };
+    drop(app);
+
+    // Load prognosis (same path as coordinator)
+    let kb = crate::knowledge_base::KnowledgeBase::init();
+    let prognosis = if let Some(ref kb) = kb {
+        kb.prognosis()
+    } else {
+        crate::types::FormationPrognosis::load()
+    };
+
+    let Some(prognosis) = prognosis else {
+        return ApiResponse::ok(LookaheadStatus {
+            enabled: true,
+            next_formation: None,
+            depth_remaining_ft: None,
+            estimated_minutes: None,
+            hazards: Vec::new(),
+            parameter_changes: Vec::new(),
+            offset_notes: None,
+        });
+    };
+
+    let formation = prognosis.formation_at_depth(bit_depth);
+    let la = formation.and_then(|fm| {
+        crate::optimization::look_ahead::check_look_ahead(
+            &prognosis,
+            bit_depth,
+            rop,
+            fm,
+            config.lookahead.window_minutes,
+        )
+    });
+
+    match la {
+        Some(la) => ApiResponse::ok(LookaheadStatus {
+            enabled: true,
+            next_formation: Some(la.formation_name),
+            depth_remaining_ft: Some(la.depth_remaining_ft),
+            estimated_minutes: Some(la.estimated_minutes),
+            hazards: la.hazards,
+            parameter_changes: la.parameter_changes,
+            offset_notes: if la.offset_notes.is_empty() { None } else { Some(la.offset_notes) },
+        }),
+        None => ApiResponse::ok(LookaheadStatus {
+            enabled: true,
+            next_formation: None,
+            depth_remaining_ft: None,
+            estimated_minutes: None,
+            hazards: Vec::new(),
+            parameter_changes: Vec::new(),
+            offset_notes: None,
+        }),
+    }
+}
+
+// ============================================================================
+// Damping status endpoint
+// ============================================================================
+
+/// Current active damping analysis status.
+#[derive(Debug, Serialize)]
+pub struct DampingStatus {
+    pub enabled: bool,
+    pub current_torque_cv: Option<f64>,
+    pub oscillation_type: Option<String>,
+    pub estimated_frequency_hz: Option<f64>,
+    pub severity: Option<f64>,
+    pub recommendation: Option<DampingRecommendationResponse>,
+    pub monitor: crate::types::DampingMonitorSnapshot,
+}
+
+#[derive(Debug, Serialize)]
+pub struct DampingRecommendationResponse {
+    pub wob_current: f64,
+    pub wob_recommended: f64,
+    pub wob_change_pct: f64,
+    pub rpm_current: f64,
+    pub rpm_recommended: f64,
+    pub rpm_change_pct: f64,
+    pub rationale: String,
+}
+
+/// Default (idle) monitor snapshot for when no coordinator data is available.
+fn default_monitor_snapshot() -> crate::types::DampingMonitorSnapshot {
+    crate::types::DampingMonitorSnapshot {
+        active: false,
+        baseline_cv: None,
+        current_cv: None,
+        cv_change_pct: None,
+        elapsed_secs: None,
+        window_secs: crate::config::get().damping.monitor_window_secs,
+        formation_name: None,
+        last_outcome: None,
+    }
+}
+
+/// GET /api/v2/damping/status — current active damping analysis.
+pub async fn damping_status(State(state): State<DashboardState>) -> Response {
+    let config = crate::config::get();
+    let enabled = config.damping.enabled;
+
+    if !enabled {
+        return ApiResponse::ok(DampingStatus {
+            enabled: false,
+            current_torque_cv: None,
+            oscillation_type: None,
+            estimated_frequency_hz: None,
+            severity: None,
+            recommendation: None,
+            monitor: default_monitor_snapshot(),
+        });
+    }
+
+    let app = state.app_state.read().await;
+    let monitor = app.damping_monitor_snapshot.clone().unwrap_or_else(default_monitor_snapshot);
+    let (wob, rpm) = match &app.latest_wits_packet {
+        Some(pkt) => (pkt.wob, pkt.rpm),
+        None => {
+            return ApiResponse::ok(DampingStatus {
+                enabled: true,
+                current_torque_cv: None,
+                oscillation_type: None,
+                estimated_frequency_hz: None,
+                severity: None,
+                recommendation: None,
+                monitor,
+            });
+        }
+    };
+
+    // Collect torque values from the WITS packet history buffer
+    let torques: Vec<f64> = app
+        .wits_history
+        .iter()
+        .map(|pkt| pkt.torque)
+        .collect();
+    drop(app);
+
+    if torques.len() < config.damping.min_samples {
+        return ApiResponse::ok(DampingStatus {
+            enabled: true,
+            current_torque_cv: None,
+            oscillation_type: None,
+            estimated_frequency_hz: None,
+            severity: None,
+            recommendation: None,
+            monitor,
+        });
+    }
+
+    let analysis = crate::physics_engine::characterize_oscillation(
+        &torques,
+        config.damping.min_samples,
+    );
+
+    match analysis {
+        Some(a) => {
+            let rec = crate::physics_engine::recommend_damping(
+                &a,
+                wob,
+                rpm,
+                config.damping.max_wob_reduction_pct,
+                config.damping.max_rpm_change_pct,
+            );
+
+            ApiResponse::ok(DampingStatus {
+                enabled: true,
+                current_torque_cv: Some(a.torque_cv),
+                oscillation_type: Some(format!("{:?}", a.oscillation_type)),
+                estimated_frequency_hz: Some(a.estimated_frequency_hz),
+                severity: Some(a.severity),
+                recommendation: rec.map(|r| DampingRecommendationResponse {
+                    wob_current: r.current_wob,
+                    wob_recommended: r.recommended_wob,
+                    wob_change_pct: r.wob_change_pct,
+                    rpm_current: r.current_rpm,
+                    rpm_recommended: r.recommended_rpm,
+                    rpm_change_pct: r.rpm_change_pct,
+                    rationale: r.rationale,
+                }),
+                monitor,
+            })
+        }
+        None => ApiResponse::ok(DampingStatus {
+            enabled: true,
+            current_torque_cv: None,
+            oscillation_type: None,
+            estimated_frequency_hz: None,
+            severity: None,
+            recommendation: None,
+            monitor,
+        }),
+    }
+}
+
+// ============================================================================
+// Damping recipe endpoints
+// ============================================================================
+
+/// Per-formation recipe summary.
+#[derive(Debug, Serialize)]
+pub struct FormationRecipes {
+    pub formation_name: String,
+    pub recipe_count: usize,
+    pub best_cv_reduction_pct: f64,
+    pub recipes: Vec<crate::types::DampingRecipe>,
+}
+
+/// Response for recipe listing endpoint.
+#[derive(Debug, Serialize)]
+pub struct RecipeListResponse {
+    pub formations: Vec<FormationRecipes>,
+}
+
+/// GET /api/v2/damping/recipes — list all stored formation damping recipes.
+pub async fn damping_recipes(
+    State(_state): State<DashboardState>,
+) -> Response {
+    let formations = crate::storage::damping_recipes::list_formations();
+    let result: Vec<FormationRecipes> = formations
+        .iter()
+        .map(|f| {
+            let recipes = crate::storage::damping_recipes::get_by_formation(f);
+            let best = recipes
+                .iter()
+                .map(|r| r.cv_reduction_pct)
+                .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
+                .unwrap_or(0.0);
+            FormationRecipes {
+                formation_name: f.clone(),
+                recipe_count: recipes.len(),
+                best_cv_reduction_pct: best,
+                recipes,
+            }
+        })
+        .collect();
+    ApiResponse::ok(RecipeListResponse { formations: result })
+}
+
+// ============================================================================
+// Debug endpoints
+// ============================================================================
+
+// ============================================================================
+// Well debrief endpoints
+// ============================================================================
+
+/// POST /api/v2/well/debrief — generate and persist a post-well debrief.
+pub async fn generate_debrief_handler(
+    State(_state): State<DashboardState>,
+) -> Response {
+    // Init knowledge base from env vars
+    let kb = match crate::knowledge_base::KnowledgeBase::init() {
+        Some(kb) => kb,
+        None => {
+            return ApiErrorResponse::service_unavailable(
+                "Knowledge base not configured. Set SAIREN_KB and SAIREN_KB_FIELD env vars.",
+            );
+        }
+    };
+
+    // Generate post-well summary
+    let post_well = match kb.complete_well() {
+        Ok(summary) => summary,
+        Err(e) => {
+            return ApiErrorResponse::internal(format!(
+                "Failed to generate post-well summary: {}",
+                e
+            ));
+        }
+    };
+
+    // Get advisory history from global history DB
+    let advisories = crate::storage::history::get_all_reports();
+
+    // Get operator feedback
+    let feedback_records = crate::storage::feedback::load_all();
+
+    // Get prognosis
+    let prognosis = kb.prognosis();
+
+    // Determine well start timestamp from first advisory
+    let well_start_ts = advisories.first().map(|a| a.timestamp).unwrap_or(0);
+
+    // Generate debrief
+    let debrief = crate::debrief::generate_debrief(
+        &post_well,
+        &advisories,
+        &feedback_records,
+        prognosis.as_ref(),
+        well_start_ts,
+    );
+
+    // Persist to KB post-well directory
+    let post_well_dir = kb.config().post_well_dir(&kb.config().well);
+    if let Err(e) = std::fs::create_dir_all(&post_well_dir) {
+        tracing::warn!("Failed to create post-well dir: {}", e);
+    }
+
+    let debrief_path = post_well_dir.join("debrief.json");
+    match serde_json::to_string_pretty(&debrief) {
+        Ok(json) => {
+            if let Err(e) = std::fs::write(&debrief_path, &json) {
+                tracing::warn!("Failed to write debrief.json: {}", e);
+            } else {
+                tracing::info!(path = ?debrief_path, "Wrote post-well debrief");
+            }
+        }
+        Err(e) => {
+            tracing::warn!("Failed to serialize debrief: {}", e);
+        }
+    }
+
+    ApiResponse::ok(debrief)
+}
+
+/// GET /api/v2/well/debrief — read persisted debrief.
+pub async fn get_debrief_handler(
+    State(_state): State<DashboardState>,
+) -> Response {
+    let kb = match crate::knowledge_base::KnowledgeBase::init() {
+        Some(kb) => kb,
+        None => {
+            return ApiErrorResponse::service_unavailable(
+                "Knowledge base not configured. Set SAIREN_KB and SAIREN_KB_FIELD env vars.",
+            );
+        }
+    };
+
+    let debrief_path = kb.config().post_well_dir(&kb.config().well).join("debrief.json");
+
+    let json = match std::fs::read_to_string(&debrief_path) {
+        Ok(s) => s,
+        Err(_) => {
+            return ApiErrorResponse::not_found(
+                "No debrief found. Generate one with POST /api/v2/well/debrief.",
+            );
+        }
+    };
+
+    match serde_json::from_str::<crate::types::WellDebrief>(&json) {
+        Ok(debrief) => ApiResponse::ok(debrief),
+        Err(e) => ApiErrorResponse::internal(format!("Failed to parse debrief.json: {}", e)),
+    }
 }
 
 // ============================================================================

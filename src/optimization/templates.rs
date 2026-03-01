@@ -1,7 +1,8 @@
 //! Template-based conversion from OptimizationAdvisory → StrategicAdvisory
 
 use crate::types::{
-    DrillingPhysicsReport, FinalSeverity, OptimizationAdvisory, RiskLevel, StrategicAdvisory,
+    AnomalyCategory, DrillingPhysicsReport, FinalSeverity, LookAheadAdvisory,
+    OptimizationAdvisory, RiskLevel, StrategicAdvisory,
 };
 
 /// Convert an `OptimizationAdvisory` into a `StrategicAdvisory` for pipeline output.
@@ -107,6 +108,88 @@ pub fn format_optimization_advisory(
         physics_report: physics.clone(),
         context_used: vec![format!("formation_prognosis:{}", advisory.formation)],
         trace_log: Vec::new(),
+        category: crate::types::AnomalyCategory::DrillingEfficiency,
+        trigger_parameter: String::new(),
+        trigger_value: 0.0,
+        threshold_value: 0.0,
+    }
+}
+
+/// Convert a standalone `LookAheadAdvisory` into a `StrategicAdvisory`.
+///
+/// Used when the lookahead fires independently of the optimizer (coordinator-level).
+pub fn format_lookahead_advisory(
+    look_ahead: &LookAheadAdvisory,
+    current_depth_ft: f64,
+    current_rop: f64,
+) -> StrategicAdvisory {
+    let changes = if look_ahead.parameter_changes.is_empty() {
+        "no parameter changes needed".to_string()
+    } else {
+        look_ahead.parameter_changes.join("; ")
+    };
+    let hazards = if look_ahead.hazards.is_empty() {
+        "none identified".to_string()
+    } else {
+        look_ahead.hazards.join(", ")
+    };
+    let notes = if look_ahead.offset_notes.is_empty() {
+        "no notes".to_string()
+    } else {
+        look_ahead.offset_notes.clone()
+    };
+
+    let recommendation = format!(
+        "FORMATION LOOKAHEAD: Approaching {} in ~{:.0} min ({:.0} ft at {:.0} ft/hr).\n\
+         Parameter changes: {}\n\
+         Known hazards: {}\n\
+         Offset notes: {}",
+        look_ahead.formation_name,
+        look_ahead.estimated_minutes,
+        look_ahead.depth_remaining_ft,
+        current_rop,
+        changes,
+        hazards,
+        notes,
+    );
+
+    let risk_level = if look_ahead.hazards.is_empty() {
+        RiskLevel::Low
+    } else {
+        RiskLevel::Elevated
+    };
+
+    let reasoning = format!(
+        "Formation lookahead at {:.0} ft (ROP {:.0} ft/hr). \
+         Next formation: {} at {:.0} ft remaining. Source: formation_prognosis",
+        current_depth_ft,
+        current_rop,
+        look_ahead.formation_name,
+        look_ahead.depth_remaining_ft,
+    );
+
+    StrategicAdvisory {
+        timestamp: std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        efficiency_score: 100,
+        risk_level,
+        severity: FinalSeverity::Low,
+        recommendation,
+        expected_benefit: format!(
+            "Proactive parameter adjustment before entering {}",
+            look_ahead.formation_name,
+        ),
+        reasoning,
+        votes: Vec::new(),
+        physics_report: DrillingPhysicsReport::default(),
+        context_used: vec![format!("formation_prognosis:{}", look_ahead.formation_name)],
+        trace_log: Vec::new(),
+        category: AnomalyCategory::Formation,
+        trigger_parameter: "formation_lookahead".to_string(),
+        trigger_value: look_ahead.estimated_minutes,
+        threshold_value: 0.0,
     }
 }
 
@@ -178,6 +261,7 @@ mod tests {
             parameter_changes: vec!["WOB: 20 → 30 klbs".into()],
             hazards: vec!["Lost circulation risk".into()],
             offset_notes: "Reduce RPM before entering".into(),
+            cfc_confidence: None,
         });
         let physics = DrillingPhysicsReport::default();
         let result = format_optimization_advisory(&adv, &physics);
@@ -194,5 +278,41 @@ mod tests {
         assert_eq!(result.risk_level, RiskLevel::Low);
         assert_eq!(result.severity, FinalSeverity::Low);
         assert!(result.reasoning.contains("optimization_engine"));
+    }
+
+    #[test]
+    fn lookahead_advisory_has_correct_fields() {
+        let la = LookAheadAdvisory {
+            formation_name: "Balder".to_string(),
+            estimated_minutes: 15.0,
+            depth_remaining_ft: 30.0,
+            parameter_changes: vec!["WOB: 20 → 30 klbs".into()],
+            hazards: vec!["Lost circulation risk".into()],
+            offset_notes: "Reduce RPM before entering".into(),
+            cfc_confidence: None,
+        };
+        let result = format_lookahead_advisory(&la, 3950.0, 120.0);
+        assert_eq!(result.category, AnomalyCategory::Formation);
+        assert_eq!(result.trigger_parameter, "formation_lookahead");
+        assert_eq!(result.risk_level, RiskLevel::Elevated);
+        assert!(result.recommendation.contains("Balder"));
+        assert!(result.recommendation.contains("FORMATION LOOKAHEAD"));
+        assert!(result.recommendation.contains("Lost circulation risk"));
+    }
+
+    #[test]
+    fn lookahead_advisory_low_risk_without_hazards() {
+        let la = LookAheadAdvisory {
+            formation_name: "Utsira".to_string(),
+            estimated_minutes: 20.0,
+            depth_remaining_ft: 40.0,
+            parameter_changes: vec![],
+            hazards: vec![],
+            offset_notes: String::new(),
+            cfc_confidence: None,
+        };
+        let result = format_lookahead_advisory(&la, 3960.0, 120.0);
+        assert_eq!(result.risk_level, RiskLevel::Low);
+        assert_eq!(result.efficiency_score, 100);
     }
 }

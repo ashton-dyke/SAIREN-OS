@@ -22,6 +22,7 @@ pub mod models;
 pub use drilling_models::{
     calculate_d_exponent, calculate_dxc, calculate_ecd, calculate_mse, calculate_mse_efficiency,
     calculate_r_squared, calculate_trend, classify_rig_state,
+    characterize_oscillation, recommend_damping,
     detect_founder, detect_founder_quick, detect_kick, detect_lost_circulation, detect_packoff,
     detect_stick_slip, estimate_optimal_mse,
 };

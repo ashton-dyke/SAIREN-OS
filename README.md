@@ -175,15 +175,15 @@ Thresholds can be viewed and updated at runtime without restarting:
 
 ```bash
 # View current config
-curl http://localhost:8080/api/v1/config | jq .
+curl http://localhost:8080/api/v2/config | jq .
 
 # Update thresholds (validates before applying, saves to well_config.toml)
-curl -X POST http://localhost:8080/api/v1/config \
+curl -X POST http://localhost:8080/api/v2/config \
   -H "Content-Type: application/json" \
   -d '{"config": {"thresholds": {"well_control": {"flow_imbalance_warning_gpm": 8.0}}}}'
 
 # Validate without applying
-curl -X POST http://localhost:8080/api/v1/config/validate \
+curl -X POST http://localhost:8080/api/v2/config/validate \
   -H "Content-Type: application/json" \
   -d '{"config": {"ensemble_weights": {"mse": 0.5, "hydraulic": 0.5, "well_control": 0.0, "formation": 0.0}}}'
 ```
@@ -457,11 +457,18 @@ The v2 API uses a consistent JSON envelope (`ApiResponse<T>`) for all responses.
 | `/api/v2/config` | GET | Current well configuration |
 | `/api/v2/config` | POST | Update configuration |
 | `/api/v2/config/validate` | POST | Validate config without applying |
+| `/api/v2/config/reload` | POST | Trigger manual config reload from file |
+| `/api/v2/config/suggestions` | GET | Threshold adjustment suggestions from feedback |
 | `/api/v2/campaign` | GET | Current campaign and thresholds |
 | `/api/v2/campaign` | POST | Switch campaign |
 | `/api/v2/advisory/acknowledge` | POST | Acknowledge an advisory |
 | `/api/v2/advisory/acknowledgments` | GET | List advisory acknowledgments |
+| `/api/v2/advisory/feedback/:timestamp` | POST | Submit operator feedback on advisory |
+| `/api/v2/advisory/feedback/stats` | GET | Per-category feedback statistics |
 | `/api/v2/shift/summary` | GET | Shift summary with `?hours=12` |
+| `/api/v2/lookahead/status` | GET | Formation lookahead advisory status |
+| `/api/v2/damping/status` | GET | Stick-slip damping analysis + recommendation |
+| `/api/v2/damping/recipes` | GET | Per-formation damping recipe library |
 | `/api/v2/debug/baseline` | GET | Baseline learning status |
 | `/api/v2/debug/ml/history` | GET | ML analysis history |
 | `/api/v2/debug/fleet/intelligence` | GET | Fleet intelligence cache |
@@ -717,7 +724,7 @@ Baseline learning state (locked thresholds) is automatically saved to `data/base
 
 ### No advisories being generated
 
-1. **Still in baseline learning** - Wait ~2 minutes for 100 samples. Check: `curl http://localhost:8080/api/v1/baseline`
+1. **Still in baseline learning** - Wait ~2 minutes for 100 samples. Check: `curl http://localhost:8080/api/v2/debug/baseline`
 2. **Drilling conditions are good** - No advisories = optimal operations
 3. **Not in drilling state** - Advisories only during Drilling/Reaming
 4. **Test with fault injection** - Press `K`, `S`, or `P` in simulator
@@ -889,7 +896,7 @@ For developer/ML terms (CfC, NCP, BPTT, ACI, RegimeProfile, etc.), see [ARCHITEC
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-Current version: v3.5
+Current version: v4.0-dev
 
 ---
 

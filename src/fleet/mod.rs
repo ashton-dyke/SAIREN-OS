@@ -23,6 +23,7 @@ pub mod queue;
 pub mod client;
 pub mod uploader;
 pub mod sync;
+pub mod federation;
 
 pub use types::{FleetEvent, FleetEpisode, EventOutcome, IntelligenceOutput, IntelligenceSyncResponse};
 pub use queue::UploadQueue;

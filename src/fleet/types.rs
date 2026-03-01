@@ -268,6 +268,10 @@ mod tests {
             physics_report: DrillingPhysicsReport::default(),
             context_used: Vec::new(),
             trace_log: Vec::new(),
+            category: crate::types::AnomalyCategory::None,
+            trigger_parameter: String::new(),
+            trigger_value: 0.0,
+            threshold_value: 0.0,
         }
     }
 

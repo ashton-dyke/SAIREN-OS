@@ -151,7 +151,12 @@ pub async fn run_intelligence_sync(
                         if let Some(parent) = cache_path.parent() {
                             let _ = std::fs::create_dir_all(parent);
                         }
-                        if let Err(e) = std::fs::write(&cache_path, json) {
+                        // Atomic write: temp file + rename to prevent corruption on crash
+                        let tmp_path = cache_path.with_extension("tmp");
+                        let write_ok = std::fs::write(&tmp_path, &json)
+                            .and_then(|()| std::fs::rename(&tmp_path, &cache_path));
+                        if let Err(e) = write_ok {
+                            let _ = std::fs::remove_file(&tmp_path); // clean up on failure
                             warn!(error = %e, path = %cache_path.display(), "Failed to write intelligence cache");
                         } else {
                             info!(

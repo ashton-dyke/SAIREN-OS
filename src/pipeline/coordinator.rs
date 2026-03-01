@@ -27,7 +27,7 @@ use crate::types::{
     DrillingPhysicsReport, FormationPrognosis, HistoryEntry,
     StrategicAdvisory, VerificationResult, VerificationStatus, WitsPacket,
 };
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
 use std::time::Instant;
 use tracing::{debug, info, warn};
@@ -100,6 +100,37 @@ fn compute_trends(history: &[HistoryEntry], fallback_mse: f64) -> TrendComponent
     }
 }
 
+/// Compute torque coefficient of variation from a slice of torque values.
+///
+/// Returns `None` if insufficient data or mean is non-positive.
+fn compute_torque_cv(torques: &[f64]) -> Option<f64> {
+    let n = torques.len() as f64;
+    if n < 5.0 {
+        return None;
+    }
+    let mean = torques.iter().sum::<f64>() / n;
+    if mean <= 0.0 {
+        return None;
+    }
+    let variance = torques.iter().map(|t| (t - mean).powi(2)).sum::<f64>() / n;
+    Some(variance.sqrt() / mean)
+}
+
+/// Damping feedback monitor — tracks recommendation effectiveness.
+enum DampingMonitorState {
+    Idle {
+        /// Most recent outcome (for API visibility)
+        last_outcome: Option<(crate::types::DampingOutcome, Instant)>,
+    },
+    Active {
+        baseline_cv: f64,
+        recommendation: crate::types::DampingRecommendation,
+        started_at: Instant,
+        formation_name: Option<String>,
+        depth: f64,
+    },
+}
+
 /// Pipeline Coordinator manages the 10-phase processing sequence
 pub struct PipelineCoordinator {
     /// Phase 2-3: Tactical Agent
@@ -138,6 +169,10 @@ pub struct PipelineCoordinator {
     knowledge_base: Option<crate::knowledge_base::KnowledgeBase>,
     /// Previous pit volume for computing pit_volume_change delta
     prev_pit_volume: Option<f64>,
+    /// Formation boundaries already alerted (prevents repeat lookahead advisories)
+    alerted_boundaries: HashSet<String>,
+    /// Active damping feedback monitor state
+    damping_monitor: DampingMonitorState,
 }
 
 impl PipelineCoordinator {
@@ -173,6 +208,8 @@ impl PipelineCoordinator {
             optimizer: crate::optimization::ParameterOptimizer::new(300),
             knowledge_base,
             prev_pit_volume: None,
+            alerted_boundaries: HashSet::new(),
+            damping_monitor: DampingMonitorState::Idle { last_outcome: None },
         }
     }
 
@@ -222,6 +259,8 @@ impl PipelineCoordinator {
             optimizer: crate::optimization::ParameterOptimizer::new(300),
             knowledge_base,
             prev_pit_volume: None,
+            alerted_boundaries: HashSet::new(),
+            damping_monitor: DampingMonitorState::Idle { last_outcome: None },
         }
     }
 
@@ -274,9 +313,13 @@ impl PipelineCoordinator {
         // Sync tactical agent campaign with AppState campaign
         self.tactical_agent.set_campaign(campaign);
 
+        // Compute formation context for depth-ahead CfC network
+        let formation_ctx = self.current_formation_context(packet.bit_depth)
+            .map(|f| (packet.bit_depth - f.depth_top_ft, f.hardness));
+
         // PHASE 2-3: Tactical Agent (Basic Physics + Decision)
         let has_active_advisory = self.latest_advisory.is_some();
-        let (ticket_opt, mut metrics, history_entry) = self.tactical_agent.process(packet, has_active_advisory);
+        let (ticket_opt, mut metrics, history_entry) = self.tactical_agent.process(packet, has_active_advisory, formation_ctx);
 
         // Phase 1.2: Enrich metrics with formation context
         if let Some(formation) = self.current_formation_context(packet.bit_depth) {
@@ -292,6 +335,9 @@ impl PipelineCoordinator {
                     "Formation transition detected"
                 );
                 self.last_formation_name = Some(current_name.clone());
+                // Clear lookahead alert for the formation we just entered
+                // (allow future re-alert if driller trips out and back)
+                self.alerted_boundaries.remove(&current_name);
             }
             metrics.current_formation = Some(current_name);
             metrics.formation_depth_in_ft = Some(depth_into);
@@ -310,11 +356,21 @@ impl PipelineCoordinator {
             self.formation_prognosis.clone()
         };
 
+        // PHASE LOOKAHEAD: Standalone formation lookahead (independent of optimizer).
+        // Runs before make_contiguous() because it needs &mut self for cooldown tracking.
+        let lookahead_advisory = if let Some(ref prognosis) = dynamic_prognosis {
+            self.check_standalone_lookahead(packet, prognosis)
+        } else { None };
+
         // Make history buffer contiguous once — O(n) worst case on wrap, O(1) thereafter.
-        // Drop the &mut return value, then re-borrow as shared via as_slices().
-        // All downstream consumers accept &[HistoryEntry], so zero heap allocation.
+        // Collect into owned Vec so &mut self methods (check_damping_monitor,
+        // enrich_with_damping) can be called without borrow conflicts.
         self.history_buffer.make_contiguous();
-        let (history_slice, _) = self.history_buffer.as_slices();
+        let history_vec: Vec<HistoryEntry> = self.history_buffer.iter().cloned().collect();
+        let history_slice: &[HistoryEntry] = &history_vec;
+
+        // PHASE DAMPING-MONITOR: Check effectiveness of active damping recommendation
+        let damping_monitor_text = self.check_damping_monitor(history_slice);
 
         // PHASE OPT: Proactive Optimization (every N packets, independent of tickets)
         let opt_advisory = if let Some(ref prognosis) = dynamic_prognosis {
@@ -377,8 +433,16 @@ impl PipelineCoordinator {
                 if should_generate_periodic {
                     return self.generate_periodic_summary(packet, &metrics, campaign).await;
                 }
+                // Return damping monitor advisory if monitoring reached a terminal state
+                if let Some(text) = damping_monitor_text {
+                    return Some(self.make_damping_monitor_advisory(packet, &text));
+                }
                 // Return optimization advisory if one was generated this cycle
                 if let Some(adv) = opt_advisory {
+                    return Some(adv);
+                }
+                // Return lookahead advisory if one was generated this cycle
+                if let Some(adv) = lookahead_advisory {
                     return Some(adv);
                 }
                 debug!("Phase 3: No ticket, pipeline ends");
@@ -387,6 +451,9 @@ impl PipelineCoordinator {
         };
 
         // PHASES 5-9: ONLY EXECUTED WHEN TICKET EXISTS
+
+        // PHASE DAMPING: Enrich stick-slip tickets with active damping recommendations
+        self.enrich_with_damping(&mut ticket, history_slice);
 
         // CAUSAL: Detect leading indicators before advanced physics.
         // Exclude the current packet (last entry) from the causal window to
@@ -648,6 +715,7 @@ impl PipelineCoordinator {
             cfc_anomaly_score: None,
             cfc_feature_surprises: Vec::new(),
             causal_leads: Vec::new(),
+            damping_recommendation: None,
         };
 
         // Make history buffer contiguous for zero-copy slice access
@@ -886,6 +954,389 @@ impl PipelineCoordinator {
         (result.recommendation, result.expected_benefit, result.reasoning)
     }
 
+    /// Standalone formation lookahead check (independent of optimizer).
+    ///
+    /// Fires once per formation boundary, then enters cooldown until
+    /// the formation transition actually occurs (which clears the cooldown).
+    fn check_standalone_lookahead(
+        &mut self,
+        packet: &WitsPacket,
+        prognosis: &FormationPrognosis,
+    ) -> Option<StrategicAdvisory> {
+        let config = crate::config::get();
+        if !config.lookahead.enabled {
+            return None;
+        }
+
+        let formation = prognosis.formation_at_depth(packet.bit_depth)?;
+        let mut la = crate::optimization::look_ahead::check_look_ahead(
+            prognosis,
+            packet.bit_depth,
+            packet.rop,
+            formation,
+            config.lookahead.window_minutes,
+        )?;
+
+        // One-shot cooldown per formation boundary
+        if self.alerted_boundaries.contains(&la.formation_name) {
+            return None;
+        }
+
+        // Annotate with depth-ahead CfC confidence if available
+        la.cfc_confidence = self.tactical_agent.depth_ahead_result()
+            .filter(|r| r.is_calibrated)
+            .map(|r| r.confidence);
+
+        info!(
+            formation = %la.formation_name,
+            eta_min = la.estimated_minutes,
+            cfc_confidence = ?la.cfc_confidence,
+            "Lookahead advisory: approaching formation boundary"
+        );
+        self.alerted_boundaries.insert(la.formation_name.clone());
+
+        Some(crate::optimization::templates::format_lookahead_advisory(
+            &la,
+            packet.bit_depth,
+            packet.rop,
+        ))
+    }
+
+    /// Enrich a stick-slip ticket with active damping recommendations.
+    ///
+    /// Runs oscillation characterization on the torque time series from
+    /// the history buffer and generates bounded parameter recommendations.
+    /// When a formation-specific recipe exists, blends its proven parameters
+    /// into the recommendation (70% recipe, 30% lookup table).
+    fn enrich_with_damping(
+        &mut self,
+        ticket: &mut AdvisoryTicket,
+        history: &[HistoryEntry],
+    ) {
+        let damping = &crate::config::get().damping;
+        if !damping.enabled {
+            return;
+        }
+
+        // Only enrich stick-slip tickets (Mechanical category with "Stick-slip" pattern)
+        let is_stick_slip = ticket.category == AnomalyCategory::Mechanical
+            && ticket
+                .context
+                .as_ref()
+                .map(|c| c.pattern.contains("Stick-slip") || c.pattern.contains("stick-slip"))
+                .unwrap_or(false);
+
+        if !is_stick_slip {
+            return;
+        }
+
+        // Extract torque time series from history
+        let torques: Vec<f64> = history.iter().map(|e| e.packet.torque).collect();
+
+        // Run oscillation characterization
+        let analysis = match physics_engine::characterize_oscillation(&torques, damping.min_samples) {
+            Some(a) => a,
+            None => return,
+        };
+
+        // Only proceed if CV meets the damping threshold
+        if analysis.torque_cv < damping.cv_threshold {
+            return;
+        }
+
+        // Get current WOB and RPM from the latest history entry
+        let (wob, rpm) = match history.last() {
+            Some(e) => (e.packet.wob, e.packet.rpm),
+            None => return,
+        };
+
+        // Generate damping recommendation
+        if let Some(rec) = physics_engine::recommend_damping(
+            &analysis,
+            wob,
+            rpm,
+            damping.max_wob_reduction_pct,
+            damping.max_rpm_change_pct,
+        ) {
+            // Check for a formation-specific recipe to refine the recommendation
+            let rec = if let Some(formation) = self.last_formation_name.as_deref() {
+                if let Some(recipe) = crate::storage::damping_recipes::best_recipe(formation) {
+                    let mut refined = rec;
+                    // Blend recipe parameters (70% recipe, 30% lookup table)
+                    let recipe_weight = 0.7;
+                    refined.wob_change_pct = recipe.wob_change_pct * recipe_weight
+                        + refined.wob_change_pct * (1.0 - recipe_weight);
+                    refined.rpm_change_pct = recipe.rpm_change_pct * recipe_weight
+                        + refined.rpm_change_pct * (1.0 - recipe_weight);
+                    // Recompute absolute values from blended percentages
+                    refined.recommended_wob = wob * (1.0 + refined.wob_change_pct / 100.0);
+                    refined.recommended_rpm = rpm * (1.0 + refined.rpm_change_pct / 100.0);
+                    refined.rationale = format!(
+                        "{} (refined by {} formation recipe: baseline CV {:.1}% → {:.1}%)",
+                        refined.rationale,
+                        formation,
+                        recipe.baseline_cv * 100.0,
+                        recipe.achieved_cv * 100.0,
+                    );
+                    info!(
+                        formation,
+                        recipe_wob_pct = recipe.wob_change_pct,
+                        recipe_rpm_pct = recipe.rpm_change_pct,
+                        blended_wob_pct = refined.wob_change_pct,
+                        blended_rpm_pct = refined.rpm_change_pct,
+                        "Recipe-informed damping recommendation"
+                    );
+                    refined
+                } else {
+                    rec
+                }
+            } else {
+                rec
+            };
+
+            info!(
+                osc_type = ?analysis.oscillation_type,
+                cv = analysis.torque_cv,
+                wob_pct = rec.wob_change_pct,
+                rpm_pct = rec.rpm_change_pct,
+                "Damping recommendation attached to stick-slip ticket"
+            );
+
+            // Start monitoring this recommendation's effectiveness
+            self.damping_monitor = DampingMonitorState::Active {
+                baseline_cv: analysis.torque_cv,
+                recommendation: rec.clone(),
+                started_at: Instant::now(),
+                formation_name: self.last_formation_name.clone(),
+                depth: history.last().map(|e| e.packet.bit_depth).unwrap_or(0.0),
+            };
+            info!(
+                baseline_cv = analysis.torque_cv,
+                formation = ?self.last_formation_name,
+                "Damping monitor activated"
+            );
+
+            ticket.damping_recommendation = Some(rec);
+        }
+    }
+
+    /// Check damping monitor state against current torque data.
+    ///
+    /// Runs on every packet. If monitoring is active, computes current
+    /// torque CV and determines if the recommendation succeeded, should
+    /// be escalated, or should be retracted.
+    ///
+    /// Returns an optional advisory text if monitoring reaches a terminal state.
+    fn check_damping_monitor(
+        &mut self,
+        history: &[HistoryEntry],
+    ) -> Option<String> {
+        use crate::types::DampingOutcome;
+        use std::time::Duration;
+
+        let config = crate::config::get();
+        let damping = &config.damping;
+
+        // Only process when actively monitoring
+        let (baseline_cv, started_at, formation_name, recommendation, depth) = match &self.damping_monitor {
+            DampingMonitorState::Idle { .. } => return None,
+            DampingMonitorState::Active {
+                baseline_cv,
+                started_at,
+                formation_name,
+                recommendation,
+                depth,
+            } => (*baseline_cv, *started_at, formation_name.clone(), recommendation.clone(), *depth),
+        };
+
+        // Compute current torque CV
+        let torques: Vec<f64> = history.iter().map(|e| e.packet.torque).collect();
+        let current_cv = match compute_torque_cv(&torques) {
+            Some(cv) => cv,
+            None => return None, // Not enough data yet
+        };
+
+        let cv_change_pct = (current_cv - baseline_cv) / baseline_cv * 100.0;
+        let elapsed = started_at.elapsed();
+
+        // Success: CV dropped enough
+        if cv_change_pct <= -(damping.success_cv_reduction_pct) {
+            let now_ts = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs();
+
+            let recipe = crate::types::DampingRecipe {
+                formation_name: formation_name.clone().unwrap_or_default(),
+                wob_change_pct: recommendation.wob_change_pct,
+                rpm_change_pct: recommendation.rpm_change_pct,
+                baseline_cv,
+                achieved_cv: current_cv,
+                cv_reduction_pct: -cv_change_pct,
+                depth_ft: depth,
+                recorded_at: now_ts,
+            };
+
+            if !recipe.formation_name.is_empty() {
+                if let Err(e) = crate::storage::damping_recipes::persist(
+                    &recipe,
+                    damping.max_recipes_per_formation,
+                ) {
+                    warn!("Failed to persist damping recipe: {}", e);
+                }
+            }
+
+            info!(
+                formation = ?formation_name,
+                baseline_cv,
+                current_cv,
+                cv_change_pct,
+                "Damping success — recipe stored"
+            );
+
+            self.damping_monitor = DampingMonitorState::Idle {
+                last_outcome: Some((DampingOutcome::Success, Instant::now())),
+            };
+
+            let formation_suffix = formation_name
+                .as_deref()
+                .map(|f| format!(" in formation {}", f))
+                .unwrap_or_default();
+            return Some(format!(
+                "DAMPING SUCCESS: Torque CV reduced from {:.1}% to {:.1}% ({:.1}%){}. Recipe stored.",
+                baseline_cv * 100.0,
+                current_cv * 100.0,
+                cv_change_pct,
+                formation_suffix,
+            ));
+        }
+
+        // Retracted: CV rose too much
+        if cv_change_pct >= damping.retract_cv_increase_pct {
+            warn!(
+                baseline_cv,
+                current_cv,
+                cv_change_pct,
+                "Damping retracted — CV worsened"
+            );
+
+            self.damping_monitor = DampingMonitorState::Idle {
+                last_outcome: Some((DampingOutcome::Retracted, Instant::now())),
+            };
+
+            return Some(format!(
+                "DAMPING RETRACTED: Torque CV increased from {:.1}% to {:.1}% (+{:.1}%). \
+                 Previous recommendation ineffective — consider alternative approach.",
+                baseline_cv * 100.0,
+                current_cv * 100.0,
+                cv_change_pct,
+            ));
+        }
+
+        // Escalated: window expired with no success/retraction
+        if elapsed >= Duration::from_secs(damping.monitor_window_secs) {
+            warn!(
+                elapsed_secs = elapsed.as_secs(),
+                baseline_cv,
+                current_cv,
+                "Damping escalated — no improvement within window"
+            );
+
+            self.damping_monitor = DampingMonitorState::Idle {
+                last_outcome: Some((DampingOutcome::Escalated, Instant::now())),
+            };
+
+            return Some(format!(
+                "DAMPING ESCALATED: No significant CV improvement after {}s. \
+                 Current CV {:.1}% vs baseline {:.1}%. \
+                 Consider more aggressive WOB reduction or RPM adjustment.",
+                elapsed.as_secs(),
+                current_cv * 100.0,
+                baseline_cv * 100.0,
+            ));
+        }
+
+        // Still monitoring
+        None
+    }
+
+    /// Create a standalone advisory from damping monitor outcome text.
+    fn make_damping_monitor_advisory(
+        &self,
+        packet: &WitsPacket,
+        text: &str,
+    ) -> StrategicAdvisory {
+        use crate::types::{FinalSeverity, RiskLevel};
+
+        let severity = if text.starts_with("DAMPING SUCCESS") {
+            FinalSeverity::Low
+        } else if text.starts_with("DAMPING RETRACTED") {
+            FinalSeverity::Medium
+        } else {
+            FinalSeverity::Medium
+        };
+
+        StrategicAdvisory {
+            timestamp: packet.timestamp,
+            efficiency_score: 80,
+            risk_level: RiskLevel::Low,
+            severity,
+            recommendation: text.to_string(),
+            expected_benefit: "Damping feedback monitoring".to_string(),
+            reasoning: "Automated torque CV tracking after damping recommendation".to_string(),
+            votes: Vec::new(),
+            physics_report: DrillingPhysicsReport::default(),
+            context_used: Vec::new(),
+            trace_log: Vec::new(),
+            category: AnomalyCategory::Mechanical,
+            trigger_parameter: "torque_cv_monitor".to_string(),
+            trigger_value: 0.0,
+            threshold_value: 0.0,
+        }
+    }
+
+    /// Get a snapshot of the current damping monitor state for API visibility.
+    pub fn damping_monitor_snapshot(&self) -> crate::types::DampingMonitorSnapshot {
+        use crate::types::DampingMonitorSnapshot;
+
+        let config = &crate::config::get().damping;
+        match &self.damping_monitor {
+            DampingMonitorState::Idle { last_outcome } => DampingMonitorSnapshot {
+                active: false,
+                baseline_cv: None,
+                current_cv: None,
+                cv_change_pct: None,
+                elapsed_secs: None,
+                window_secs: config.monitor_window_secs,
+                formation_name: None,
+                last_outcome: last_outcome.map(|(o, _)| o),
+            },
+            DampingMonitorState::Active {
+                baseline_cv,
+                started_at,
+                formation_name,
+                ..
+            } => {
+                // Compute current CV from history for the snapshot
+                let torques: Vec<f64> =
+                    self.history_buffer.iter().map(|e| e.packet.torque).collect();
+                let current_cv = compute_torque_cv(&torques);
+                let cv_change_pct =
+                    current_cv.map(|cv| (cv - baseline_cv) / baseline_cv * 100.0);
+                DampingMonitorSnapshot {
+                    active: true,
+                    baseline_cv: Some(*baseline_cv),
+                    current_cv,
+                    cv_change_pct,
+                    elapsed_secs: Some(started_at.elapsed().as_secs()),
+                    window_secs: config.monitor_window_secs,
+                    formation_name: formation_name.clone(),
+                    last_outcome: None,
+                }
+            }
+        }
+    }
+
     /// Look up the formation at the current bit depth.
     ///
     /// When the knowledge base is active, it dynamically reads from the KB
@@ -900,6 +1351,24 @@ impl PipelineCoordinator {
     /// Get a reference to the tactical agent
     pub fn tactical_agent(&self) -> &TacticalAgent {
         &self.tactical_agent
+    }
+
+    /// Mutable access to the tactical agent (for federation checkpoint operations).
+    pub fn tactical_agent_mut(&mut self) -> &mut TacticalAgent {
+        &mut self.tactical_agent
+    }
+
+    /// Snapshot the dual CfC network state for federation upload.
+    pub fn snapshot_cfc(&self, rig_id: &str, well_id: &str) -> crate::cfc::checkpoint::DualCfcCheckpoint {
+        self.tactical_agent.cfc_network().snapshot(rig_id, well_id)
+    }
+
+    /// Restore dual CfC network state from a federated checkpoint.
+    pub fn restore_cfc_from_checkpoint(
+        &mut self,
+        cp: &crate::cfc::checkpoint::DualCfcCheckpoint,
+    ) -> Result<(), String> {
+        self.tactical_agent.cfc_network_mut().restore_from(cp)
     }
 
     /// Get pipeline statistics
@@ -1083,5 +1552,189 @@ mod tests {
             "Third packet should have delta -3.0, got {}",
             pkt3.pit_volume_change
         );
+    }
+
+    // ============================================================================
+    // Damping Monitor Tests (Iteration 2)
+    // ============================================================================
+
+    /// Build a history entry with the given torque value.
+    fn make_history_entry(torque: f64) -> HistoryEntry {
+        let mut pkt = create_test_packet(50.0, 2.0);
+        pkt.torque = torque;
+        HistoryEntry {
+            packet: pkt,
+            metrics: DrillingMetrics::default(),
+        }
+    }
+
+    #[test]
+    fn test_compute_torque_cv() {
+        // Constant torque → CV = 0
+        let constant: Vec<f64> = vec![10.0; 20];
+        assert_eq!(compute_torque_cv(&constant), Some(0.0));
+
+        // Insufficient data (< 5 samples)
+        assert_eq!(compute_torque_cv(&[1.0, 2.0, 3.0]), None);
+
+        // Known values: [10, 20, 30, 40, 50] → mean=30, std≈14.14, CV≈0.471
+        let known = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+        let cv = compute_torque_cv(&known).unwrap();
+        assert!((cv - 0.4714).abs() < 0.01, "CV should be ~0.471, got {}", cv);
+
+        // Non-positive mean → None
+        let zeros = vec![0.0; 10];
+        assert_eq!(compute_torque_cv(&zeros), None);
+    }
+
+    /// Build a test DampingRecommendation.
+    fn make_test_damping_rec() -> crate::types::DampingRecommendation {
+        crate::types::DampingRecommendation {
+            analysis: crate::types::OscillationAnalysis {
+                oscillation_type: crate::types::OscillationType::StickSlip,
+                torque_cv: 0.25,
+                estimated_frequency_hz: 0.3,
+                amplitude_ratio: 0.5,
+                severity: 0.6,
+                sample_count: 60,
+            },
+            current_wob: 25.0,
+            recommended_wob: 21.0,
+            wob_change_pct: -15.0,
+            current_rpm: 120.0,
+            recommended_rpm: 132.0,
+            rpm_change_pct: 10.0,
+            rationale: "test recommendation".to_string(),
+        }
+    }
+
+    /// Ensure config is initialized for coordinator tests.
+    fn ensure_config() {
+        crate::config::init(
+            crate::config::WellConfig::default(),
+            crate::config::ConfigProvenance::default(),
+        );
+    }
+
+    #[test]
+    fn test_monitor_success_transition() {
+        ensure_config();
+        // Set up storage for recipe persistence
+        let tmp = std::env::temp_dir().join("sairen_coord_test_success");
+        let _ = std::fs::remove_dir_all(&tmp);
+        let _ = crate::storage::history::init(tmp.to_str().unwrap());
+        let _ = crate::storage::damping_recipes::init();
+
+        let mut coordinator = PipelineCoordinator::new();
+
+        // Activate monitoring with baseline_cv = 0.25
+        coordinator.damping_monitor = DampingMonitorState::Active {
+            baseline_cv: 0.25,
+            recommendation: make_test_damping_rec(),
+            started_at: std::time::Instant::now(),
+            formation_name: Some("TestFormation".to_string()),
+            depth: 10000.0,
+        };
+
+        // Build history with torque that gives CV = ~0.047 (low = success)
+        // With baseline 0.25, need CV ≤ 0.25 * (1 - 0.20) = 0.20
+        // Use near-constant torque → CV ≈ 0
+        let history: Vec<HistoryEntry> = (0..20)
+            .map(|_| make_history_entry(15.0))
+            .collect();
+
+        let result = coordinator.check_damping_monitor(&history);
+        assert!(result.is_some(), "Should return success advisory text");
+        let text = result.unwrap();
+        assert!(text.contains("DAMPING SUCCESS"), "Text should indicate success: {}", text);
+
+        // Monitor should transition to Idle
+        assert!(matches!(
+            coordinator.damping_monitor,
+            DampingMonitorState::Idle { last_outcome: Some((crate::types::DampingOutcome::Success, _)) }
+        ));
+    }
+
+    #[test]
+    fn test_monitor_retraction() {
+        ensure_config();
+        let mut coordinator = PipelineCoordinator::new();
+
+        // Activate monitoring with baseline_cv = 0.10
+        coordinator.damping_monitor = DampingMonitorState::Active {
+            baseline_cv: 0.10,
+            recommendation: make_test_damping_rec(),
+            started_at: std::time::Instant::now(),
+            formation_name: None,
+            depth: 10000.0,
+        };
+
+        // Build history with high torque variation → high CV (much higher than 0.10)
+        // Need cv_change_pct >= 15.0, so current_cv >= 0.10 * 1.15 = 0.115
+        // Use widely varying torque: [5, 25, 5, 25, ...] → mean=15, std=10, CV=0.667
+        let history: Vec<HistoryEntry> = (0..20)
+            .map(|i| {
+                if i % 2 == 0 { make_history_entry(5.0) }
+                else { make_history_entry(25.0) }
+            })
+            .collect();
+
+        let result = coordinator.check_damping_monitor(&history);
+        assert!(result.is_some(), "Should return retraction advisory text");
+        let text = result.unwrap();
+        assert!(text.contains("DAMPING RETRACTED"), "Text should indicate retraction: {}", text);
+
+        assert!(matches!(
+            coordinator.damping_monitor,
+            DampingMonitorState::Idle { last_outcome: Some((crate::types::DampingOutcome::Retracted, _)) }
+        ));
+    }
+
+    #[test]
+    fn test_monitor_escalation() {
+        ensure_config();
+        let mut coordinator = PipelineCoordinator::new();
+
+        // Activate monitoring with a started_at far in the past (> monitor_window_secs)
+        let long_ago = std::time::Instant::now() - std::time::Duration::from_secs(300);
+        coordinator.damping_monitor = DampingMonitorState::Active {
+            baseline_cv: 0.20,
+            recommendation: make_test_damping_rec(),
+            started_at: long_ago,
+            formation_name: None,
+            depth: 10000.0,
+        };
+
+        // Build history with moderate variation (CV similar to baseline — no improvement but no worsening)
+        // CV around 0.19 → cv_change_pct = (0.19 - 0.20) / 0.20 * 100 = -5% (not enough for success)
+        // Use torque values that produce CV ≈ 0.19
+        // torques: [14, 15, 16, 14, 15, 16, ...] → mean=15, std≈0.816, CV≈0.054
+        // That's way too low. Need CV ≈ 0.18-0.19
+        // torques with mean=15, std=15*0.19=2.85
+        // Use [12, 15, 18, 12, 15, 18, ...] → mean=15, variance=6, std=2.449, CV=0.163
+        // That's CV=0.163 vs baseline 0.20, change = (0.163-0.20)/0.20*100 = -18.5% → that triggers success
+        // Need CV between 0.20 * (1-0.20) = 0.16 and 0.20 * (1+0.15) = 0.23
+        // So CV in [0.161, 0.229] — doesn't trigger success or retraction
+        // Use [11, 15, 19, 11, 15, 19, ...] → mean=15, variance≈10.67, std≈3.27, CV≈0.218
+        let history: Vec<HistoryEntry> = (0..21)
+            .map(|i| {
+                let torque = match i % 3 {
+                    0 => 11.0,
+                    1 => 15.0,
+                    _ => 19.0,
+                };
+                make_history_entry(torque)
+            })
+            .collect();
+
+        let result = coordinator.check_damping_monitor(&history);
+        assert!(result.is_some(), "Should return escalation advisory text");
+        let text = result.unwrap();
+        assert!(text.contains("DAMPING ESCALATED"), "Text should indicate escalation: {}", text);
+
+        assert!(matches!(
+            coordinator.damping_monitor,
+            DampingMonitorState::Idle { last_outcome: Some((crate::types::DampingOutcome::Escalated, _)) }
+        ));
     }
 }

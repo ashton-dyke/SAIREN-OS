@@ -21,8 +21,11 @@ pub mod sensors;
 // available in the binary crate which declares its own `mod storage;`.
 pub mod storage {
     pub mod acks;
+    pub mod damping_recipes;
+    pub mod feedback;
     pub mod history;
     pub mod strategic;
+    pub mod suggestions;
     pub use strategic::StrategicStorage;
 }
 pub mod llm;
@@ -36,6 +39,7 @@ pub mod causal;
 pub mod background;
 pub mod fleet;
 pub mod knowledge_base;
+pub mod debrief;
 pub mod volve;
 #[cfg(feature = "fleet-hub")]
 pub mod hub;

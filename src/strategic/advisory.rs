@@ -95,6 +95,10 @@ impl AdvisoryComposer {
             physics_report: physics.clone(),
             context_used: context.to_vec(),
             trace_log: ticket.trace_log.clone(),
+            category: ticket.category,
+            trigger_parameter: ticket.trigger_parameter.clone(),
+            trigger_value: ticket.trigger_value,
+            threshold_value: ticket.threshold_value,
         })
     }
 }
@@ -202,6 +206,7 @@ mod tests {
             cfc_anomaly_score: None,
             cfc_feature_surprises: Vec::new(),
             causal_leads: Vec::new(),
+            damping_recommendation: None,
         }
     }
 

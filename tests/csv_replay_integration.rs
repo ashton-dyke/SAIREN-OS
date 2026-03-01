@@ -72,7 +72,7 @@ fn csv_replay_50_packets_smoke() {
     let mut tickets_confirmed: u64 = 0;
 
     for packet in drilling_packets.iter().take(target_count) {
-        let (ticket_opt, _metrics, history_entry) = tactical.process(packet, false);
+        let (ticket_opt, _metrics, history_entry) = tactical.process(packet, false, None);
         packets_processed += 1;
 
         // Update rolling history (same as coordinator Phase 4)
@@ -208,7 +208,7 @@ fn csv_replay_200_packets_baseline_and_tickets() {
     let mut baseline_locked = false;
 
     for packet in drilling.iter().take(target_count) {
-        let (ticket_opt, _metrics, history_entry) = tactical.process(packet, false);
+        let (ticket_opt, _metrics, history_entry) = tactical.process(packet, false, None);
 
         if history.len() >= 60 {
             history.pop_front();

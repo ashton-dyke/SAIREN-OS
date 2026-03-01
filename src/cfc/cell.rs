@@ -14,9 +14,10 @@ use crate::cfc::wiring::{NcpWiring, NUM_OUTPUTS};
 use crate::cfc::normalizer::NUM_FEATURES;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
+use serde::{Serialize, Deserialize};
 
 /// CfC cell weights and biases.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CfcWeights {
     // Per-neuron weight vectors for incoming connections (sparse).
     // For neuron i, w_tau[i], w_f[i], w_g[i] have length = number of incoming connections.

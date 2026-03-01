@@ -100,6 +100,9 @@ impl RAMRecall {
     ) -> Vec<String> {
         let store = self.episodes.read().expect("RAMRecall lock poisoned");
 
+        // Newest timestamp in store (for recency scoring)
+        let newest_ts = store.iter().map(|e| e.timestamp).max().unwrap_or(0);
+
         // Phase 1: Metadata filter (category + campaign)
         let mut candidates: Vec<(&FleetEpisode, f64)> = store
             .iter()
@@ -110,7 +113,8 @@ impl RAMRecall {
             })
             .map(|ep| {
                 // Phase 2: Score by relevance (recency + outcome quality)
-                let recency_score = 1.0 / (1.0 + (store.len() as f64 - ep.timestamp as f64).abs() / 10000.0);
+                let age_secs = (newest_ts as f64 - ep.timestamp as f64).max(0.0);
+                let recency_score = 1.0 / (1.0 + age_secs / 3600.0);
                 let outcome_score = match &ep.outcome {
                     crate::fleet::types::EventOutcome::Resolved { .. } => 1.0,
                     crate::fleet::types::EventOutcome::Escalated { .. } => 0.8,

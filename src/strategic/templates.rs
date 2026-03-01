@@ -8,7 +8,7 @@
 //! and are tagged with `source: "template"` so the dashboard can display a banner.
 
 use crate::types::{
-    AdvisoryTicket, AnomalyCategory, Campaign, DrillingPhysicsReport,
+    AdvisoryTicket, AnomalyCategory, Campaign, DrillingPhysicsReport, OscillationType,
 };
 
 /// Result of template-based advisory generation
@@ -197,6 +197,42 @@ fn mechanical_template(
     let metrics = &ticket.current_metrics;
     let torque_delta = metrics.torque_delta_percent;
 
+    // If damping recommendation is attached, use specific advice
+    if let Some(ref damping) = ticket.damping_recommendation {
+        let rec = format!(
+            "STICK-SLIP DAMPING: Torque CV {:.1}% ({}, {:.2} Hz, severity {:.0}%).\n\
+             Recommended: WOB {:.1} → {:.1} klbs ({:+.0}%), RPM {:.0} → {:.0} ({:+.0}%).\n\
+             Rationale: {}",
+            damping.analysis.torque_cv * 100.0,
+            match damping.analysis.oscillation_type {
+                OscillationType::StickSlip => "stick-slip",
+                OscillationType::TorsionalGeneral => "torsional",
+            },
+            damping.analysis.estimated_frequency_hz,
+            damping.analysis.severity * 100.0,
+            damping.current_wob, damping.recommended_wob, damping.wob_change_pct,
+            damping.current_rpm, damping.recommended_rpm, damping.rpm_change_pct,
+            damping.rationale,
+        );
+        let benefit = format!(
+            "Reduce torque oscillation severity from {:.0}% toward stable drilling",
+            damping.analysis.severity * 100.0,
+        );
+        let reasoning = format!(
+            "Active damping engine: {} oscillation at {:.2} Hz, amplitude ratio {:.1}x. \
+             WOB/RPM changes bounded to config limits ({:.0}%/{:.0}%).",
+            match damping.analysis.oscillation_type {
+                OscillationType::StickSlip => "stick-slip",
+                OscillationType::TorsionalGeneral => "torsional",
+            },
+            damping.analysis.estimated_frequency_hz,
+            damping.analysis.amplitude_ratio,
+            damping.wob_change_pct.abs(),
+            damping.rpm_change_pct.abs(),
+        );
+        return (rec, benefit, reasoning);
+    }
+
     let action = if physics.founder_detected {
         format!(
             "FOUNDER CONDITION: WOB exceeds optimal ({:.0} klbs, optimal ~{:.0} klbs). \
@@ -316,6 +352,7 @@ mod tests {
             cfc_anomaly_score: None,
             cfc_feature_surprises: Vec::new(),
             causal_leads: Vec::new(),
+            damping_recommendation: None,
         }
     }
 
@@ -392,5 +429,38 @@ mod tests {
         physics.optimal_wob_estimate = 25.0;
         let result = template_advisory(&ticket, &physics, Campaign::Production);
         assert!(result.recommendation.contains("FOUNDER"), "Should detect founder condition");
+    }
+
+    #[test]
+    fn test_mechanical_template_with_damping() {
+        use crate::types::{OscillationAnalysis, OscillationType, DampingRecommendation};
+
+        let mut ticket = make_ticket(AnomalyCategory::Mechanical);
+        ticket.damping_recommendation = Some(DampingRecommendation {
+            analysis: OscillationAnalysis {
+                oscillation_type: OscillationType::StickSlip,
+                torque_cv: 0.22,
+                estimated_frequency_hz: 0.2,
+                amplitude_ratio: 0.6,
+                severity: 0.8,
+                sample_count: 60,
+            },
+            current_wob: 25.0,
+            recommended_wob: 21.3,
+            wob_change_pct: -14.8,
+            current_rpm: 120.0,
+            recommended_rpm: 130.8,
+            rpm_change_pct: 9.0,
+            rationale: "Reduce bit-rock friction".to_string(),
+        });
+
+        let physics = make_physics();
+        let result = template_advisory(&ticket, &physics, Campaign::Production);
+        assert!(result.recommendation.contains("STICK-SLIP DAMPING"),
+            "Should contain STICK-SLIP DAMPING header");
+        assert!(result.recommendation.contains("21.3"),
+            "Should contain recommended WOB value");
+        assert!(result.recommendation.contains("131"),
+            "Should contain recommended RPM value (130.8 rounded to 131)");
     }
 }

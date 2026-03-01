@@ -130,6 +130,9 @@ pub struct AdvisoryTicket {
     /// giving the driller advance warning of developing inefficiency.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub causal_leads: Vec<CausalLead>,
+    /// Active damping recommendation for stick-slip tickets (coordinator enrichment)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub damping_recommendation: Option<super::DampingRecommendation>,
 }
 
 impl AdvisoryTicket {

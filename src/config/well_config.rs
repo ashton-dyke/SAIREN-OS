@@ -76,6 +76,18 @@ pub struct WellConfig {
     /// ML engine tuning
     #[serde(default)]
     pub ml: MlConfig,
+
+    /// Formation lookahead advisory settings
+    #[serde(default)]
+    pub lookahead: LookaheadConfig,
+
+    /// Active damping recommendation settings
+    #[serde(default)]
+    pub damping: DampingConfig,
+
+    /// Federated CfC weight sharing settings
+    #[serde(default)]
+    pub federation: FederationConfig,
 }
 
 impl Default for WellConfig {
@@ -89,6 +101,9 @@ impl Default for WellConfig {
             physics: PhysicsConfig::default(),
             server: ServerConfig::default(),
             ml: MlConfig::default(),
+            lookahead: LookaheadConfig::default(),
+            damping: DampingConfig::default(),
+            federation: FederationConfig::default(),
         }
     }
 }
@@ -1165,6 +1180,22 @@ pub struct AdvisoryConfig {
     /// Minimum depth change (ft) between CRITICAL tickets of the same category.
     #[serde(default = "default_critical_depth_cooldown")]
     pub critical_depth_cooldown_ft: f64,
+
+    /// Number of tickets before progressive sustained throttle engages.
+    #[serde(default = "default_sustained_throttle_onset")]
+    pub sustained_throttle_onset: u32,
+
+    /// Depth cooldown multiplier for each ticket beyond onset (exponential).
+    #[serde(default = "default_sustained_depth_multiplier")]
+    pub sustained_depth_multiplier: f64,
+
+    /// Maximum progressive depth cooldown cap (ft).
+    #[serde(default = "default_sustained_max_depth_cooldown")]
+    pub sustained_max_depth_cooldown_ft: f64,
+
+    /// Non-anomalous packets required to reset sustained throttle for a category.
+    #[serde(default = "default_sustained_reset_normal_count")]
+    pub sustained_reset_normal_count: u32,
 }
 
 fn default_cooldown_seconds() -> u64 { 60 }
@@ -1173,6 +1204,10 @@ fn default_packet_cooldown() -> u64 { 50 }
 fn default_critical_packet_cooldown() -> u64 { 20 }
 fn default_depth_cooldown() -> f64 { 50.0 }
 fn default_critical_depth_cooldown() -> f64 { 10.0 }
+fn default_sustained_throttle_onset() -> u32 { 3 }
+fn default_sustained_depth_multiplier() -> f64 { 2.0 }
+fn default_sustained_max_depth_cooldown() -> f64 { 500.0 }
+fn default_sustained_reset_normal_count() -> u32 { 500 }
 
 impl Default for AdvisoryConfig {
     fn default() -> Self {
@@ -1183,6 +1218,10 @@ impl Default for AdvisoryConfig {
             critical_packet_cooldown: default_critical_packet_cooldown(),
             depth_cooldown_ft: default_depth_cooldown(),
             critical_depth_cooldown_ft: default_critical_depth_cooldown(),
+            sustained_throttle_onset: default_sustained_throttle_onset(),
+            sustained_depth_multiplier: default_sustained_depth_multiplier(),
+            sustained_max_depth_cooldown_ft: default_sustained_max_depth_cooldown(),
+            sustained_reset_normal_count: default_sustained_reset_normal_count(),
         }
     }
 }
@@ -1372,6 +1411,168 @@ impl Default for ServerConfig {
     fn default() -> Self {
         Self {
             addr: default_server_addr(),
+        }
+    }
+}
+
+// ============================================================================
+// Formation Lookahead Config
+// ============================================================================
+
+/// Formation lookahead advisory settings.
+///
+/// Controls proactive alerting when the bit is approaching a formation
+/// boundary based on current ROP and formation prognosis data.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LookaheadConfig {
+    /// Enable/disable formation lookahead advisories
+    #[serde(default = "default_lookahead_enabled")]
+    pub enabled: bool,
+    /// How far ahead to look (minutes based on current ROP)
+    #[serde(default = "default_lookahead_window_minutes")]
+    pub window_minutes: f64,
+}
+
+fn default_lookahead_enabled() -> bool { true }
+fn default_lookahead_window_minutes() -> f64 { 30.0 }
+
+impl Default for LookaheadConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_lookahead_enabled(),
+            window_minutes: default_lookahead_window_minutes(),
+        }
+    }
+}
+
+// ============================================================================
+// Active Damping Config
+// ============================================================================
+
+/// Active damping recommendation settings.
+///
+/// Controls oscillation characterization and bounded parameter recommendations
+/// when stick-slip is detected. Recommendations are clamped to the configured
+/// safe envelope to prevent overcorrection.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DampingConfig {
+    /// Enable/disable active damping recommendations
+    #[serde(default = "default_damping_enabled")]
+    pub enabled: bool,
+    /// Maximum WOB reduction percentage (absolute value)
+    #[serde(default = "default_max_wob_reduction_pct")]
+    pub max_wob_reduction_pct: f64,
+    /// Maximum RPM change percentage (absolute value, applies to both increase/decrease)
+    #[serde(default = "default_max_rpm_change_pct")]
+    pub max_rpm_change_pct: f64,
+    /// Minimum torque CV to trigger damping analysis (overrides mechanical threshold if higher)
+    #[serde(default = "default_damping_cv_threshold")]
+    pub cv_threshold: f64,
+    /// Minimum history packets required for oscillation characterization
+    #[serde(default = "default_damping_min_samples")]
+    pub min_samples: usize,
+    /// Duration (seconds) to monitor torque CV after issuing a damping recommendation
+    #[serde(default = "default_damping_monitor_window_secs")]
+    pub monitor_window_secs: u64,
+    /// Minimum CV reduction percentage to classify outcome as Success
+    #[serde(default = "default_damping_success_cv_reduction_pct")]
+    pub success_cv_reduction_pct: f64,
+    /// CV increase percentage that triggers recommendation retraction
+    #[serde(default = "default_damping_retract_cv_increase_pct")]
+    pub retract_cv_increase_pct: f64,
+    /// Maximum recipes stored per formation (oldest pruned when exceeded)
+    #[serde(default = "default_damping_max_recipes_per_formation")]
+    pub max_recipes_per_formation: usize,
+}
+
+fn default_damping_enabled() -> bool { true }
+fn default_max_wob_reduction_pct() -> f64 { 20.0 }
+fn default_max_rpm_change_pct() -> f64 { 20.0 }
+fn default_damping_cv_threshold() -> f64 { 0.15 }
+fn default_damping_min_samples() -> usize { 10 }
+fn default_damping_monitor_window_secs() -> u64 { 120 }
+fn default_damping_success_cv_reduction_pct() -> f64 { 20.0 }
+fn default_damping_retract_cv_increase_pct() -> f64 { 15.0 }
+fn default_damping_max_recipes_per_formation() -> usize { 20 }
+
+impl Default for DampingConfig {
+    fn default() -> Self {
+        Self {
+            enabled: default_damping_enabled(),
+            max_wob_reduction_pct: default_max_wob_reduction_pct(),
+            max_rpm_change_pct: default_max_rpm_change_pct(),
+            cv_threshold: default_damping_cv_threshold(),
+            min_samples: default_damping_min_samples(),
+            monitor_window_secs: default_damping_monitor_window_secs(),
+            success_cv_reduction_pct: default_damping_success_cv_reduction_pct(),
+            retract_cv_increase_pct: default_damping_retract_cv_increase_pct(),
+            max_recipes_per_formation: default_damping_max_recipes_per_formation(),
+        }
+    }
+}
+
+// ============================================================================
+// Federation Config
+// ============================================================================
+
+/// Policy for when to accept a federated model from the hub.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum FederationInitPolicy {
+    /// Only seed untrained networks (packets_processed == 0).
+    FreshOnly,
+    /// Use federated model if it has more experience than the local one.
+    BetterModel,
+    /// Upload checkpoints only, never pull from the hub.
+    UploadOnly,
+}
+
+impl Default for FederationInitPolicy {
+    fn default() -> Self {
+        Self::FreshOnly
+    }
+}
+
+/// Configuration for federated CfC weight sharing.
+///
+/// When enabled, the rig periodically uploads CfC network checkpoints to the
+/// fleet hub and pulls federated-averaged models. Disabled by default.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FederationConfig {
+    /// Enable federated weight sharing (default: false).
+    #[serde(default)]
+    pub enable: bool,
+    /// Seconds between checkpoint uploads (default: 3600 = 1 hour).
+    #[serde(default = "default_federation_checkpoint_interval")]
+    pub checkpoint_interval_secs: u64,
+    /// Seconds between federated model pulls (default: 7200 = 2 hours).
+    #[serde(default = "default_federation_pull_interval")]
+    pub pull_interval_secs: u64,
+    /// Policy for accepting federated models (default: FreshOnly).
+    #[serde(default)]
+    pub init_policy: FederationInitPolicy,
+    /// Minimum packets processed before uploading a checkpoint (default: 1000).
+    #[serde(default = "default_federation_min_packets")]
+    pub min_packets_for_upload: u64,
+    /// Disk path for persisting checkpoints (default: "./data/cfc_checkpoint.json").
+    #[serde(default = "default_federation_checkpoint_path")]
+    pub checkpoint_path: String,
+}
+
+fn default_federation_checkpoint_interval() -> u64 { 3600 }
+fn default_federation_pull_interval() -> u64 { 7200 }
+fn default_federation_min_packets() -> u64 { 1000 }
+fn default_federation_checkpoint_path() -> String { "./data/cfc_checkpoint.json".to_string() }
+
+impl Default for FederationConfig {
+    fn default() -> Self {
+        Self {
+            enable: false,
+            checkpoint_interval_secs: default_federation_checkpoint_interval(),
+            pull_interval_secs: default_federation_pull_interval(),
+            init_policy: FederationInitPolicy::default(),
+            min_packets_for_upload: default_federation_min_packets(),
+            checkpoint_path: default_federation_checkpoint_path(),
         }
     }
 }

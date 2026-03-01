@@ -21,6 +21,7 @@ mod ml;
 mod formation;
 mod optimization;
 mod knowledge_base;
+mod debrief;
 
 pub use state::*;
 pub use wits::*;
@@ -32,3 +33,4 @@ pub use ml::*;
 pub use formation::*;
 pub use optimization::*;
 pub use knowledge_base::*;
+pub use debrief::*;

@@ -22,7 +22,7 @@ pub const FEATURE_NAMES: [&str; NUM_FEATURES] = [
 
 /// Online normalizer using Welford's algorithm for numerically stable
 /// incremental mean and variance computation.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OnlineNormalizer {
     count: u64,
     mean: [f64; NUM_FEATURES],

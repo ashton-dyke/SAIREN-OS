@@ -435,6 +435,179 @@ pub fn detect_stick_slip(torque_values: &[f64]) -> (bool, f64) {
 }
 
 // ============================================================================
+// Oscillation Characterization & Active Damping
+// ============================================================================
+
+/// Characterize torque oscillation from a time series of torque values.
+///
+/// Uses zero-crossing analysis to estimate oscillation frequency and
+/// amplitude ratio to assess severity. Requires at least `min_samples`
+/// valid torque values.
+///
+/// Returns `None` if insufficient data or torque is near-zero.
+pub fn characterize_oscillation(
+    torque_values: &[f64],
+    min_samples: usize,
+) -> Option<crate::types::OscillationAnalysis> {
+    // Filter to valid (finite, > 0) values
+    let valid: Vec<f64> = torque_values
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite() && *v > 0.0)
+        .collect();
+
+    if valid.len() < min_samples {
+        return None;
+    }
+
+    let n = valid.len() as f64;
+    let mean = valid.iter().sum::<f64>() / n;
+    if mean <= 0.0 {
+        return None;
+    }
+
+    let variance = valid.iter().map(|v| (v - mean).powi(2)).sum::<f64>() / n;
+    let std_dev = variance.sqrt();
+    let cv = std_dev / mean;
+
+    // Negligible oscillation — not worth characterizing
+    if cv < 0.05 {
+        return None;
+    }
+
+    // Zero-crossing frequency estimation
+    // Detrend by subtracting mean, count sign changes
+    let mut zero_crossings = 0u32;
+    let detrended: Vec<f64> = valid.iter().map(|v| v - mean).collect();
+    for i in 1..detrended.len() {
+        if (detrended[i] >= 0.0) != (detrended[i - 1] >= 0.0) {
+            zero_crossings += 1;
+        }
+    }
+
+    // duration_seconds = samples - 1 (at 1 Hz sampling)
+    let duration_seconds = (valid.len() - 1) as f64;
+    let estimated_frequency_hz = if duration_seconds > 0.0 {
+        zero_crossings as f64 / (2.0 * duration_seconds)
+    } else {
+        0.0
+    };
+
+    // Amplitude ratio: (peak - trough) / mean_torque
+    let max_torque = valid.iter().cloned().fold(f64::NEG_INFINITY, f64::max);
+    let min_torque = valid.iter().cloned().fold(f64::INFINITY, f64::min);
+    let amplitude_ratio = (max_torque - min_torque) / mean;
+
+    // Classification: < 1.0 Hz → StickSlip, otherwise → TorsionalGeneral
+    let oscillation_type = if estimated_frequency_hz < 1.0 {
+        crate::types::OscillationType::StickSlip
+    } else {
+        crate::types::OscillationType::TorsionalGeneral
+    };
+
+    // Severity: linear interpolation between config warning and critical thresholds
+    let cfg = crate::config::get();
+    let cv_warning = cfg.thresholds.mechanical.stick_slip_cv_warning;
+    let cv_critical = cfg.thresholds.mechanical.stick_slip_cv_critical;
+    let severity = if cv >= cv_critical {
+        1.0
+    } else if cv > cv_warning && cv_critical > cv_warning {
+        (cv - cv_warning) / (cv_critical - cv_warning)
+    } else {
+        0.0
+    };
+
+    Some(crate::types::OscillationAnalysis {
+        oscillation_type,
+        torque_cv: cv,
+        estimated_frequency_hz,
+        amplitude_ratio,
+        severity,
+        sample_count: valid.len(),
+    })
+}
+
+/// Generate a damping recommendation based on oscillation analysis.
+///
+/// Applies a lookup-table strategy by oscillation type, clamped to
+/// the configured safe envelope (max_wob_reduction_pct, max_rpm_change_pct).
+///
+/// Returns `None` if current parameters are below minimums (bit off bottom).
+pub fn recommend_damping(
+    analysis: &crate::types::OscillationAnalysis,
+    current_wob: f64,
+    current_rpm: f64,
+    max_wob_reduction_pct: f64,
+    max_rpm_change_pct: f64,
+) -> Option<crate::types::DampingRecommendation> {
+    // Don't recommend changes if WOB is too low (off bottom)
+    if current_wob < 3.0 {
+        return None;
+    }
+
+    let severity_factor = analysis.severity.clamp(0.5, 1.0);
+
+    let (base_wob_pct, base_rpm_pct, rationale) = match analysis.oscillation_type {
+        crate::types::OscillationType::StickSlip => {
+            // Scale WOB reduction: -10% to -15% by severity
+            let wob = 10.0 + 5.0 * severity_factor;
+            // Scale RPM increase: +5% to +10% by severity
+            let rpm = 5.0 + 5.0 * severity_factor;
+            (
+                wob,
+                rpm,
+                "Reduce bit-rock friction via WOB reduction, increase rotary momentum to prevent stalling".to_string(),
+            )
+        }
+        crate::types::OscillationType::TorsionalGeneral => {
+            // Conservative: fixed 10% WOB reduction, hold RPM
+            (
+                10.0,
+                0.0,
+                "Conservative WOB reduction for ambiguous torsional oscillation; holding RPM pending further diagnosis".to_string(),
+            )
+        }
+    };
+
+    // Clamp to config limits
+    let wob_pct = base_wob_pct.min(max_wob_reduction_pct);
+    let rpm_pct = base_rpm_pct.min(max_rpm_change_pct);
+
+    // Calculate recommended values
+    let recommended_wob = (current_wob * (1.0 - wob_pct / 100.0)).max(3.0);
+    let recommended_rpm = if rpm_pct > 0.0 {
+        let target = current_rpm * (1.0 + rpm_pct / 100.0);
+        // Don't exceed 150% of current RPM
+        target.min(current_rpm * 1.5)
+    } else {
+        current_rpm
+    };
+
+    let actual_wob_pct = if current_wob > 0.0 {
+        (recommended_wob - current_wob) / current_wob * 100.0
+    } else {
+        0.0
+    };
+
+    let actual_rpm_pct = if current_rpm > 0.0 {
+        (recommended_rpm - current_rpm) / current_rpm * 100.0
+    } else {
+        0.0
+    };
+
+    Some(crate::types::DampingRecommendation {
+        analysis: analysis.clone(),
+        current_wob,
+        recommended_wob,
+        wob_change_pct: actual_wob_pct,
+        current_rpm,
+        recommended_rpm,
+        rpm_change_pct: actual_rpm_pct,
+        rationale,
+    })
+}
+
+// ============================================================================
 // Founder Detection
 // ============================================================================
 
@@ -1029,5 +1202,157 @@ mod tests {
 
         // Should NOT classify as Drilling — ROP below noise floor
         assert_ne!(classify_rig_state(&packet), RigState::Drilling);
+    }
+
+    // ========================================================================
+    // Oscillation Characterization Tests
+    // ========================================================================
+
+    #[test]
+    fn test_characterize_stick_slip_oscillation() {
+        ensure_config();
+
+        // Simulate ~0.2 Hz stick-slip: 60 samples at 1 Hz, sinusoidal torque
+        let base_torque = 15.0;
+        let amplitude = 5.0;
+        let freq = 0.2; // Hz
+        let torques: Vec<f64> = (0..60)
+            .map(|i| base_torque + amplitude * (2.0 * std::f64::consts::PI * freq * i as f64).sin())
+            .collect();
+
+        let analysis = characterize_oscillation(&torques, 10).expect("Should produce analysis");
+        assert_eq!(analysis.oscillation_type, crate::types::OscillationType::StickSlip);
+        assert!(analysis.estimated_frequency_hz > 0.1 && analysis.estimated_frequency_hz < 0.5,
+            "Frequency should be ~0.2 Hz, got {:.3}", analysis.estimated_frequency_hz);
+        assert!(analysis.torque_cv > 0.05, "CV should be above negligible threshold");
+        assert!(analysis.amplitude_ratio > 0.0);
+        assert_eq!(analysis.sample_count, 60);
+    }
+
+    #[test]
+    fn test_characterize_returns_none_insufficient_data() {
+        ensure_config();
+
+        let torques = vec![15.0, 14.0, 16.0]; // Only 3 samples
+        let result = characterize_oscillation(&torques, 10);
+        assert!(result.is_none(), "Should return None with fewer than min_samples");
+    }
+
+    #[test]
+    fn test_characterize_returns_none_stable_torque() {
+        ensure_config();
+
+        // Constant torque → CV below 0.05 threshold
+        let torques = vec![15.0; 30];
+        let result = characterize_oscillation(&torques, 10);
+        assert!(result.is_none(), "Should return None for stable (constant) torque");
+    }
+
+    #[test]
+    fn test_amplitude_ratio_calculation() {
+        ensure_config();
+
+        // Known peak and trough: mean=15, peak=20, trough=10 → ratio = 10/15 ≈ 0.667
+        let torques: Vec<f64> = (0..20)
+            .map(|i| if i % 2 == 0 { 20.0 } else { 10.0 })
+            .collect();
+        let analysis = characterize_oscillation(&torques, 10).expect("Should produce analysis");
+        assert!(
+            (analysis.amplitude_ratio - (10.0 / 15.0)).abs() < 0.01,
+            "Amplitude ratio should be ~0.667, got {:.3}",
+            analysis.amplitude_ratio
+        );
+    }
+
+    // ========================================================================
+    // Damping Recommendation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_stick_slip_damping_recommendation() {
+        ensure_config();
+
+        let analysis = crate::types::OscillationAnalysis {
+            oscillation_type: crate::types::OscillationType::StickSlip,
+            torque_cv: 0.22,
+            estimated_frequency_hz: 0.2,
+            amplitude_ratio: 0.6,
+            severity: 0.8,
+            sample_count: 60,
+        };
+
+        let rec = recommend_damping(&analysis, 25.0, 120.0, 20.0, 20.0)
+            .expect("Should produce recommendation");
+
+        // severity_factor = 0.8 → WOB base = 10 + 5*0.8 = 14%, RPM base = 5 + 5*0.8 = 9%
+        assert!(rec.wob_change_pct < 0.0, "WOB should decrease");
+        assert!(rec.wob_change_pct.abs() > 10.0 && rec.wob_change_pct.abs() < 16.0,
+            "WOB reduction should be ~14%, got {:.1}%", rec.wob_change_pct.abs());
+        assert!(rec.rpm_change_pct > 0.0, "RPM should increase");
+        assert!(rec.rpm_change_pct > 5.0 && rec.rpm_change_pct < 12.0,
+            "RPM increase should be ~9%, got {:.1}%", rec.rpm_change_pct);
+        assert!(rec.recommended_wob < 25.0);
+        assert!(rec.recommended_rpm > 120.0);
+    }
+
+    #[test]
+    fn test_damping_respects_max_limits() {
+        ensure_config();
+
+        let analysis = crate::types::OscillationAnalysis {
+            oscillation_type: crate::types::OscillationType::StickSlip,
+            torque_cv: 0.30,
+            estimated_frequency_hz: 0.2,
+            amplitude_ratio: 1.0,
+            severity: 1.0,
+            sample_count: 60,
+        };
+
+        // Set max limits lower than the natural recommendation
+        let rec = recommend_damping(&analysis, 25.0, 120.0, 10.0, 5.0)
+            .expect("Should produce recommendation");
+
+        assert!(rec.wob_change_pct.abs() <= 10.1,
+            "WOB reduction should be capped at 10%, got {:.1}%", rec.wob_change_pct.abs());
+        assert!(rec.rpm_change_pct <= 5.1,
+            "RPM increase should be capped at 5%, got {:.1}%", rec.rpm_change_pct);
+    }
+
+    #[test]
+    fn test_damping_none_when_wob_too_low() {
+        ensure_config();
+
+        let analysis = crate::types::OscillationAnalysis {
+            oscillation_type: crate::types::OscillationType::StickSlip,
+            torque_cv: 0.20,
+            estimated_frequency_hz: 0.2,
+            amplitude_ratio: 0.5,
+            severity: 0.5,
+            sample_count: 30,
+        };
+
+        let result = recommend_damping(&analysis, 2.0, 120.0, 20.0, 20.0);
+        assert!(result.is_none(), "Should return None when WOB < 3.0 klbs (off bottom)");
+    }
+
+    #[test]
+    fn test_torsional_general_holds_rpm() {
+        ensure_config();
+
+        let analysis = crate::types::OscillationAnalysis {
+            oscillation_type: crate::types::OscillationType::TorsionalGeneral,
+            torque_cv: 0.18,
+            estimated_frequency_hz: 1.5,
+            amplitude_ratio: 0.4,
+            severity: 0.6,
+            sample_count: 40,
+        };
+
+        let rec = recommend_damping(&analysis, 25.0, 120.0, 20.0, 20.0)
+            .expect("Should produce recommendation");
+
+        assert!(rec.rpm_change_pct.abs() < 0.01,
+            "TorsionalGeneral should hold RPM, got {:.2}% change", rec.rpm_change_pct);
+        assert!(rec.wob_change_pct < 0.0, "Should still reduce WOB");
     }
 }

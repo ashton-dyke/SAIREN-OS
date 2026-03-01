@@ -3,7 +3,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::{DrillingMetrics, RiskLevel, TicketEvent, TicketSeverity, WitsPacket};
+use super::{AnomalyCategory, DrillingMetrics, RiskLevel, TicketEvent, TicketSeverity, WitsPacket};
 
 // ============================================================================
 // Phase 4: History Buffer
@@ -131,6 +131,114 @@ impl Default for DrillingPhysicsReport {
 }
 
 // ============================================================================
+// Active Damping Types
+// ============================================================================
+
+/// Classification of torque oscillation type based on frequency analysis.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum OscillationType {
+    /// Classic stick-slip: low-frequency torsional oscillation (<1 Hz)
+    StickSlip,
+    /// Torsional oscillation with indeterminate frequency (insufficient data or ambiguous)
+    TorsionalGeneral,
+}
+
+/// Result of torque oscillation characterization from the history buffer.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OscillationAnalysis {
+    /// Classified oscillation type
+    pub oscillation_type: OscillationType,
+    /// Torque coefficient of variation (std_dev / mean)
+    pub torque_cv: f64,
+    /// Estimated oscillation frequency (Hz) from zero-crossing analysis
+    pub estimated_frequency_hz: f64,
+    /// Amplitude ratio: (peak - trough) / mean_torque
+    pub amplitude_ratio: f64,
+    /// Severity: 0.0 (mild) to 1.0 (severe)
+    pub severity: f64,
+    /// Number of torque samples used in analysis
+    pub sample_count: usize,
+}
+
+/// Specific parameter change recommendation to dampen torque oscillation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DampingRecommendation {
+    /// Oscillation analysis that triggered this recommendation
+    pub analysis: OscillationAnalysis,
+    /// Current WOB (klbs)
+    pub current_wob: f64,
+    /// Recommended WOB (klbs) — always within safe envelope
+    pub recommended_wob: f64,
+    /// WOB change percentage (negative = reduction)
+    pub wob_change_pct: f64,
+    /// Current RPM
+    pub current_rpm: f64,
+    /// Recommended RPM — always within safe envelope
+    pub recommended_rpm: f64,
+    /// RPM change percentage (positive = increase for stick-slip)
+    pub rpm_change_pct: f64,
+    /// Human-readable rationale for the recommendation
+    pub rationale: String,
+}
+
+// ============================================================================
+// Damping Feedback Monitoring Types
+// ============================================================================
+
+/// Outcome of monitoring a damping recommendation's effectiveness.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum DampingOutcome {
+    /// Torque CV reduced by ≥ success threshold — recommendation worked
+    Success,
+    /// Monitoring window expired without significant improvement — escalate
+    Escalated,
+    /// Torque CV increased by ≥ retract threshold — recommendation made things worse
+    Retracted,
+}
+
+/// A successful damping recipe stored per formation for future reuse.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DampingRecipe {
+    /// Formation name where this recipe succeeded
+    pub formation_name: String,
+    /// WOB change percentage that was applied
+    pub wob_change_pct: f64,
+    /// RPM change percentage that was applied
+    pub rpm_change_pct: f64,
+    /// Torque CV before damping action
+    pub baseline_cv: f64,
+    /// Torque CV achieved after damping action
+    pub achieved_cv: f64,
+    /// CV reduction percentage (positive = improvement)
+    pub cv_reduction_pct: f64,
+    /// Depth (ft) at time of recommendation
+    pub depth_ft: f64,
+    /// Unix timestamp when recipe was recorded
+    pub recorded_at: u64,
+}
+
+/// Snapshot of the damping monitor state for API/dashboard visibility.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DampingMonitorSnapshot {
+    /// Whether the monitor is currently tracking a recommendation
+    pub active: bool,
+    /// Baseline torque CV when monitoring started
+    pub baseline_cv: Option<f64>,
+    /// Current torque CV (latest computation)
+    pub current_cv: Option<f64>,
+    /// CV change percentage since baseline (negative = improvement)
+    pub cv_change_pct: Option<f64>,
+    /// Seconds elapsed since monitoring started
+    pub elapsed_secs: Option<u64>,
+    /// Monitoring window duration (from config)
+    pub window_secs: u64,
+    /// Formation being monitored
+    pub formation_name: Option<String>,
+    /// Most recent outcome (if monitoring just concluded)
+    pub last_outcome: Option<DampingOutcome>,
+}
+
+// ============================================================================
 // Phase 8: Orchestrator Voting
 // ============================================================================
 
@@ -227,6 +335,18 @@ pub struct StrategicAdvisory {
     /// Flight Recorder trace log from the advisory ticket
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub trace_log: Vec<TicketEvent>,
+    /// Anomaly category from the originating ticket
+    #[serde(default)]
+    pub category: AnomalyCategory,
+    /// Parameter that triggered the advisory (e.g. "flow_balance", "mse_efficiency")
+    #[serde(default)]
+    pub trigger_parameter: String,
+    /// Measured value of the trigger parameter at detection time
+    #[serde(default)]
+    pub trigger_value: f64,
+    /// Threshold value that was exceeded
+    #[serde(default)]
+    pub threshold_value: f64,
 }
 
 impl Default for StrategicAdvisory {
@@ -243,6 +363,10 @@ impl Default for StrategicAdvisory {
             physics_report: DrillingPhysicsReport::default(),
             context_used: Vec::new(),
             trace_log: Vec::new(),
+            category: AnomalyCategory::None,
+            trigger_parameter: String::new(),
+            trigger_value: 0.0,
+            threshold_value: 0.0,
         }
     }
 }

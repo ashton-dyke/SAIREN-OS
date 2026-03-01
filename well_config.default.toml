@@ -193,6 +193,10 @@ outlier_sigma_threshold = 3.0    # Sigma for outlier detection during learning
 [advisory]
 default_cooldown_seconds  = 60    # Cooldown between same-type advisories (s)
 critical_bypass_cooldown  = true  # Critical tickets bypass cooldown
+sustained_throttle_onset        = 3     # Tickets before progressive throttle engages
+sustained_depth_multiplier      = 2.0   # Depth cooldown doubles each subsequent ticket
+sustained_max_depth_cooldown_ft = 500.0 # Cap on progressive depth cooldown (ft)
+sustained_reset_normal_count    = 500   # Non-anomalous drilling packets to reset throttle
 
 
 # ==============================================================================
@@ -224,6 +228,56 @@ kick_pit_severity_divisor       = 20.0     # Pit severity normalisation divisor
 kick_gas_severity_divisor       = 500.0    # Gas severity normalisation divisor
 confidence_full_window          = 60       # Packets for full confidence (1Hz = 60s)
 min_rop_for_mse                 = 0.1      # Min ROP for MSE rotary component (ft/hr)
+
+
+# ==============================================================================
+# FORMATION LOOKAHEAD
+# ==============================================================================
+# Proactive alerting when the bit is approaching a formation boundary.
+# Uses current ROP and formation prognosis to estimate ETA.
+
+[lookahead]
+enabled        = true
+window_minutes = 30.0   # Alert when ETA to next formation < this (minutes)
+
+
+# ==============================================================================
+# ACTIVE DAMPING
+# ==============================================================================
+# Controls stick-slip oscillation characterization and bounded WOB/RPM
+# recommendations. Recommendations are clamped to the configured safe envelope.
+
+[damping]
+enabled               = true
+max_wob_reduction_pct = 20     # Max WOB reduction (%)
+max_rpm_change_pct    = 20     # Max RPM change (%)
+cv_threshold          = 0.15   # Torque CV threshold for damping analysis
+min_samples           = 10     # Minimum history packets for oscillation analysis
+monitor_window_secs       = 120   # Seconds to monitor after recommendation
+success_cv_reduction_pct  = 20    # CV reduction % for success classification
+retract_cv_increase_pct   = 15    # CV increase % that triggers retraction
+max_recipes_per_formation = 20    # Max stored recipes per formation
+
+
+# ==============================================================================
+# FEDERATED CfC WEIGHT SHARING
+# ==============================================================================
+# When enabled, the rig periodically uploads CfC neural network checkpoints to
+# the fleet hub and pulls federated-averaged models. This seeds fresh rigs with
+# learned weights from the fleet. Disabled by default — opt-in only.
+#
+# init_policy options:
+#   "fresh_only"   — only accept federated model if local network is untrained
+#   "better_model"  — accept if federated model has more experience
+#   "upload_only"  — upload checkpoints only, never pull
+
+# [federation]
+# enable                  = false
+# checkpoint_interval_secs = 3600    # Upload checkpoint every hour
+# pull_interval_secs       = 7200    # Pull federated model every 2 hours
+# init_policy              = "fresh_only"
+# min_packets_for_upload   = 1000    # Min packets before first upload
+# checkpoint_path          = "./data/cfc_checkpoint.json"
 
 
 # ==============================================================================

@@ -6,6 +6,7 @@ import { LiveView } from './components/live/LiveView';
 import { HourlyView } from './components/reports/HourlyView';
 import { DailyView } from './components/reports/DailyView';
 import { CriticalReports } from './components/reports/CriticalReports';
+import { FeedbackView } from './components/feedback/FeedbackView';
 import { useLiveData } from './hooks/useLiveData';
 import type { LiveData } from './api/types';
 
@@ -43,6 +44,7 @@ export default function App() {
           <Route path="/hourly" element={<HourlyView />} />
           <Route path="/daily" element={<DailyView />} />
           <Route path="/reports" element={<CriticalReports />} />
+          <Route path="/feedback" element={<FeedbackView />} />
         </Routes>
       </main>
     </div>

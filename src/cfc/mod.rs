@@ -32,6 +32,8 @@ pub mod training;
 pub mod network;
 pub mod formation_detector;
 pub mod regime_clusterer;
+pub mod checkpoint;
+pub mod depth_ahead;
 
 pub use network::{CfcNetwork, CfcNetworkConfig, FeatureSurprise};
 pub use normalizer::NUM_FEATURES;
@@ -111,6 +113,36 @@ impl DualCfcNetwork {
     pub fn reset(&mut self) {
         self.fast.reset();
         self.slow.reset();
+    }
+
+    /// Create a serializable snapshot of both networks.
+    pub fn snapshot(&self, rig_id: &str, well_id: &str) -> checkpoint::DualCfcCheckpoint {
+        let fast_cp = self.fast.snapshot();
+        let slow_cp = self.slow.snapshot();
+        let packets = self.fast.packets_processed();
+        checkpoint::DualCfcCheckpoint {
+            version: 1,
+            fast: fast_cp,
+            slow: slow_cp,
+            metadata: checkpoint::CheckpointMetadata {
+                rig_id: rig_id.to_string(),
+                well_id: well_id.to_string(),
+                timestamp: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_secs(),
+                packets_processed: packets,
+                avg_loss: self.fast.avg_loss(),
+                is_calibrated: self.fast.is_calibrated(),
+            },
+        }
+    }
+
+    /// Restore both networks from a checkpoint.
+    pub fn restore_from(&mut self, cp: &checkpoint::DualCfcCheckpoint) -> Result<(), String> {
+        self.fast.restore_from(&cp.fast)?;
+        self.slow.restore_from(&cp.slow)?;
+        Ok(())
     }
 }
 
@@ -226,11 +258,11 @@ pub fn update_dual_from_drilling(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::types::{RigState, Operation, AnomalyCategory};
 
-    fn make_test_packet() -> WitsPacket {
+    pub(crate) fn make_test_packet() -> WitsPacket {
         let mut p = WitsPacket::default();
         p.wob = 25.0;
         p.rop = 60.0;
@@ -250,7 +282,7 @@ mod tests {
         p
     }
 
-    fn make_test_metrics() -> DrillingMetrics {
+    pub(crate) fn make_test_metrics() -> DrillingMetrics {
         DrillingMetrics {
             state: RigState::Drilling,
             operation: Operation::ProductionDrilling,

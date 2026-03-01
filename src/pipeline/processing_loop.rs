@@ -6,8 +6,9 @@
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tracing::{info, warn};
+use tracing::{debug, info, warn};
 
 use super::source::{PacketEvent, PacketSource};
 use super::{AppState, PipelineCoordinator, PipelineStats, SystemStatus};
@@ -62,6 +63,26 @@ pub struct FleetContext {
 }
 
 // ============================================================================
+// Federation Context
+// ============================================================================
+
+/// Watch channels for federated CfC weight sharing.
+pub struct FederationContext {
+    /// Processing loop publishes snapshots here for the upload task.
+    pub checkpoint_tx: watch::Sender<Option<crate::cfc::checkpoint::DualCfcCheckpoint>>,
+    /// Processing loop reads federated models published by the pull task.
+    pub federation_model_rx: watch::Receiver<Option<crate::cfc::checkpoint::DualCfcCheckpoint>>,
+    /// Processing loop publishes local packets_processed for the pull task.
+    pub local_packets_tx: watch::Sender<u64>,
+    /// Rig ID (for checkpoint metadata).
+    pub rig_id: String,
+    /// Well ID (for checkpoint metadata).
+    pub well_id: String,
+    /// How often (in packets) to publish a checkpoint snapshot.
+    pub checkpoint_interval_packets: u64,
+}
+
+// ============================================================================
 // Processing Loop
 // ============================================================================
 
@@ -77,8 +98,9 @@ pub struct ProcessingLoop<H: PostProcessHooks> {
     cancel_token: CancellationToken,
     /// Tracks WOB/RPM changes to stamp `seconds_since_param_change` on every packet.
     param_tracker: crate::ml_engine::param_change_tracker::ParamChangeTracker,
-    
+
     fleet_ctx: Option<FleetContext>,
+    federation_ctx: Option<FederationContext>,
 }
 
 impl<H: PostProcessHooks> ProcessingLoop<H> {
@@ -94,15 +116,20 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
             hooks,
             cancel_token,
             param_tracker: crate::ml_engine::param_change_tracker::ParamChangeTracker::new(),
-            
             fleet_ctx: None,
+            federation_ctx: None,
         }
     }
 
     /// Attach fleet client context for advisory uploads.
-    
     pub fn with_fleet(mut self, ctx: FleetContext) -> Self {
         self.fleet_ctx = Some(ctx);
+        self
+    }
+
+    /// Attach federation watch channels for CfC weight sharing.
+    pub fn with_federation(mut self, ctx: FederationContext) -> Self {
+        self.federation_ctx = Some(ctx);
         self
     }
 
@@ -191,6 +218,10 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
                     state.latest_drilling_metrics = Some(metrics.clone());
                 }
 
+                // Store damping monitor snapshot for API visibility
+                state.damping_monitor_snapshot =
+                    Some(self.coordinator.damping_monitor_snapshot());
+
                 // Store CfC formation transition event (if any)
                 if let Some(event) = self.coordinator.tactical_agent().latest_formation_transition() {
                     state.formation_transition_timestamps.push(event.timestamp);
@@ -225,6 +256,43 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
 
                 // Log advisory summary
                 log_advisory(advisories_generated, adv);
+            }
+
+            // Federation: publish checkpoint and check for inbound federated model
+            if let Some(ref mut fed) = self.federation_ctx {
+                // Publish local packets_processed for the pull task's policy check
+                let _ = fed.local_packets_tx.send(packets_processed);
+
+                // Publish CfC snapshot every N packets for the upload task
+                if fed.checkpoint_interval_packets > 0
+                    && packets_processed % fed.checkpoint_interval_packets == 0
+                {
+                    let cp = self.coordinator.snapshot_cfc(&fed.rig_id, &fed.well_id);
+                    let _ = fed.checkpoint_tx.send(Some(cp));
+                    debug!(
+                        "[Federation] Published CfC checkpoint at packet {}",
+                        packets_processed,
+                    );
+                }
+
+                // Check for inbound federated model
+                if fed.federation_model_rx.has_changed().unwrap_or(false) {
+                    let model = fed.federation_model_rx.borrow_and_update().clone();
+                    if let Some(ref cp) = model {
+                        match self.coordinator.restore_cfc_from_checkpoint(cp) {
+                            Ok(()) => {
+                                info!(
+                                    "[Federation] Restored federated model ({} packets, {} rigs)",
+                                    cp.metadata.packets_processed,
+                                    cp.metadata.rig_id,
+                                );
+                            }
+                            Err(e) => {
+                                warn!("[Federation] Failed to restore federated model: {}", e);
+                            }
+                        }
+                    }
+                }
             }
 
             // Progress indicator every 10 packets

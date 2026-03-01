@@ -51,6 +51,7 @@ pub mod aci;
 pub mod cfc;
 pub mod fleet;
 pub mod knowledge_base;
+pub mod debrief;
 pub mod background;
 pub mod optimization;
 pub mod causal;
@@ -244,6 +245,9 @@ enum TaskName {
     FleetUploader,
     FleetLibrarySync,
     FleetIntelligenceSync,
+    FederationUpload,
+    FederationPull,
+    ConfigWatcher,
 }
 
 impl std::fmt::Display for TaskName {
@@ -255,6 +259,9 @@ impl std::fmt::Display for TaskName {
             TaskName::FleetUploader => write!(f, "FleetUploader"),
             TaskName::FleetLibrarySync => write!(f, "FleetLibrarySync"),
             TaskName::FleetIntelligenceSync => write!(f, "FleetIntelligenceSync"),
+            TaskName::FederationUpload => write!(f, "FederationUpload"),
+            TaskName::FederationPull => write!(f, "FederationPull"),
+            TaskName::ConfigWatcher => write!(f, "ConfigWatcher"),
         }
     }
 }
@@ -300,6 +307,18 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
             Ok(0) => {}
             Ok(n) => info!("Pruned {} strategic reports older than 30 days", n),
             Err(e) => warn!("Failed to prune old history reports: {}", e),
+        }
+
+        // Initialise feedback tree for operator feedback loop.
+        match storage::feedback::init() {
+            Err(e) => warn!("Failed to init feedback store: {}", e),
+            Ok(()) => info!("✓ Feedback storage initialized"),
+        }
+
+        // Initialise damping recipes tree for formation-specific recipe persistence.
+        match storage::damping_recipes::init() {
+            Err(e) => warn!("Failed to init damping recipes store: {}", e),
+            Ok(()) => info!("✓ Damping recipes storage initialized"),
         }
 
         // Initialise acknowledgment tree and restore persisted records.
@@ -454,13 +473,20 @@ fn spawn_http_server(
     });
 }
 
-/// Spawn fleet client background tasks (uploader + library sync).
+/// Fleet + federation task return type.
+struct FleetTasksResult {
+    fleet_ctx: pipeline::processing_loop::FleetContext,
+    federation_ctx: Option<pipeline::processing_loop::FederationContext>,
+}
+
+/// Spawn fleet client background tasks (uploader + library sync + federation).
 ///
 /// Returns a `FleetContext` with the shared queue so the packet processor
-/// can enqueue events directly.
+/// can enqueue events directly, plus an optional `FederationContext` if
+/// federated weight sharing is enabled.
 fn spawn_fleet_tasks(
     task_set: &mut JoinSet<Result<TaskName>>,
-) -> Option<pipeline::processing_loop::FleetContext> {
+) -> Option<FleetTasksResult> {
     use fleet::{FleetClient, UploadQueue};
     use fleet::uploader::run_uploader;
     use fleet::sync::run_library_sync;
@@ -528,7 +554,74 @@ fn spawn_fleet_tasks(
         Ok(TaskName::FleetIntelligenceSync)
     });
 
-    Some(pipeline::processing_loop::FleetContext { queue, rig_id, well_id })
+    // Federation tasks (opt-in via config)
+    let fed_config = &config::get().federation;
+    let federation_ctx = if fed_config.enable {
+        info!(
+            "[Federation] Enabled — upload every {}s, pull every {}s, policy: {:?}",
+            fed_config.checkpoint_interval_secs,
+            fed_config.pull_interval_secs,
+            fed_config.init_policy,
+        );
+
+        // Watch channels: processing loop <-> federation tasks
+        let (checkpoint_tx, checkpoint_rx) =
+            tokio::sync::watch::channel::<Option<crate::cfc::checkpoint::DualCfcCheckpoint>>(None);
+        let (fed_model_tx, fed_model_rx) =
+            tokio::sync::watch::channel::<Option<crate::cfc::checkpoint::DualCfcCheckpoint>>(None);
+        let (local_packets_tx, local_packets_rx) =
+            tokio::sync::watch::channel::<u64>(0);
+
+        // Task: Federation Upload
+        let upload_client = client.clone();
+        let checkpoint_path = fed_config.checkpoint_path.clone();
+        let upload_interval = fed_config.checkpoint_interval_secs;
+        let min_packets = fed_config.min_packets_for_upload;
+        task_set.spawn(async move {
+            info!("[FederationUpload] Task starting");
+            fleet::federation::run_checkpoint_upload(
+                upload_client,
+                checkpoint_rx,
+                checkpoint_path,
+                upload_interval,
+                min_packets,
+            ).await;
+            Ok(TaskName::FederationUpload)
+        });
+
+        // Task: Federation Pull
+        let pull_client = client.clone();
+        let pull_interval = fed_config.pull_interval_secs;
+        let policy = fed_config.init_policy.clone();
+        task_set.spawn(async move {
+            info!("[FederationPull] Task starting");
+            fleet::federation::run_federation_pull(
+                pull_client,
+                fed_model_tx,
+                policy,
+                pull_interval,
+                local_packets_rx,
+            ).await;
+            Ok(TaskName::FederationPull)
+        });
+
+        Some(pipeline::processing_loop::FederationContext {
+            checkpoint_tx,
+            federation_model_rx: fed_model_rx,
+            local_packets_tx,
+            rig_id: rig_id.clone(),
+            well_id: well_id.clone(),
+            checkpoint_interval_packets: fed_config.min_packets_for_upload,
+        })
+    } else {
+        info!("[Federation] Disabled (federation.enable = false)");
+        None
+    };
+
+    Some(FleetTasksResult {
+        fleet_ctx: pipeline::processing_loop::FleetContext { queue, rig_id, well_id },
+        federation_ctx,
+    })
 }
 
 /// Spawn the ML Engine Scheduler task.
@@ -658,6 +751,58 @@ fn spawn_ml_scheduler(
     });
 }
 
+/// Spawn the config file watcher task.
+///
+/// Only starts if a config file path was recorded at startup. The watcher
+/// polls the file's mtime and triggers `config::reload()` on changes.
+fn spawn_config_watcher(
+    task_set: &mut JoinSet<Result<TaskName>>,
+    cancel_token: CancellationToken,
+) {
+    let Some(path) = config::config_path().cloned() else {
+        info!("[ConfigWatcher] No config file path recorded — watcher disabled");
+        return;
+    };
+
+    let (tx, mut rx) = tokio::sync::mpsc::channel(4);
+
+    // Spawn the polling loop
+    task_set.spawn(async move {
+        info!("[ConfigWatcher] Task starting — watching {}", path.display());
+
+        tokio::select! {
+            _ = cancel_token.cancelled() => {
+                info!("[ConfigWatcher] Received shutdown signal");
+            }
+            _ = config::watcher::run_config_watcher(path, tx) => {
+                info!("[ConfigWatcher] Watcher loop ended");
+            }
+        }
+
+        Ok(TaskName::ConfigWatcher)
+    });
+
+    // Spawn a lightweight drain task so events are consumed
+    // (the watcher sends events; we log them here)
+    tokio::spawn(async move {
+        while let Some(event) = rx.recv().await {
+            match event {
+                config::watcher::ConfigEvent::Reloaded(changes) => {
+                    if !changes.is_empty() {
+                        info!(
+                            count = changes.len(),
+                            "[ConfigWatcher] Config hot-reloaded via file change"
+                        );
+                    }
+                }
+                config::watcher::ConfigEvent::Error(e) => {
+                    warn!("[ConfigWatcher] Reload failed: {}", e);
+                }
+            }
+        }
+    });
+}
+
 /// Run the supervisor loop: monitor tasks, cancel on failure.
 async fn run_supervisor(
     task_set: &mut JoinSet<Result<TaskName>>,
@@ -739,13 +884,16 @@ async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
     // Task 1: HTTP Server
     spawn_http_server(&mut task_set, core.listener, core.app, cancel_token.clone());
 
-    // Fleet client background tasks
-    let fleet_ctx = spawn_fleet_tasks(&mut task_set);
+    // Fleet client background tasks (+ optional federation)
+    let fleet_result = spawn_fleet_tasks(&mut task_set);
+    let (proc_fleet, proc_federation) = match fleet_result {
+        Some(r) => (Some(r.fleet_ctx), r.federation_ctx),
+        None => (None, None),
+    };
 
     // Task 2: Packet Processor (unified processing loop)
     let proc_cancel = cancel_token.clone();
     let proc_state = Arc::clone(&app_state);
-    let proc_fleet = fleet_ctx;
     task_set.spawn(async move {
         info!("[PacketProcessor] Task starting");
 
@@ -762,6 +910,12 @@ async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
             processing_loop
         };
 
+        let processing_loop = if let Some(ctx) = proc_federation {
+            processing_loop.with_federation(ctx)
+        } else {
+            processing_loop
+        };
+
         let _stats = processing_loop.run(&mut source).await;
         Ok(TaskName::PacketProcessor)
     });
@@ -770,6 +924,9 @@ async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
     if spawn_ml {
         spawn_ml_scheduler(&mut task_set, Arc::clone(&app_state), cancel_token.clone());
     }
+
+    // Task 4: Config File Watcher (hot-reload on file changes)
+    spawn_config_watcher(&mut task_set, cancel_token.clone());
 
     run_supervisor(&mut task_set, cancel_token).await
 }
@@ -1428,6 +1585,30 @@ async fn main() -> Result<()> {
     }
 
     config::init(well_config, provenance);
+
+    // Record config file path for hot-reload watcher
+    {
+        let config_file = std::env::var("SAIREN_CONFIG")
+            .ok()
+            .map(std::path::PathBuf::from)
+            .filter(|p| p.exists())
+            .or_else(|| {
+                let local = std::path::PathBuf::from("well_config.toml");
+                if local.exists() { Some(local) } else { None }
+            });
+        if let Some(path) = config_file {
+            match path.canonicalize() {
+                Ok(abs) => {
+                    info!("Config file path recorded for hot-reload: {}", abs.display());
+                    config::set_config_path(abs);
+                }
+                Err(_) => {
+                    info!("Config file path recorded for hot-reload: {}", path.display());
+                    config::set_config_path(path);
+                }
+            }
+        }
+    }
 
     // Server address: CLI > env > TOML > default
     let server_addr = args.addr

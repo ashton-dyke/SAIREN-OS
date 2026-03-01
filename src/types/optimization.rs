@@ -88,6 +88,9 @@ pub struct LookAheadAdvisory {
     pub hazards: Vec<String>,
     /// Offset well notes for the upcoming formation
     pub offset_notes: String,
+    /// CfC depth-ahead prediction confidence (0.0–1.0), if available
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cfc_confidence: Option<f64>,
 }
 
 /// Full optimization advisory output

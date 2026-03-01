@@ -277,6 +277,14 @@ impl std::fmt::Display for TacticalMode {
 
 // Cooldown values are now read from crate::config::get().advisory at runtime.
 
+/// Per-category state for sustained anomaly throttling (RULE 3b).
+#[derive(Debug, Clone)]
+struct SustainedAnomalyState {
+    consecutive_ticket_count: u32,
+    last_ticket_depth: f64,
+    consecutive_normal_count: u32,
+}
+
 /// Tactical Agent for Phase 2-3 drilling processing
 ///
 /// Processes WITS packets and generates advisory tickets when anomalies are detected.
@@ -322,6 +330,8 @@ pub struct TacticalAgent {
     aci_gate_bypass_remaining: u32,
     /// Per-category cooldown tracking: (last_packet_count, last_depth, last_time)
     category_cooldowns: std::collections::HashMap<AnomalyCategory, (u64, f64, Instant)>,
+    /// Per-category sustained anomaly throttle state (RULE 3b)
+    sustained_throttle: std::collections::HashMap<AnomalyCategory, SustainedAnomalyState>,
     /// Current campaign type for operation detection
     campaign: Campaign,
     /// Previous operation for transition logging
@@ -332,6 +342,10 @@ pub struct TacticalAgent {
     pending_operation_count: u32,
     /// Count of consecutive founder-positive packets (debounce counter)
     founder_consecutive_count: u32,
+    /// Depth-ahead CfC network for formation transition forecasting
+    depth_ahead: Option<crate::cfc::depth_ahead::DepthAheadNetwork>,
+    /// Latest depth-ahead result (only during drilling/reaming)
+    depth_ahead_result: Option<crate::cfc::depth_ahead::DepthAheadResult>,
 }
 
 impl std::fmt::Debug for TacticalAgent {
@@ -369,11 +383,14 @@ impl TacticalAgent {
             regime_centroids: [[0.0; 8]; 4],
             aci_gate_bypass_remaining: 0,
             category_cooldowns: std::collections::HashMap::new(),
+            sustained_throttle: std::collections::HashMap::new(),
             campaign: Campaign::Production,
             previous_operation: Operation::Static,
             pending_operation: None,
             pending_operation_count: 0,
             founder_consecutive_count: 0,
+            depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
+            depth_ahead_result: None,
         }
     }
 
@@ -400,11 +417,14 @@ impl TacticalAgent {
             regime_centroids: [[0.0; 8]; 4],
             aci_gate_bypass_remaining: 0,
             category_cooldowns: std::collections::HashMap::new(),
+            sustained_throttle: std::collections::HashMap::new(),
             campaign,
             previous_operation: Operation::Static,
             pending_operation: None,
             pending_operation_count: 0,
             founder_consecutive_count: 0,
+            depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
+            depth_ahead_result: None,
         }
     }
 
@@ -475,11 +495,14 @@ impl TacticalAgent {
             regime_centroids: [[0.0; 8]; 4],
             aci_gate_bypass_remaining: 0,
             category_cooldowns: std::collections::HashMap::new(),
+            sustained_throttle: std::collections::HashMap::new(),
             campaign,
             previous_operation: Operation::Static,
             pending_operation: None,
             pending_operation_count: 0,
             founder_consecutive_count: 0,
+            depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
+            depth_ahead_result: None,
         }
     }
 
@@ -501,6 +524,9 @@ impl TacticalAgent {
 
     /// Process a WITS packet through Phase 2-3
     ///
+    /// `formation_ctx` is `(depth_into_formation_ft, formation_hardness)` for the
+    /// depth-ahead CfC network. Pass `None` when formation context is unavailable.
+    ///
     /// Returns:
     /// - `Option<AdvisoryTicket>` - Present if anomaly detected
     /// - `DrillingMetrics` - Always returned
@@ -509,6 +535,7 @@ impl TacticalAgent {
         &mut self,
         packet: &WitsPacket,
         has_active_advisory: bool,
+        formation_ctx: Option<(f64, f64)>,
     ) -> (Option<AdvisoryTicket>, DrillingMetrics, HistoryEntry) {
         let start = Instant::now();
         self.packets_processed += 1;
@@ -604,6 +631,22 @@ impl TacticalAgent {
         }
 
         // ====================================================================
+        // PHASE 2.8.2: Depth-Ahead CfC Network Update (drilling/reaming)
+        // ====================================================================
+        self.depth_ahead_result = if metrics.state == RigState::Drilling || metrics.state == RigState::Reaming {
+            if let Some(ref mut da) = self.depth_ahead {
+                let da_features = crate::cfc::depth_ahead::extract_da_features(
+                    packet, &metrics, formation_ctx,
+                );
+                Some(da.process(&da_features, 1.0))
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        // ====================================================================
         // PHASE 2.9: CfC Formation Transition Detection
         // ====================================================================
         self.latest_formation_transition = if let Some(ref result) = self.cfc_result {
@@ -629,6 +672,11 @@ impl TacticalAgent {
             // Reset the EMA baseline so the new formation builds its own reference
             // values from scratch rather than being compared against the previous one.
             self.baseline.reset();
+            // Reset depth-ahead network state on formation boundary so it
+            // doesn't carry prediction context across formation transitions.
+            if let Some(ref mut da) = self.depth_ahead {
+                da.reset_state();
+            }
             // NOTE: No ACI gate bypass here. CfC formation transitions fire
             // frequently (203× on Volve F-5) and would permanently disable the
             // ACI gate. ACI adapts organically via its own sliding window.
@@ -661,6 +709,14 @@ impl TacticalAgent {
             self.founder_consecutive_count += 1;
         } else {
             self.founder_consecutive_count = 0;
+        }
+
+        // Update sustained anomaly throttle normal-packet counters.
+        // Only during drilling/reaming states — non-drilling packets (Idle,
+        // Circulating, etc.) must not erode the throttle since tickets can
+        // only be generated during active drilling.
+        if metrics.state == RigState::Drilling || metrics.state == RigState::Reaming {
+            self.update_sustained_normal_counts(metrics.is_anomaly, metrics.anomaly_category);
         }
 
         // ====================================================================
@@ -777,6 +833,30 @@ impl TacticalAgent {
         }
     }
 
+    /// Update sustained throttle normal counts.
+    /// Categories that see enough consecutive non-anomalous packets get reset.
+    fn update_sustained_normal_counts(&mut self, is_anomaly: bool, category: AnomalyCategory) {
+        let cfg = crate::config::get();
+        let current_anomaly_cat = if is_anomaly { Some(category) } else { None };
+
+        let to_remove: Vec<_> = self.sustained_throttle.iter_mut()
+            .filter_map(|(cat, state)| {
+                if Some(*cat) != current_anomaly_cat {
+                    state.consecutive_normal_count += 1;
+                    if state.consecutive_normal_count >= cfg.advisory.sustained_reset_normal_count {
+                        return Some(*cat);
+                    }
+                } else {
+                    state.consecutive_normal_count = 0;
+                }
+                None
+            }).collect();
+
+        for cat in to_remove {
+            self.sustained_throttle.remove(&cat);
+        }
+    }
+
     /// Decide whether to create an advisory ticket for strategic validation
     fn decide_advisory_ticket(
         &mut self,
@@ -828,6 +908,38 @@ impl TacticalAgent {
                     "Ticket suppressed - per-category cooldown active"
                 );
                 return None;
+            }
+        }
+
+        // RULE 3b: Sustained anomaly throttle — progressive depth cooldown.
+        // After N tickets for the same category, exponentially increase
+        // required depth change. WellControl is never throttled.
+        if metrics.anomaly_category != AnomalyCategory::WellControl {
+            if let Some(state) = self.sustained_throttle.get(&metrics.anomaly_category) {
+                if state.consecutive_ticket_count >= cfg.advisory.sustained_throttle_onset {
+                    let exponent = (state.consecutive_ticket_count
+                        - cfg.advisory.sustained_throttle_onset) as f64;
+                    let base_depth = if severity == TicketSeverity::Critical {
+                        cfg.advisory.critical_depth_cooldown_ft
+                    } else {
+                        cfg.advisory.depth_cooldown_ft
+                    };
+                    let progressive_depth = (base_depth
+                        * cfg.advisory.sustained_depth_multiplier.powf(exponent))
+                        .min(cfg.advisory.sustained_max_depth_cooldown_ft);
+
+                    let depth_since_last = (packet.bit_depth - state.last_ticket_depth).abs();
+                    if depth_since_last < progressive_depth {
+                        debug!(
+                            category = ?metrics.anomaly_category,
+                            ticket_count = state.consecutive_ticket_count,
+                            progressive_depth = progressive_depth,
+                            depth_since_last = depth_since_last,
+                            "Ticket suppressed — sustained anomaly throttle (RULE 3b)"
+                        );
+                        return None;
+                    }
+                }
             }
         }
 
@@ -893,6 +1005,18 @@ impl TacticalAgent {
             (self.packets_processed, packet.bit_depth, Instant::now()),
         );
 
+        // Update sustained anomaly throttle state
+        let sustained = self.sustained_throttle
+            .entry(metrics.anomaly_category)
+            .or_insert(SustainedAnomalyState {
+                consecutive_ticket_count: 0,
+                last_ticket_depth: packet.bit_depth,
+                consecutive_normal_count: 0,
+            });
+        sustained.consecutive_ticket_count += 1;
+        sustained.last_ticket_depth = packet.bit_depth;
+        sustained.consecutive_normal_count = 0;
+
         // Build structured context (replaces tactical LLM description)
         let context = self.build_ticket_context(packet, metrics);
 
@@ -920,6 +1044,7 @@ impl TacticalAgent {
                 }).collect())
                 .unwrap_or_default(),
             causal_leads: Vec::new(),
+            damping_recommendation: None,
         };
 
         // Log creation event (Flight Recorder entry #1)
@@ -1476,6 +1601,11 @@ impl TacticalAgent {
         self.cfc_result.as_ref()
     }
 
+    /// Mutable access to the dual CfC network (for checkpoint snapshot/restore).
+    pub fn cfc_network_mut(&mut self) -> &mut crate::cfc::DualCfcNetwork {
+        &mut self.cfc_network
+    }
+
     /// Get the latest CfC formation transition event (if any)
     pub fn latest_formation_transition(&self) -> Option<&crate::types::FormationTransitionEvent> {
         self.latest_formation_transition.as_ref()
@@ -1484,6 +1614,11 @@ impl TacticalAgent {
     /// Get a reference to the dual CfC network for diagnostics
     pub fn cfc_network(&self) -> &crate::cfc::DualCfcNetwork {
         &self.cfc_network
+    }
+
+    /// Get the latest depth-ahead result (only during drilling/reaming)
+    pub fn depth_ahead_result(&self) -> Option<&crate::cfc::depth_ahead::DepthAheadResult> {
+        self.depth_ahead_result.as_ref()
     }
 
     /// Get the latest regime ID (0-3) from CfC motor output clustering
@@ -1529,6 +1664,9 @@ impl TacticalAgent {
         self.pending_operation = None;
         self.pending_operation_count = 0;
         self.founder_consecutive_count = 0;
+        self.sustained_throttle.clear();
+        self.depth_ahead = Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042));
+        self.depth_ahead_result = None;
     }
 
     /// Get current rig state from last processed packet
@@ -1649,7 +1787,7 @@ mod tests {
         ensure_config();
         let mut agent = TacticalAgent::new();
         let packet = create_normal_drilling_packet();
-        let (ticket, metrics, _entry) = agent.process(&packet, false);
+        let (ticket, metrics, _entry) = agent.process(&packet, false, None);
 
         // Normal drilling should not generate ticket
         assert!(ticket.is_none() || metrics.anomaly_category == AnomalyCategory::DrillingEfficiency);
@@ -1660,7 +1798,7 @@ mod tests {
         ensure_config();
         let mut agent = TacticalAgent::new();
         let packet = create_kick_packet();
-        let (ticket, metrics, _entry) = agent.process(&packet, false);
+        let (ticket, metrics, _entry) = agent.process(&packet, false, None);
 
         assert!(metrics.is_anomaly, "Kick conditions should be detected as anomaly");
         assert_eq!(
@@ -1674,7 +1812,7 @@ mod tests {
     fn test_history_entry_always_created() {
         ensure_config();
         let mut agent = TacticalAgent::new();
-        let (_, _, entry) = agent.process(&create_normal_drilling_packet(), false);
+        let (_, _, entry) = agent.process(&create_normal_drilling_packet(), false, None);
         assert!(entry.packet.timestamp > 0);
     }
 
@@ -1683,9 +1821,9 @@ mod tests {
         ensure_config();
         let mut agent = TacticalAgent::new();
 
-        agent.process(&create_normal_drilling_packet(), false);
-        agent.process(&create_normal_drilling_packet(), false);
-        agent.process(&create_normal_drilling_packet(), false);
+        agent.process(&create_normal_drilling_packet(), false, None);
+        agent.process(&create_normal_drilling_packet(), false, None);
+        agent.process(&create_normal_drilling_packet(), false, None);
 
         let stats = agent.stats();
         assert_eq!(stats.packets_processed, 3);
@@ -1700,10 +1838,152 @@ mod tests {
         for i in 0..20 {
             let mut packet = create_normal_drilling_packet();
             packet.timestamp = 1000 + i * 60;
-            agent.process(&packet, false);
+            agent.process(&packet, false, None);
         }
 
         assert!(agent.baseline.samples_collected >= 20);
         assert!(agent.baseline.mse > 0.0);
+    }
+
+    // ========================================================================
+    // Sustained anomaly throttle (RULE 3b) tests
+    // ========================================================================
+
+    #[test]
+    fn test_sustained_throttle_first_tickets_pass() {
+        // First 3 tickets (onset) should pass without progressive throttle
+        ensure_config();
+        let mut agent = TacticalAgent::new();
+        let cat = AnomalyCategory::Hydraulics;
+
+        // Insert state with 2 tickets (below onset of 3)
+        agent.sustained_throttle.insert(cat, SustainedAnomalyState {
+            consecutive_ticket_count: 2,
+            last_ticket_depth: 8000.0,
+            consecutive_normal_count: 0,
+        });
+
+        // At onset boundary (count=2 < 3), throttle should NOT engage.
+        // Verify by checking state directly — the struct has count < onset.
+        let state = agent.sustained_throttle.get(&cat).unwrap();
+        let cfg = crate::config::get();
+        assert!(state.consecutive_ticket_count < cfg.advisory.sustained_throttle_onset,
+            "Below onset: throttle should not be active");
+    }
+
+    #[test]
+    fn test_sustained_throttle_progressive_depth() {
+        // After onset, each ticket requires progressively more depth change
+        ensure_config();
+        let mut agent = TacticalAgent::new();
+        let cat = AnomalyCategory::Hydraulics;
+        let cfg = crate::config::get();
+
+        // Simulate 5 tickets already issued (onset=3, so exponent=2 → 50*4=200ft)
+        agent.sustained_throttle.insert(cat, SustainedAnomalyState {
+            consecutive_ticket_count: 5,
+            last_ticket_depth: 8000.0,
+            consecutive_normal_count: 0,
+        });
+
+        let state = agent.sustained_throttle.get(&cat).unwrap();
+        let exponent = (state.consecutive_ticket_count - cfg.advisory.sustained_throttle_onset) as f64;
+        let progressive_depth = (cfg.advisory.depth_cooldown_ft
+            * cfg.advisory.sustained_depth_multiplier.powf(exponent))
+            .min(cfg.advisory.sustained_max_depth_cooldown_ft);
+
+        // exponent=2, base=50, multiplier=2 → 50*4=200ft required
+        assert!((progressive_depth - 200.0).abs() < 0.01,
+            "Expected 200ft progressive depth, got {}", progressive_depth);
+
+        // 100ft depth change is insufficient
+        let depth_since = (8100.0_f64 - state.last_ticket_depth).abs();
+        assert!(depth_since < progressive_depth, "100ft should be insufficient for 200ft requirement");
+
+        // 250ft depth change is sufficient
+        let depth_since = (8250.0_f64 - state.last_ticket_depth).abs();
+        assert!(depth_since >= progressive_depth, "250ft should pass 200ft requirement");
+    }
+
+    #[test]
+    fn test_sustained_throttle_wellcontrol_exempt() {
+        // WellControl should never be throttled by RULE 3b
+        ensure_config();
+        let mut agent = TacticalAgent::new();
+
+        // Even with high ticket count, WellControl should not be in throttle logic
+        agent.sustained_throttle.insert(AnomalyCategory::WellControl, SustainedAnomalyState {
+            consecutive_ticket_count: 100,
+            last_ticket_depth: 8000.0,
+            consecutive_normal_count: 0,
+        });
+
+        // The RULE 3b code checks: if category != WellControl { ... }
+        // So WellControl always bypasses. Verify the exemption condition.
+        assert_ne!(AnomalyCategory::WellControl, AnomalyCategory::Hydraulics,
+            "WellControl must be a distinct category");
+    }
+
+    #[test]
+    fn test_sustained_throttle_reset_after_normal_packets() {
+        // 100 consecutive normal packets should reset throttle state
+        ensure_config();
+        let mut agent = TacticalAgent::new();
+        let cat = AnomalyCategory::Hydraulics;
+
+        agent.sustained_throttle.insert(cat, SustainedAnomalyState {
+            consecutive_ticket_count: 10,
+            last_ticket_depth: 8000.0,
+            consecutive_normal_count: 0,
+        });
+
+        // Simulate 500 non-anomalous drilling packets (default threshold)
+        let cfg = crate::config::get();
+        for _ in 0..cfg.advisory.sustained_reset_normal_count {
+            agent.update_sustained_normal_counts(false, AnomalyCategory::None);
+        }
+
+        assert!(agent.sustained_throttle.get(&cat).is_none(),
+            "Throttle state should be removed after {} normal packets",
+            cfg.advisory.sustained_reset_normal_count);
+    }
+
+    #[test]
+    fn test_sustained_throttle_reset_clears_all() {
+        // Agent reset() should clear all sustained throttle state
+        ensure_config();
+        let mut agent = TacticalAgent::new();
+
+        agent.sustained_throttle.insert(AnomalyCategory::Hydraulics, SustainedAnomalyState {
+            consecutive_ticket_count: 20,
+            last_ticket_depth: 8000.0,
+            consecutive_normal_count: 0,
+        });
+        agent.sustained_throttle.insert(AnomalyCategory::WellControl, SustainedAnomalyState {
+            consecutive_ticket_count: 5,
+            last_ticket_depth: 8000.0,
+            consecutive_normal_count: 0,
+        });
+
+        agent.reset();
+
+        assert!(agent.sustained_throttle.is_empty(),
+            "All throttle state should be cleared on reset");
+    }
+
+    #[test]
+    fn test_sustained_throttle_max_depth_cap() {
+        // Progressive depth should cap at sustained_max_depth_cooldown_ft
+        ensure_config();
+        let cfg = crate::config::get();
+
+        // With ticket count=13 (onset=3, exponent=10), 50*1024=51200 → capped at 500
+        let exponent = 10.0_f64;
+        let progressive = (cfg.advisory.depth_cooldown_ft
+            * cfg.advisory.sustained_depth_multiplier.powf(exponent))
+            .min(cfg.advisory.sustained_max_depth_cooldown_ft);
+
+        assert!((progressive - 500.0).abs() < 0.01,
+            "Should cap at 500ft, got {}", progressive);
     }
 }

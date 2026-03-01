@@ -62,6 +62,9 @@ rand_distr = "0.4"
 # Parallel computation (CfC dual network)
 rayon = "1.10"
 
+# Lock-free atomic config swaps (hot reload)
+arc-swap = "1.7"
+
 # CLI argument parsing
 clap = { version = "4.4", features = ["derive", "env"] }
 

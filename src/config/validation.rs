@@ -147,6 +147,10 @@ pub fn known_config_keys() -> HashSet<&'static str> {
         "advisory.critical_packet_cooldown",
         "advisory.depth_cooldown_ft",
         "advisory.critical_depth_cooldown_ft",
+        "advisory.sustained_throttle_onset",
+        "advisory.sustained_depth_multiplier",
+        "advisory.sustained_max_depth_cooldown_ft",
+        "advisory.sustained_reset_normal_count",
         // [ensemble_weights]
         "ensemble_weights",
         "ensemble_weights.mse",
@@ -169,6 +173,21 @@ pub fn known_config_keys() -> HashSet<&'static str> {
         "ml",
         "ml.rop_lag_seconds",
         "ml.interval_secs",
+        // [lookahead]
+        "lookahead",
+        "lookahead.enabled",
+        "lookahead.window_minutes",
+        // [damping]
+        "damping",
+        "damping.enabled",
+        "damping.max_wob_reduction_pct",
+        "damping.max_rpm_change_pct",
+        "damping.cv_threshold",
+        "damping.min_samples",
+        "damping.monitor_window_secs",
+        "damping.success_cv_reduction_pct",
+        "damping.retract_cv_increase_pct",
+        "damping.max_recipes_per_formation",
     ];
     keys.iter().copied().collect()
 }
@@ -371,6 +390,66 @@ pub fn validate_physical_ranges(
             ),
             suggestion: None,
         });
+    }
+
+    // Lookahead: window_minutes must be in [5.0, 120.0]
+    let lw = config.lookahead.window_minutes;
+    if lw < 5.0 || lw > 120.0 {
+        errors.push(format!(
+            "lookahead.window_minutes = {:.1} is outside valid range (5-120 minutes)",
+            lw
+        ));
+    }
+
+    // Damping: validate safe envelope ranges
+    let d = &config.damping;
+    if d.max_wob_reduction_pct < 5.0 || d.max_wob_reduction_pct > 50.0 {
+        errors.push(format!(
+            "damping.max_wob_reduction_pct = {:.1} is outside valid range (5-50%)",
+            d.max_wob_reduction_pct
+        ));
+    }
+    if d.max_rpm_change_pct < 5.0 || d.max_rpm_change_pct > 50.0 {
+        errors.push(format!(
+            "damping.max_rpm_change_pct = {:.1} is outside valid range (5-50%)",
+            d.max_rpm_change_pct
+        ));
+    }
+    if d.cv_threshold < 0.05 || d.cv_threshold > 0.50 {
+        errors.push(format!(
+            "damping.cv_threshold = {:.2} is outside valid range (0.05-0.50)",
+            d.cv_threshold
+        ));
+    }
+    if d.min_samples < 3 || d.min_samples > 60 {
+        errors.push(format!(
+            "damping.min_samples = {} is outside valid range (3-60)",
+            d.min_samples
+        ));
+    }
+    if d.monitor_window_secs < 30 || d.monitor_window_secs > 600 {
+        errors.push(format!(
+            "damping.monitor_window_secs = {} is outside valid range (30-600)",
+            d.monitor_window_secs
+        ));
+    }
+    if d.success_cv_reduction_pct < 5.0 || d.success_cv_reduction_pct > 50.0 {
+        errors.push(format!(
+            "damping.success_cv_reduction_pct = {:.1} is outside valid range (5-50%)",
+            d.success_cv_reduction_pct
+        ));
+    }
+    if d.retract_cv_increase_pct < 5.0 || d.retract_cv_increase_pct > 50.0 {
+        errors.push(format!(
+            "damping.retract_cv_increase_pct = {:.1} is outside valid range (5-50%)",
+            d.retract_cv_increase_pct
+        ));
+    }
+    if d.max_recipes_per_formation < 1 || d.max_recipes_per_formation > 100 {
+        errors.push(format!(
+            "damping.max_recipes_per_formation = {} is outside valid range (1-100)",
+            d.max_recipes_per_formation
+        ));
     }
 
     (errors, warnings)
@@ -596,5 +675,76 @@ some_field = 42
             errors.iter().any(|e| e.contains("bit_diameter_inches")),
             "Bit diameter 0.5 should be an error"
         );
+    }
+
+    #[test]
+    fn test_damping_config_monitoring_validation() {
+        // Default config should be clean
+        let config = crate::config::WellConfig::default();
+        let (errors, _) = validate_physical_ranges(&config);
+        let damping_errors: Vec<_> = errors.iter().filter(|e| e.contains("damping.")).collect();
+        assert!(damping_errors.is_empty(), "Defaults should have no damping errors: {:?}", damping_errors);
+
+        // monitor_window_secs out of range (too low)
+        let mut cfg = crate::config::WellConfig::default();
+        cfg.damping.monitor_window_secs = 10; // min is 30
+        let (errors, _) = validate_physical_ranges(&cfg);
+        assert!(errors.iter().any(|e| e.contains("monitor_window_secs")),
+            "monitor_window_secs=10 should error");
+
+        // monitor_window_secs out of range (too high)
+        cfg.damping.monitor_window_secs = 999;
+        let (errors, _) = validate_physical_ranges(&cfg);
+        assert!(errors.iter().any(|e| e.contains("monitor_window_secs")),
+            "monitor_window_secs=999 should error");
+
+        // success_cv_reduction_pct out of range
+        let mut cfg = crate::config::WellConfig::default();
+        cfg.damping.success_cv_reduction_pct = 2.0; // min is 5.0
+        let (errors, _) = validate_physical_ranges(&cfg);
+        assert!(errors.iter().any(|e| e.contains("success_cv_reduction_pct")),
+            "success_cv_reduction_pct=2.0 should error");
+
+        // retract_cv_increase_pct out of range
+        let mut cfg = crate::config::WellConfig::default();
+        cfg.damping.retract_cv_increase_pct = 60.0; // max is 50.0
+        let (errors, _) = validate_physical_ranges(&cfg);
+        assert!(errors.iter().any(|e| e.contains("retract_cv_increase_pct")),
+            "retract_cv_increase_pct=60.0 should error");
+
+        // max_recipes_per_formation out of range
+        let mut cfg = crate::config::WellConfig::default();
+        cfg.damping.max_recipes_per_formation = 0; // min is 1
+        let (errors, _) = validate_physical_ranges(&cfg);
+        assert!(errors.iter().any(|e| e.contains("max_recipes_per_formation")),
+            "max_recipes_per_formation=0 should error");
+
+        // Valid monitoring config at boundary values
+        let mut cfg = crate::config::WellConfig::default();
+        cfg.damping.monitor_window_secs = 30;
+        cfg.damping.success_cv_reduction_pct = 5.0;
+        cfg.damping.retract_cv_increase_pct = 50.0;
+        cfg.damping.max_recipes_per_formation = 100;
+        let (errors, _) = validate_physical_ranges(&cfg);
+        let damping_errors: Vec<_> = errors.iter().filter(|e| e.contains("damping.")).collect();
+        assert!(damping_errors.is_empty(), "Boundary values should be valid: {:?}", damping_errors);
+
+        // Verify new keys are recognized (not flagged as unknown)
+        let toml_str = r#"
+[damping]
+monitor_window_secs = 120
+success_cv_reduction_pct = 20.0
+retract_cv_increase_pct = 15.0
+max_recipes_per_formation = 20
+"#;
+        let warnings = validate_unknown_keys(toml_str);
+        let damping_warnings: Vec<_> = warnings.iter()
+            .filter(|w| w.field.contains("damping.monitor")
+                || w.field.contains("damping.success")
+                || w.field.contains("damping.retract")
+                || w.field.contains("damping.max_recipes"))
+            .collect();
+        assert!(damping_warnings.is_empty(),
+            "New damping keys should be known: {:?}", damping_warnings);
     }
 }

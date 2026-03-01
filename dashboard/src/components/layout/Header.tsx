@@ -11,6 +11,7 @@ const navItems = [
   { to: '/hourly', label: 'Hourly' },
   { to: '/daily', label: 'Daily' },
   { to: '/reports', label: 'Reports' },
+  { to: '/feedback', label: 'Feedback' },
 ];
 
 export function Header({ status, connected }: HeaderProps) {

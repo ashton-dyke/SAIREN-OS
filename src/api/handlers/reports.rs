@@ -397,6 +397,10 @@ pub async fn create_test_critical_report() -> Json<serde_json::Value> {
                 message: "CONFIRMED: Active kick - immediate response required".to_string(),
             },
         ],
+        category: crate::types::AnomalyCategory::WellControl,
+        trigger_parameter: "flow_balance".to_string(),
+        trigger_value: 85.0,
+        threshold_value: 20.0,
     };
 
     // Store the test report

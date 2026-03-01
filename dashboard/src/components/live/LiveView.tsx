@@ -2,6 +2,7 @@ import type { LiveData } from '../../api/types';
 import { HealthGauge } from './HealthGauge';
 import { DrillingParams } from './DrillingParams';
 import { WellControl } from './WellControl';
+import { LookAheadPanel } from './LookAheadPanel';
 import { SpecialistVotes } from './SpecialistVotes';
 import { BaselineProgress } from './BaselineProgress';
 import { FlowBalanceChart } from '../charts/FlowBalanceChart';
@@ -54,6 +55,9 @@ export function LiveView({ data, history }: Props) {
 
       {/* Well control */}
       <WellControl drilling={data.drilling} />
+
+      {/* Formation lookahead */}
+      <LookAheadPanel />
 
       {/* Charts row */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

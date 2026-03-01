@@ -102,7 +102,8 @@ The **Orchestrator** uses trait-based `Specialist` implementations for domain-sp
 |-------|-----------|----------|
 | 1 | WITS Ingestion | Receive 40+ channel WITS Level 0 packets, classify rig state |
 | 2 | Tactical Physics | Calculate MSE, d-exponent, flow balance, pit rate (<15ms) |
-| 2.8 | CfC Network | Self-supervised neural network: predict, compare, train, score, modulate severity; stamp `regime_id` via k-means clusterer |
+| 2.8.1 | CfC Network | Self-supervised neural network: predict, compare, train, score, modulate severity; stamp `regime_id` via k-means clusterer |
+| 2.8.2 | Depth-Ahead CfC | Secondary 64-neuron CfC (seed=1042) predicting formation transition response; resets on formation boundaries; annotates `LookAheadAdvisory` with confidence |
 | 3 | Decision Gate | 6-rule ticket gate: rig state, anomaly, per-category cooldown, ACI corroboration, CfC corroboration, founder debounce |
 | 4 | History Buffer | Store last 60 packets for trend analysis |
 | 4.5 | Causal Inference | Cross-correlate WOB/RPM/Torque/SPP/ROP against MSE at lags 1-20s; attach `CausalLead` results to ticket |
@@ -193,6 +194,8 @@ When the CfC detects anomalies, it reports which specific features deviated most
 | `src/cfc/network.rs` | CfcNetwork: process(), anomaly scoring, calibration |
 | `src/cfc/regime_clusterer.rs` | K-means clustering of 8 motor outputs -> regime_id (0-3) |
 | `src/cfc/formation_detector.rs` | Motor-output pattern analysis for formation boundary detection |
+| `src/cfc/checkpoint.rs` | `DualCfcCheckpoint`, `CfcNetworkCheckpoint`, atomic disk save/load for federation |
+| `src/cfc/depth_ahead.rs` | Depth-ahead CfC network (64 neurons, seed=1042, BPTT=6), 8-feature extraction, formation-boundary reset |
 
 **Adam optimizer**: Decaying base LR, beta1=0.9, beta2=0.999 — 64% lower loss vs SGD baseline. Fast network: 0.001 → 0.0001; Slow network: 0.0001 → 0.00001.
 
@@ -377,6 +380,8 @@ Per-well directory-based knowledge base that separates geologist-authored geolog
 | **Uploader** | `fleet/uploader.rs` | Background task draining queue to hub with retry |
 | **LibrarySync** | `fleet/sync.rs` | Periodic library pull from hub with jitter |
 | **RAMRecall** | `context/ram_recall.rs` | In-memory episode search with metadata filtering + scoring |
+| **Federation Upload** | `fleet/federation.rs` | Background task: snapshot CfC weights via watch channel, upload checkpoint to hub |
+| **Federation Pull** | `fleet/federation.rs` | Background task: pull federated model from hub, restore into CfcNetwork via watch channel |
 
 ### Hub-Side (Central Server) Components
 
@@ -390,6 +395,7 @@ Per-well directory-based knowledge base that separates geologist-authored geolog
 | **Auth Middleware** | `hub/auth/` | Bearer token extractors (RigAuth, AdminAuth) with 5-min cache |
 | **Fleet Dashboard** | `hub/api/dashboard.rs` | Real-time fleet overview with Chart.js visualizations |
 | **Pairing** | `hub/api/pairing.rs` | 6-digit pairing code flow with DashMap store |
+| **Federation** | `hub/federation.rs`, `hub/api/federation.rs` | Federated averaging (weighted + Welford merge + Adam reset); checkpoint UPSERT + model serve endpoints |
 
 ### Curator Rules
 
@@ -543,9 +549,10 @@ src/
     knowledge_base.rs  # FieldGeology, PreSpudPrognosis, MidWellSnapshot,
                        # PostWellFormationPerformance, PostWellSummary, KnowledgeBaseConfig
     ml.rs              # MLInsightsReport, OptimalParams, ConfidenceLevel
-    optimization.rs    # OptimizationAdvisory, ConfidenceBreakdown
+    optimization.rs    # OptimizationAdvisory, ConfidenceBreakdown, LookAheadAdvisory
     tactical.rs        # TacticalAnalysis types
     thresholds.rs      # AnomalyCategory, FinalSeverity, RiskLevel
+    debrief.rs         # Post-well debrief types (WellTimeline, DebriefSection) — early/partial
 
   bin/
     simulation.rs      # WITS Level 0 data simulator for testing
@@ -560,6 +567,7 @@ src/
     validation.rs      # walk_toml_keys(), unknown key detection, physical range checks
     auto_detect.rs     # AutoDetector: median-based mud weight detection from WITS packets
     formation.rs       # FormationPrognosis loader (SAIREN_PROGNOSIS env var)
+    watcher.rs         # Polling-based file watcher on well_config.toml (mtime, 2s interval, 500ms debounce)
 
   causal/
     mod.rs             # Causal inference: Granger-style cross-correlation over 60-packet history;
@@ -603,6 +611,8 @@ src/
     network.rs         # CfcNetwork: process(), anomaly scoring, calibration
     regime_clusterer.rs # K-means clustering of 8 motor outputs -> regime_id (0-3); stamps packet
     formation_detector.rs # CfC-based formation boundary detection from motor output patterns
+    checkpoint.rs      # DualCfcCheckpoint, CfcNetworkCheckpoint, atomic disk save/load
+    depth_ahead.rs     # Depth-ahead CfC network (64 neurons, seed=1042), 8-feature extraction
 
   baseline/
     mod.rs             # Adaptive threshold learning with crash-safe persistence
@@ -655,11 +665,13 @@ src/
     client.rs          # FleetClient: HTTP client for hub communication
     uploader.rs        # Background upload task draining queue to hub
     sync.rs            # Periodic library sync from hub with jitter
+    federation.rs      # Spoke-side federation tasks: checkpoint upload + federated model pull via watch channels
 
   hub/                   # Fleet Hub server (fleet-hub feature)
     mod.rs             # HubState, module exports
     config.rs          # HubConfig from env vars and CLI args
     db.rs              # PostgreSQL pool and migration runner
+    federation.rs      # federated_average(): weighted weight averaging, Welford merge, Adam reset
     api/
       mod.rs           # Router builder with all fleet routes
       events.rs        # Event ingestion (POST), retrieval (GET), outcome update (PATCH)
@@ -667,6 +679,7 @@ src/
       performance.rs   # Post-well performance data upload and query endpoints
       registry.rs      # Rig registration, listing, revocation
       pairing.rs       # 6-digit pairing code flow (DashMap store, approve/reject)
+      federation.rs    # POST /federation/checkpoint (UPSERT), GET /federation/model; FederationState
       dashboard.rs     # Fleet dashboard API endpoints and HTML serving
       health.rs        # Health check endpoint
     auth/
@@ -688,6 +701,9 @@ src/
     history.rs         # Advisory history storage
     strategic.rs       # Strategic report storage
     lockfile.rs        # Process lock file management
+    feedback.rs        # FeedbackRecord, FeedbackOutcome, sled-persisted operator feedback
+    suggestions.rs     # CategoryStats, ThresholdSuggestion, compute_stats(), compute_suggestions()
+    damping_recipes.rs # Per-formation damping recipe library (sled), recipe blending + pruning
 
   acquisition/
     mod.rs             # Acquisition module exports
@@ -720,7 +736,28 @@ src/
 
 
 dashboard/               # React SPA (Vite + Tailwind + Recharts)
-  src/                 # React components, pages, hooks
+  src/
+    api/
+      types.ts         # TypeScript interfaces (LiveData, CriticalReport, CategoryStats, ThresholdSuggestion, LookaheadStatus)
+      client.ts        # API client (fetchLive, submitFeedback, fetchFeedbackStats, fetchConfigSuggestions, fetchLookaheadStatus)
+    components/
+      live/
+        LiveView.tsx       # Main live dashboard view
+        HealthGauge.tsx    # Radial health score gauge
+        DrillingParams.tsx # Real-time drilling parameters
+        WellControl.tsx    # Well control indicators
+        LookAheadPanel.tsx # Formation lookahead advisory panel (polls /api/v2/lookahead/status)
+        SpecialistVotes.tsx # Specialist voting display
+        BaselineProgress.tsx # Baseline learning progress
+      reports/
+        CriticalReports.tsx # Critical advisory reports with feedback buttons (Confirmed/FP/Unclear)
+      feedback/
+        FeedbackView.tsx   # Feedback analytics page (category stats + threshold suggestions)
+      charts/            # FlowBalanceChart, MSEChart (Recharts)
+      layout/            # Header (with nav items), sidebar
+    hooks/
+      usePolling.ts      # Generic polling hook for API data
+    App.tsx              # React Router (Live, Hourly, Daily, Reports, Feedback)
   index.html           # SPA entry point
   vite.config.ts       # Vite build configuration
   tailwind.config.ts   # Tailwind CSS configuration

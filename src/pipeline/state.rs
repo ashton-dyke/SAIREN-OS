@@ -122,6 +122,10 @@ pub struct AppState {
     /// Current regime centroids from CfC motor output clustering (k=4, dim=8)
     #[serde(skip)]
     pub regime_centroids: [[f64; 8]; 4],
+
+    /// Latest damping monitor snapshot (updated every packet by coordinator)
+    #[serde(skip)]
+    pub damping_monitor_snapshot: Option<crate::types::DampingMonitorSnapshot>,
 }
 
 impl Default for AppState {
@@ -160,6 +164,7 @@ impl Default for AppState {
             latest_formation_transition: None,
             formation_transition_timestamps: Vec::new(),
             regime_centroids: [[0.0; 8]; 4],
+            damping_monitor_snapshot: None,
         }
     }
 }

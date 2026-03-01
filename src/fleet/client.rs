@@ -217,4 +217,82 @@ impl FleetClient {
     pub fn http_client(&self) -> &reqwest::Client {
         &self.http
     }
+
+    /// Upload a CfC checkpoint to the hub for federated averaging.
+    ///
+    /// The hub stores one checkpoint per rig (UPSERT) and triggers
+    /// re-aggregation when enough rigs have contributed.
+    pub async fn upload_checkpoint(
+        &self,
+        checkpoint: &crate::cfc::checkpoint::DualCfcCheckpoint,
+    ) -> Result<bool, FleetClientError> {
+        let json = serde_json::to_vec(checkpoint)?;
+        let compressed = zstd::encode_all(json.as_slice(), 3)
+            .map_err(|e| FleetClientError::Compression(e.to_string()))?;
+
+        let resp = self
+            .http
+            .post(format!("{}/api/fleet/federation/checkpoint", self.hub_url))
+            .header("Authorization", format!("Bearer {}", self.passphrase))
+            .header("Content-Type", "application/json")
+            .header("Content-Encoding", "zstd")
+            .header("X-Rig-ID", &self.rig_id)
+            .body(compressed)
+            .send()
+            .await?;
+
+        match resp.status() {
+            reqwest::StatusCode::OK | reqwest::StatusCode::CREATED => Ok(true),
+            reqwest::StatusCode::CONFLICT => Ok(false),
+            status => Err(FleetClientError::ServerError(status)),
+        }
+    }
+
+    /// Pull the latest federated-averaged model from the hub.
+    ///
+    /// Returns `Ok(None)` if no federated model is available yet (404)
+    /// or if the model hasn't changed since `since_round`.
+    pub async fn pull_federated_model(
+        &self,
+        since_round: Option<u64>,
+    ) -> Result<Option<FederatedModelResponse>, FleetClientError> {
+        let mut url = format!("{}/api/fleet/federation/model", self.hub_url);
+        if let Some(round) = since_round {
+            url.push_str(&format!("?since_round={}", round));
+        }
+
+        let resp = self
+            .http
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", self.passphrase))
+            .header("X-Rig-ID", &self.rig_id)
+            .send()
+            .await?;
+
+        match resp.status() {
+            reqwest::StatusCode::OK => {
+                let body = resp.bytes().await?;
+                let response: FederatedModelResponse = serde_json::from_slice(&body)?;
+                Ok(Some(response))
+            }
+            reqwest::StatusCode::NOT_FOUND
+            | reqwest::StatusCode::NOT_MODIFIED => Ok(None),
+            status => Err(FleetClientError::ServerError(status)),
+        }
+    }
+}
+
+/// Response from the hub's federated model endpoint.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct FederatedModelResponse {
+    /// The aggregated checkpoint.
+    pub checkpoint: crate::cfc::checkpoint::DualCfcCheckpoint,
+    /// Number of rigs that contributed to this aggregation.
+    pub contributing_rigs: usize,
+    /// Total packets processed across all contributing rigs.
+    pub total_packets: u64,
+    /// Unix timestamp when aggregation was performed.
+    pub aggregated_at: u64,
+    /// Aggregation round number (monotonically increasing).
+    pub round: u64,
 }

@@ -24,6 +24,8 @@ pub mod auth;
 pub mod knowledge_graph;
 #[cfg(all(feature = "fleet-hub", feature = "llm"))]
 pub mod intelligence;
+#[cfg(feature = "fleet-hub")]
+pub mod federation;
 
 #[cfg(feature = "fleet-hub")]
 use std::sync::atomic::AtomicU64;
@@ -46,6 +48,8 @@ pub struct HubState {
     pub pairing_requests: api::pairing::PairingStore,
     /// Per-IP failed pairing lookup tracker (brute-force mitigation)
     pub pairing_attempts: api::pairing::PairingAttemptStore,
+    /// Federation state for CfC weight sharing
+    pub federation: api::federation::FederationState,
 }
 
 #[cfg(feature = "fleet-hub")]
@@ -60,6 +64,7 @@ impl HubState {
             llm_backend: None,
             pairing_requests: api::pairing::new_pairing_store(),
             pairing_attempts: api::pairing::new_pairing_attempt_store(),
+            federation: api::federation::FederationState::new(),
         });
         api::pairing::spawn_pairing_cleanup(
             Arc::clone(&state.pairing_requests),
@@ -82,6 +87,7 @@ impl HubState {
             llm_backend: Some(backend),
             pairing_requests: api::pairing::new_pairing_store(),
             pairing_attempts: api::pairing::new_pairing_attempt_store(),
+            federation: api::federation::FederationState::new(),
         });
         api::pairing::spawn_pairing_cleanup(
             Arc::clone(&state.pairing_requests),

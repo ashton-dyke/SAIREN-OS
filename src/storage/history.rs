@@ -276,6 +276,31 @@ pub fn prune_old_reports(max_age_days: u64) -> Result<usize, StorageError> {
     storage.cleanup_before(cutoff)
 }
 
+/// Look up a single report by its exact timestamp key.
+pub fn get_by_timestamp(timestamp: u64) -> Result<Option<StrategicReport>, StorageError> {
+    let db = get_db()?;
+    let key = timestamp.to_be_bytes();
+    match db.get(key)? {
+        Some(bytes) => Ok(Some(serde_json::from_slice(&bytes)?)),
+        None => Ok(None),
+    }
+}
+
+/// Get all reports from the global database (oldest first).
+pub fn get_all_reports() -> Vec<StrategicReport> {
+    let db = match get_db() {
+        Ok(db) => db,
+        Err(_) => return Vec::new(),
+    };
+
+    db.iter()
+        .filter_map(|item| {
+            item.ok()
+                .and_then(|(_, v)| serde_json::from_slice::<StrategicReport>(&v).ok())
+        })
+        .collect()
+}
+
 /// Get only Critical severity reports (newest first)
 pub fn get_critical_reports(limit: usize) -> Vec<StrategicReport> {
     let db = match get_db() {
@@ -321,6 +346,10 @@ mod tests {
             physics_report: DrillingPhysicsReport::default(),
             context_used: Vec::new(),
             trace_log: Vec::new(),
+            category: crate::types::AnomalyCategory::None,
+            trigger_parameter: String::new(),
+            trigger_value: 0.0,
+            threshold_value: 0.0,
         }
     }
 

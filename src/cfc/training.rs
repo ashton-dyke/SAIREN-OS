@@ -23,7 +23,7 @@ const BPTT_DECAY: f64 = 0.7;
 const MAX_GRAD_NORM: f64 = 5.0;
 
 /// Training hyperparameters for a CfC network.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct TrainingConfig {
     pub bptt_depth: usize,
     pub bptt_decay: f64,
@@ -120,7 +120,7 @@ impl GradAccum {
 }
 
 /// Adam optimizer with decaying base learning rate.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct AdamOptimizer {
     /// Base learning rate (decays over time).
     pub lr: f64,

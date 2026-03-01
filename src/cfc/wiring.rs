@@ -42,7 +42,7 @@ pub const NUM_OUTPUTS: usize = NUM_FEATURES;
 const NUM_PRIMARY: usize = 8;
 
 /// Configuration for NCP neuron topology — group boundaries and sizes.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NcpConfig {
     pub num_neurons: usize,
     pub sensory_end: usize,    // sensory = 0..sensory_end

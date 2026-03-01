@@ -65,7 +65,7 @@ fn run_pipeline(
     let mut has_nan = false;
 
     for packet in drilling_packets.iter().take(count) {
-        let (ticket_opt, metrics, history_entry) = tactical.process(packet, false);
+        let (ticket_opt, metrics, history_entry) = tactical.process(packet, false, None);
         packets_processed += 1;
 
         // Check for NaN in drilling metrics

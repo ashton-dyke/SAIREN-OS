@@ -16,8 +16,8 @@ use super::DashboardState;
 /// Returns the complete WellConfig as JSON including all thresholds,
 /// physics parameters, baseline learning settings, and campaign overrides.
 pub async fn get_config() -> Json<serde_json::Value> {
-    let cfg = crate::config::get();
-    match serde_json::to_value(cfg) {
+    let cfg = crate::config::get_arc();
+    match serde_json::to_value(&*cfg) {
         Ok(v) => Json(v),
         Err(e) => Json(serde_json::json!({
             "error": format!("Failed to serialize config: {}", e)

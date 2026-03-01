@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
-import { fetchCriticalReports } from '../../api/client';
-import type { CriticalReport } from '../../api/types';
+import { fetchCriticalReports, submitFeedback } from '../../api/client';
+import type { CriticalReport, FeedbackOutcome } from '../../api/types';
 import { SeverityBadge } from '../common/SeverityBadge';
 import { severityColor } from '../../theme/colors';
 
@@ -8,6 +8,7 @@ export function CriticalReports() {
   const [reports, setReports] = useState<CriticalReport[]>([]);
   const [selected, setSelected] = useState<CriticalReport | null>(null);
   const [loading, setLoading] = useState(true);
+  const [feedbackStatus, setFeedbackStatus] = useState<Record<number, FeedbackOutcome>>({});
 
   useEffect(() => {
     let active = true;
@@ -79,7 +80,18 @@ export function CriticalReports() {
       {/* Right: detail pane */}
       <div className="flex-1 overflow-y-auto p-4">
         {selected ? (
-          <ReportDetail report={selected} />
+          <ReportDetail
+            report={selected}
+            feedbackStatus={feedbackStatus}
+            onFeedback={async (ts, outcome) => {
+              try {
+                await submitFeedback(ts, outcome);
+                setFeedbackStatus((prev) => ({ ...prev, [ts]: outcome }));
+              } catch {
+                // ignore
+              }
+            }}
+          />
         ) : (
           <div className="text-text-secondary text-sm">Select a report</div>
         )}
@@ -88,9 +100,18 @@ export function CriticalReports() {
   );
 }
 
-function ReportDetail({ report }: { report: CriticalReport }) {
+function ReportDetail({
+  report,
+  feedbackStatus,
+  onFeedback,
+}: {
+  report: CriticalReport;
+  feedbackStatus: Record<number, FeedbackOutcome>;
+  onFeedback: (timestamp: number, outcome: FeedbackOutcome) => void;
+}) {
   const color = severityColor(report.risk_level);
   const p = report.drilling_params;
+  const existing = feedbackStatus[report.timestamp];
 
   return (
     <div className="space-y-4 max-w-2xl">
@@ -110,6 +131,48 @@ function ReportDetail({ report }: { report: CriticalReport }) {
         >
           {report.recommendation}
         </h2>
+
+        {/* Feedback buttons */}
+        <div className="flex items-center gap-2 mt-2">
+          {existing ? (
+            <span
+              className={`px-2 py-0.5 rounded text-xs font-medium ${
+                existing === 'confirmed'
+                  ? 'bg-accent-green/20 text-accent-green'
+                  : existing === 'false_positive'
+                    ? 'bg-accent-red/20 text-accent-red'
+                    : 'bg-accent-yellow/20 text-accent-yellow'
+              }`}
+            >
+              {existing === 'confirmed'
+                ? 'Confirmed'
+                : existing === 'false_positive'
+                  ? 'False Positive'
+                  : 'Unclear'}
+            </span>
+          ) : (
+            <>
+              <button
+                onClick={() => onFeedback(report.timestamp, 'confirmed')}
+                className="px-2 py-0.5 rounded text-xs font-medium bg-accent-green/20 text-accent-green hover:bg-accent-green/30 transition-colors"
+              >
+                Confirmed
+              </button>
+              <button
+                onClick={() => onFeedback(report.timestamp, 'false_positive')}
+                className="px-2 py-0.5 rounded text-xs font-medium bg-accent-red/20 text-accent-red hover:bg-accent-red/30 transition-colors"
+              >
+                False Positive
+              </button>
+              <button
+                onClick={() => onFeedback(report.timestamp, 'unclear')}
+                className="px-2 py-0.5 rounded text-xs font-medium bg-accent-yellow/20 text-accent-yellow hover:bg-accent-yellow/30 transition-colors"
+              >
+                Unclear
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div>

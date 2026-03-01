@@ -5,7 +5,7 @@
 //! algorithmic — no LLM involved.
 
 mod confidence;
-mod look_ahead;
+pub mod look_ahead;
 mod optimizer;
 mod rate_limiter;
 pub mod templates;
