@@ -14,9 +14,11 @@
 //! - `detect_kick()` / `detect_lost_circulation()` - Well control
 //! - `detect_packoff()` / `detect_stick_slip()` - Mechanical issues
 
+pub mod connection_gas;
 pub mod drilling_models;
 pub mod metrics;
 pub mod models;
+pub mod swab_surge;
 
 // Export drilling-specific functions
 pub use drilling_models::{
@@ -594,7 +596,7 @@ mod tests {
             hook_load: 150.0,
             wob: 25.0,
             rpm: 120.0,
-            torque: 15.0,
+            torque: 2.0,
             bit_diameter: 8.5,
             spp: 3000.0,
             pump_spm: 120.0,

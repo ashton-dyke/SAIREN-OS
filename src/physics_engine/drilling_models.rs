@@ -21,11 +21,11 @@ use crate::types::{DrillingPhysicsReport, HistoryEntry, RigState, WitsPacket};
 /// Formula: MSE = (480 × T × RPM) / (D² × ROP) + (4 × WOB) / (π × D²)
 ///
 /// Where:
-/// - T = Torque (kft-lbs)
+/// - T = Torque (ft-lbs) — input is kft-lbs, converted internally
 /// - RPM = Rotary speed
 /// - D = Bit diameter (inches)
 /// - ROP = Rate of penetration (ft/hr)
-/// - WOB = Weight on bit (klbs)
+/// - WOB = Weight on bit (lbs) — input is klbs, converted internally
 ///
 /// Returns MSE in psi
 pub fn calculate_mse(torque: f64, rpm: f64, bit_diameter: f64, rop: f64, wob: f64) -> f64 {
@@ -38,8 +38,9 @@ pub fn calculate_mse(torque: f64, rpm: f64, bit_diameter: f64, rop: f64, wob: f6
     let d_squared = bit_diameter * bit_diameter;
 
     // Rotary component: (480 × T × RPM) / (D² × ROP)
+    // Torque in kft-lbs, convert to ft-lbs (×1000)
     let rotary_component = if rop > cfg.physics.min_rop_for_mse {
-        (480.0 * torque * rpm) / (d_squared * rop)
+        (480.0 * torque * 1000.0 * rpm) / (d_squared * rop)
     } else {
         0.0
     };
@@ -1099,15 +1100,15 @@ mod tests {
         ensure_config();
 
         // Test MSE calculation with typical drilling parameters
-        // Torque: 15 kft-lbs, RPM: 120, Bit: 8.5", ROP: 60 ft/hr, WOB: 25 klbs
-        let mse = calculate_mse(15.0, 120.0, 8.5, 60.0, 25.0);
+        // Torque: 3 kft-lbs, RPM: 120, Bit: 8.5", ROP: 80 ft/hr, WOB: 20 klbs
+        let mse = calculate_mse(3.0, 120.0, 8.5, 80.0, 20.0);
 
-        // Expected rotary: (480 * 15 * 120) / (72.25 * 60) = 199.3 psi
-        // Expected axial: (4 * 25000) / (π * 72.25) = 440.3 psi
-        // Total: ~640 psi (very efficient drilling)
+        // Rotary: (480 × 3000 × 120) / (72.25 × 80) = 172,800,000 / 5,780 ≈ 29,896 psi
+        // Axial:  (4 × 20,000) / (π × 72.25) ≈ 352 psi
+        // Total:  ~30,248 psi (medium-hard formation, realistic)
         assert!(
-            mse > 500.0 && mse < 800.0,
-            "MSE should be ~640 psi, got {}",
+            mse > 25_000.0 && mse < 35_000.0,
+            "MSE should be ~30k psi, got {}",
             mse
         );
     }
