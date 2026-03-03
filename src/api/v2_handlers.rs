@@ -1495,6 +1495,188 @@ pub async fn debug_fleet_intelligence(
     ApiResponse::ok(filtered)
 }
 
+// ============================================================================
+// Formation context endpoint
+// ============================================================================
+
+/// Current formation and upcoming boundary context.
+#[derive(Debug, Serialize)]
+pub struct FormationContext {
+    pub current: Option<CurrentFormation>,
+    pub next_boundary: Option<NextBoundary>,
+    pub upcoming: Vec<UpcomingFormation>,
+    pub target_depth_ft: Option<f64>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CurrentFormation {
+    pub name: String,
+    pub lithology: String,
+    pub hardness: f64,
+    pub depth_top_ft: f64,
+    pub depth_base_ft: f64,
+    pub pore_pressure_ppg: f64,
+    pub fracture_gradient_ppg: f64,
+    pub mud_weight_ppg: f64,
+    pub depth_in_formation_ft: f64,
+    pub formation_thickness_ft: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct NextBoundary {
+    pub formation_name: String,
+    pub depth_ft: f64,
+    pub distance_ft: f64,
+    pub lithology: String,
+    pub hardness: f64,
+    pub hazards: Vec<String>,
+    pub parameter_changes: Vec<String>,
+    pub offset_notes: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct UpcomingFormation {
+    pub name: String,
+    pub depth_top_ft: f64,
+    pub lithology: String,
+    pub hardness: f64,
+    pub hazards: Vec<String>,
+}
+
+/// GET /api/v2/formation/context — current formation, next boundary, upcoming formations.
+pub async fn formation_context(State(state): State<DashboardState>) -> Response {
+    let app = state.app_state.read().await;
+    let bit_depth = app
+        .latest_wits_packet
+        .as_ref()
+        .map(|p| p.bit_depth)
+        .unwrap_or(0.0);
+    let rop = app
+        .latest_wits_packet
+        .as_ref()
+        .map(|p| p.rop)
+        .unwrap_or(0.0);
+    drop(app);
+
+    // Load prognosis (same path as lookahead_status)
+    let kb = crate::knowledge_base::KnowledgeBase::init();
+    let prognosis = if let Some(ref kb) = kb {
+        kb.prognosis()
+    } else {
+        crate::types::FormationPrognosis::load()
+    };
+
+    let Some(prognosis) = prognosis else {
+        return ApiResponse::ok(FormationContext {
+            current: None,
+            next_boundary: None,
+            upcoming: Vec::new(),
+            target_depth_ft: None,
+        });
+    };
+
+    let target_depth_ft = Some(prognosis.well.target_depth_ft);
+
+    // Current formation
+    let current_fm = prognosis.formation_at_depth(bit_depth);
+    let current = current_fm.map(|fm| CurrentFormation {
+        name: fm.name.clone(),
+        lithology: fm.lithology.clone(),
+        hardness: fm.hardness,
+        depth_top_ft: fm.depth_top_ft,
+        depth_base_ft: fm.depth_base_ft,
+        pore_pressure_ppg: fm.pore_pressure_ppg,
+        fracture_gradient_ppg: fm.fracture_gradient_ppg,
+        mud_weight_ppg: fm.parameters.mud_weight_ppg,
+        depth_in_formation_ft: bit_depth - fm.depth_top_ft,
+        formation_thickness_ft: fm.depth_base_ft - fm.depth_top_ft,
+    });
+
+    // Next boundary with parameter changes
+    let next_boundary = prognosis.next_formation(bit_depth).map(|next| {
+        let distance_ft = next.depth_top_ft - bit_depth;
+
+        // Build parameter change diffs (reuse check_look_ahead logic)
+        let mut parameter_changes = Vec::new();
+        if let Some(cur) = current_fm {
+            let cur_p = &cur.parameters;
+            let nxt_p = &next.parameters;
+
+            let wob_delta = nxt_p.wob_klbs.optimal - cur_p.wob_klbs.optimal;
+            if wob_delta.abs() > 1.0 {
+                parameter_changes.push(format!(
+                    "WOB: {:.0} \u{2192} {:.0} klbs",
+                    cur_p.wob_klbs.optimal, nxt_p.wob_klbs.optimal
+                ));
+            }
+
+            let rpm_delta = nxt_p.rpm.optimal - cur_p.rpm.optimal;
+            if rpm_delta.abs() > 5.0 {
+                parameter_changes.push(format!(
+                    "RPM: {:.0} \u{2192} {:.0}",
+                    cur_p.rpm.optimal, nxt_p.rpm.optimal
+                ));
+            }
+
+            let flow_delta = nxt_p.flow_gpm.optimal - cur_p.flow_gpm.optimal;
+            if flow_delta.abs() > 10.0 {
+                parameter_changes.push(format!(
+                    "Flow: {:.0} \u{2192} {:.0} GPM",
+                    cur_p.flow_gpm.optimal, nxt_p.flow_gpm.optimal
+                ));
+            }
+
+            let mw_delta = nxt_p.mud_weight_ppg - cur_p.mud_weight_ppg;
+            if mw_delta.abs() > 0.2 {
+                parameter_changes.push(format!(
+                    "MW: {:.1} \u{2192} {:.1} ppg",
+                    cur_p.mud_weight_ppg, nxt_p.mud_weight_ppg
+                ));
+            }
+        }
+
+        let notes = &next.offset_performance.notes;
+        NextBoundary {
+            formation_name: next.name.clone(),
+            depth_ft: next.depth_top_ft,
+            distance_ft,
+            lithology: next.lithology.clone(),
+            hardness: next.hardness,
+            hazards: next.hazards.clone(),
+            parameter_changes,
+            offset_notes: if notes.is_empty() {
+                None
+            } else {
+                Some(notes.clone())
+            },
+        }
+    });
+
+    // Upcoming formations (max 3 after next)
+    let _ = rop; // bit_depth-only; ROP not needed for context card
+    let upcoming: Vec<UpcomingFormation> = prognosis
+        .formations
+        .iter()
+        .filter(|f| f.depth_top_ft > bit_depth)
+        .skip(1) // skip the "next" one already shown
+        .take(3)
+        .map(|f| UpcomingFormation {
+            name: f.name.clone(),
+            depth_top_ft: f.depth_top_ft,
+            lithology: f.lithology.clone(),
+            hardness: f.hardness,
+            hazards: f.hazards.clone(),
+        })
+        .collect();
+
+    ApiResponse::ok(FormationContext {
+        current,
+        next_boundary,
+        upcoming,
+        target_depth_ft,
+    })
+}
+
 /// GET /api/v2/metrics — Prometheus text format (unchanged from v1).
 pub async fn metrics(State(state): State<DashboardState>) -> Response {
     super::handlers::get_metrics(State(state))

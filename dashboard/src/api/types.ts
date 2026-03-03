@@ -219,3 +219,43 @@ export interface LookaheadStatus {
   parameter_changes: string[];
   offset_notes: string | null;
 }
+
+// Formation context types
+export interface FormationContext {
+  current: CurrentFormation | null;
+  next_boundary: NextBoundary | null;
+  upcoming: UpcomingFormation[];
+  target_depth_ft: number | null;
+}
+
+export interface CurrentFormation {
+  name: string;
+  lithology: string;
+  hardness: number;
+  depth_top_ft: number;
+  depth_base_ft: number;
+  pore_pressure_ppg: number;
+  fracture_gradient_ppg: number;
+  mud_weight_ppg: number;
+  depth_in_formation_ft: number;
+  formation_thickness_ft: number;
+}
+
+export interface NextBoundary {
+  formation_name: string;
+  depth_ft: number;
+  distance_ft: number;
+  lithology: string;
+  hardness: number;
+  hazards: string[];
+  parameter_changes: string[];
+  offset_notes: string | null;
+}
+
+export interface UpcomingFormation {
+  name: string;
+  depth_top_ft: number;
+  lithology: string;
+  hardness: number;
+  hazards: string[];
+}

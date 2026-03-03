@@ -52,6 +52,11 @@ pub fn v2_api_routes(state: DashboardState) -> Router {
         // Well debrief
         .route("/well/debrief", get(v2_handlers::get_debrief_handler))
         .route("/well/debrief", post(v2_handlers::generate_debrief_handler))
+        // Formation context
+        .route(
+            "/formation/context",
+            get(v2_handlers::formation_context),
+        )
         // Shift
         .route("/shift/summary", get(v2_handlers::shift_summary))
         // Debug

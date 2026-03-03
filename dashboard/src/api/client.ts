@@ -10,6 +10,7 @@ import type {
   CategoryStats,
   ThresholdSuggestion,
   LookaheadStatus,
+  FormationContext,
 } from './types';
 
 const BASE = '/api/v2';
@@ -65,4 +66,8 @@ export async function fetchConfigSuggestions(): Promise<ThresholdSuggestion[]> {
 
 export async function fetchLookaheadStatus(): Promise<LookaheadStatus> {
   return fetchJson<LookaheadStatus>(`${BASE}/lookahead/status`);
+}
+
+export async function fetchFormationContext(): Promise<FormationContext> {
+  return fetchJson<FormationContext>(`${BASE}/formation/context`);
 }

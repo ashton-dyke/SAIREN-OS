@@ -124,6 +124,7 @@ pub struct AppState {
     /// Latest damping monitor snapshot (updated every packet by coordinator)
     #[serde(skip)]
     pub damping_monitor_snapshot: Option<crate::types::DampingMonitorSnapshot>,
+
 }
 
 impl Default for AppState {
