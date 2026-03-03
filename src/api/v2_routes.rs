@@ -57,6 +57,10 @@ pub fn v2_api_routes(state: DashboardState) -> Router {
             "/formation/context",
             get(v2_handlers::formation_context),
         )
+        // Trip / swab-surge
+        .route("/trip/swab-surge", get(v2_handlers::swab_surge_status))
+        // Shift handover
+        .route("/shift/handover", get(v2_handlers::shift_handover))
         // Shift
         .route("/shift/summary", get(v2_handlers::shift_summary))
         // Debug

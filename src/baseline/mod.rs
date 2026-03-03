@@ -69,7 +69,7 @@ pub const MAX_OUTLIER_PERCENTAGE: f64 = 0.05; // 5%
 pub const OUTLIER_SIGMA_THRESHOLD: f64 = 3.0;
 
 /// Schema version for persistence compatibility
-pub const SCHEMA_VERSION: u32 = 2; // Updated for WITS metrics
+pub const SCHEMA_VERSION: u32 = 3; // v3: formation-aware baselines
 
 // ============================================================================
 // Config-aware accessors (read from well_config.toml when available)
@@ -651,6 +651,9 @@ struct BaselineState {
     /// Sigma-derived overrides computed at lock time (Phase 2 auto-detection).
     #[serde(default)]
     overrides: Option<BaselineOverrides>,
+    /// Per-formation locked thresholds (v3+). Key: "equipment:metric:formation".
+    #[serde(default)]
+    formation_thresholds: HashMap<String, DynamicThresholds>,
 }
 
 // ============================================================================
@@ -674,6 +677,13 @@ pub struct ThresholdManager {
     /// Sigma-derived overrides computed at lock time, used by physics engine.
     /// Populated after baselines lock; persisted alongside thresholds.
     pub overrides: Option<BaselineOverrides>,
+
+    /// Per-formation locked thresholds. Key: "equipment:metric:formation".
+    /// Allows anomaly detection to use formation-specific baselines when available.
+    formation_thresholds: HashMap<String, DynamicThresholds>,
+
+    /// Per-formation accumulators for metrics still learning.
+    formation_accumulators: HashMap<String, BaselineAccumulator>,
 }
 
 impl Default for ThresholdManager {
@@ -690,6 +700,8 @@ impl ThresholdManager {
             accumulators: HashMap::new(),
             schema_version: SCHEMA_VERSION,
             overrides: None,
+            formation_thresholds: HashMap::new(),
+            formation_accumulators: HashMap::new(),
         }
     }
 
@@ -845,6 +857,100 @@ impl ThresholdManager {
         self.thresholds.get(&composite_id).map(|t| t.check(value))
     }
 
+    /// Add a sample to both global and formation-specific accumulators.
+    ///
+    /// The global accumulator always receives the sample (via `add_sample()`).
+    /// When `formation_name` is provided, a formation-specific accumulator is
+    /// also fed, keyed as `"equipment:metric:formation"`.
+    ///
+    /// Empty or excessively long formation names (> 256 chars) are rejected
+    /// and the sample falls through to global learning only — no data loss.
+    pub fn add_sample_with_formation(
+        &mut self,
+        equipment_id: &str,
+        sensor_id: &str,
+        value: f64,
+        formation_name: &str,
+        timestamp: u64,
+    ) -> Option<bool> {
+        // Reject empty or excessively long formation names — fall back to global
+        if formation_name.is_empty() || formation_name.len() > 256 {
+            return self.add_sample(equipment_id, sensor_id, value, timestamp);
+        }
+
+        // Always feed the global accumulator
+        let global_outlier = self.add_sample(equipment_id, sensor_id, value, timestamp);
+
+        // Feed formation-specific accumulator
+        let formation_key = format!("{}:{}:{}", equipment_id, sensor_id, formation_name);
+
+        // If already locked for this formation, skip
+        if self.formation_thresholds.contains_key(&formation_key) {
+            return global_outlier;
+        }
+
+        // Start formation learning if needed
+        if !self.formation_accumulators.contains_key(&formation_key) {
+            debug!(
+                formation_key = %formation_key,
+                "Starting formation-specific baseline learning"
+            );
+            self.formation_accumulators.insert(
+                formation_key.clone(),
+                BaselineAccumulator::new(equipment_id, sensor_id, timestamp),
+            );
+        }
+
+        if let Some(acc) = self.formation_accumulators.get_mut(&formation_key) {
+            acc.add_sample(value);
+
+            // Auto-lock formation baseline when enough samples collected
+            if acc.has_enough_samples() && !acc.is_contaminated() {
+                let fm_key = formation_key.clone();
+                if let Some(acc) = self.formation_accumulators.remove(&fm_key) {
+                    match acc.finalize(timestamp) {
+                        Ok(thresholds) => {
+                            info!(
+                                formation_key = %fm_key,
+                                mean = thresholds.baseline_mean,
+                                std = thresholds.baseline_std,
+                                samples = thresholds.sample_count,
+                                "Formation-specific baseline locked"
+                            );
+                            self.formation_thresholds.insert(fm_key, thresholds);
+                        }
+                        Err(e) => {
+                            debug!(error = %e, "Formation baseline finalize failed");
+                        }
+                    }
+                }
+            }
+        }
+
+        global_outlier
+    }
+
+    /// Check a value against formation-specific thresholds first, falling
+    /// back to global thresholds when no formation baseline is available.
+    ///
+    /// Returns `None` if neither formation nor global baseline is locked.
+    pub fn check_anomaly_with_formation(
+        &self,
+        equipment_id: &str,
+        sensor_id: &str,
+        value: f64,
+        formation_name: &str,
+    ) -> Option<AnomalyCheckResult> {
+        // Try formation-specific first
+        let formation_key = format!("{}:{}:{}", equipment_id, sensor_id, formation_name);
+        if let Some(t) = self.formation_thresholds.get(&formation_key) {
+            return Some(t.check(value));
+        }
+
+        // Fall back to global
+        self.check_anomaly(equipment_id, sensor_id, value)
+    }
+
     /// Get learning status for a metric
     pub fn get_status(&self, equipment_id: &str, sensor_id: &str) -> Option<LearningStatus> {
         let composite_id = format!("{}:{}", equipment_id, sensor_id);
@@ -965,6 +1071,61 @@ impl ThresholdManager {
         overrides
     }
 
+    /// Compute sigma-derived overrides using formation-specific baselines where
+    /// available, falling back to global baselines otherwise.
+    ///
+    /// For each metric (flow_balance, SPP, torque), checks `formation_thresholds`
+    /// first via the key `"equipment:metric:formation"`. If not found, falls back
+    /// to the global `get_threshold()`.
+    pub fn compute_overrides_with_formation(
+        &self,
+        equipment_id: &str,
+        formation_name: &str,
+    ) -> BaselineOverrides {
+        let mut overrides = BaselineOverrides::default();
+
+        // Helper: look up formation-specific threshold, fall back to global
+        let get_t = |metric: &str| -> Option<&DynamicThresholds> {
+            let fkey = format!("{}:{}:{}", equipment_id, metric, formation_name);
+            self.formation_thresholds
+                .get(&fkey)
+                .or_else(|| self.get_threshold(equipment_id, metric))
+        };
+
+        // Flow imbalance: 3σ of flow_balance std
+        if let Some(t) = get_t(wits_metrics::FLOW_BALANCE) {
+            let sigma3 = 3.0 * t.effective_std();
+            if sigma3 > 0.0 {
+                overrides.flow_imbalance_warning_gpm = Some(sigma3);
+            }
+        }
+
+        // SPP deviation: 2σ for warning, 3σ for critical
+        if let Some(t) = get_t(wits_metrics::SPP) {
+            let sigma2 = 2.0 * t.effective_std();
+            let sigma3 = 3.0 * t.effective_std();
+            if sigma2 > 0.0 {
+                overrides.spp_deviation_warning_psi = Some(sigma2.max(30.0));
+                overrides.spp_deviation_critical_psi = Some(sigma3.max(50.0));
+            }
+        }
+
+        // Torque: fraction-based increase thresholds
+        if let Some(t) = get_t(wits_metrics::TORQUE) {
+            if t.baseline_mean > 0.0 {
+                let cv = (t.effective_std() / t.baseline_mean).clamp(0.0, 10.0);
+                let warn = (2.0 * cv).max(0.10);
+                let crit = (3.0 * cv).max(0.20);
+                if warn > 0.0 {
+                    overrides.torque_warning_fraction = Some(warn);
+                    overrides.torque_critical_fraction = Some(crit);
+                }
+            }
+        }
+
+        overrides
+    }
+
     /// Count of locked thresholds
     pub fn locked_count(&self) -> usize {
         self.thresholds.len()
@@ -989,6 +1150,7 @@ impl ThresholdManager {
             schema_version: SCHEMA_VERSION,
             thresholds: self.thresholds.clone(),
             overrides: self.overrides.clone(),
+            formation_thresholds: self.formation_thresholds.clone(),
         };
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
@@ -1023,7 +1185,8 @@ impl ThresholdManager {
                 return None;
             }
         };
-        if state.schema_version != SCHEMA_VERSION {
+        // Accept schema v2 (pre-formation) and v3 (formation-aware)
+        if state.schema_version != SCHEMA_VERSION && state.schema_version != 2 {
             warn!(
                 file_version = state.schema_version,
                 expected = SCHEMA_VERSION,
@@ -1031,9 +1194,13 @@ impl ThresholdManager {
             );
             return None;
         }
+        if state.schema_version == 2 {
+            info!("Migrating baseline state from schema v2 → v3 (empty formation baselines)");
+        }
         let locked = state.thresholds.len();
+        let formation_locked = state.formation_thresholds.len();
         let has_overrides = state.overrides.is_some();
-        info!(path = %path.display(), locked, has_overrides, "Baseline state loaded");
+        info!(path = %path.display(), locked, formation_locked, has_overrides, "Baseline state loaded");
 
         // Reconstruct cached composite_id for entries deserialized from old state
         // files that predate the composite_id field.
@@ -1053,6 +1220,8 @@ impl ThresholdManager {
             accumulators: HashMap::new(),
             schema_version: SCHEMA_VERSION,
             overrides: state.overrides,
+            formation_thresholds: state.formation_thresholds,
+            formation_accumulators: HashMap::new(),
         })
     }
 
@@ -1367,5 +1536,207 @@ mod tests {
         // Finalize should fail
         let result = acc.finalize(1000);
         assert!(matches!(result, Err(BaselineError::Contaminated(_, _, _))));
+    }
+
+    #[test]
+    fn test_formation_specific_accumulator_learns_independently() {
+        let mut manager = ThresholdManager::new();
+
+        // Feed samples with two different formations
+        // Formation "Draupne" gets high values, "Hordaland" gets low values
+        for i in 0..150 {
+            manager.add_sample_with_formation(
+                "RIG", "mse", 50000.0 + (i as f64 * 10.0), "Draupne", i as u64,
+            );
+            manager.add_sample_with_formation(
+                "RIG", "mse", 10000.0 + (i as f64 * 5.0), "Hordaland", i as u64,
+            );
+        }
+
+        // Both formation baselines should auto-lock (>= 100 samples)
+        let draupne_key = "RIG:mse:Draupne";
+        let hordaland_key = "RIG:mse:Hordaland";
+        assert!(
+            manager.formation_thresholds.contains_key(draupne_key),
+            "Draupne formation baseline should be locked"
+        );
+        assert!(
+            manager.formation_thresholds.contains_key(hordaland_key),
+            "Hordaland formation baseline should be locked"
+        );
+
+        // Means should be different (formation-specific)
+        let draupne = &manager.formation_thresholds[draupne_key];
+        let hordaland = &manager.formation_thresholds[hordaland_key];
+        assert!(
+            draupne.baseline_mean > 40000.0,
+            "Draupne mean should be ~50750"
+        );
+        assert!(
+            hordaland.baseline_mean < 15000.0,
+            "Hordaland mean should be ~10375"
+        );
+    }
+
+    #[test]
+    fn test_formation_baseline_overrides_global() {
+        let mut manager = ThresholdManager::new();
+
+        // Train global on wide range
+        for i in 0..150 {
+            manager.add_sample("RIG", "mse", 30000.0 + (i as f64 * 200.0), i as u64);
+        }
+        manager.lock_baseline("RIG", "mse", 1000).unwrap();
+
+        // Train formation on narrow, lower range
+        for i in 0..150 {
+            manager.add_sample_with_formation(
+                "RIG", "mse", 10000.0 + (i as f64 * 5.0), "Tight", i as u64,
+            );
+        }
+
+        // Check with formation — should use formation-specific baseline
+        let result = manager
+            .check_anomaly_with_formation("RIG", "mse", 30000.0, "Tight")
+            .unwrap();
+        // 30000 is way above Tight's mean of ~10375, should be anomalous
+        assert_ne!(result.level, AnomalyLevel::Normal);
+
+        // Check same value with global — 30000 is within normal range (mean ~44750)
+        let global_result = manager.check_anomaly("RIG", "mse", 30000.0).unwrap();
+        assert_eq!(global_result.level, AnomalyLevel::Normal);
+
+        // Check with unknown formation — should fall back to global
+        let fallback = manager
+            .check_anomaly_with_formation("RIG", "mse", 30000.0, "Unknown")
+            .unwrap();
+        assert_eq!(fallback.level, AnomalyLevel::Normal);
+    }
+
+    #[test]
+    fn test_add_sample_with_formation_empty_name_falls_back_to_global() {
+        let mut manager = ThresholdManager::new();
+
+        // Feed with empty formation name — should still feed global
+        for i in 0..150 {
+            manager.add_sample_with_formation(
+                "RIG",
+                "mse",
+                30000.0 + (i as f64 * 10.0),
+                "", // empty formation name
+                i as u64,
+            );
+        }
+
+        // Global should have received samples
+        assert!(
+            manager.is_learning("RIG", "mse") || manager.is_locked("RIG", "mse"),
+            "Global accumulator should have received samples"
+        );
+
+        // No formation-specific accumulator should exist
+        assert!(
+            manager.formation_accumulators.is_empty()
+                || !manager
+                    .formation_accumulators
+                    .keys()
+                    .any(|k| k.contains("::")),
+            "Empty formation name should not create formation accumulator"
+        );
+    }
+
+    #[test]
+    fn test_add_sample_with_formation_long_name_rejected() {
+        let mut manager = ThresholdManager::new();
+
+        let long_name = "X".repeat(300); // 300 chars > 256 limit
+        for i in 0..150 {
+            manager.add_sample_with_formation(
+                "RIG",
+                "mse",
+                30000.0 + (i as f64 * 10.0),
+                &long_name,
+                i as u64,
+            );
+        }
+
+        // Global should have received samples
+        assert!(
+            manager.is_learning("RIG", "mse") || manager.is_locked("RIG", "mse"),
+            "Global accumulator should have received samples"
+        );
+
+        // No formation-specific accumulator for the long name
+        let long_key = format!("RIG:mse:{}", long_name);
+        assert!(
+            !manager.formation_accumulators.contains_key(&long_key),
+            "Long formation name should not create formation accumulator"
+        );
+    }
+
+    #[test]
+    fn test_compute_overrides_with_formation_falls_back_to_global() {
+        let mut manager = ThresholdManager::new();
+
+        // Train global SPP baseline
+        for i in 0..150 {
+            manager.add_sample("RIG", wits_metrics::SPP, 2500.0 + (i as f64 * 2.0), i as u64);
+        }
+        manager.lock_baseline("RIG", wits_metrics::SPP, 1000).unwrap();
+
+        // No formation-specific baseline exists for "Unknown"
+        // compute_overrides_with_formation should fall back to global
+        let overrides = manager.compute_overrides_with_formation("RIG", "Unknown");
+        assert!(
+            overrides.spp_deviation_warning_psi.is_some(),
+            "Should fall back to global SPP baseline"
+        );
+
+        // Compare with global-only overrides — should be identical
+        let global_overrides = manager.compute_overrides("RIG");
+        assert_eq!(
+            overrides.spp_deviation_warning_psi,
+            global_overrides.spp_deviation_warning_psi,
+            "Fallback should produce same result as global"
+        );
+    }
+
+    #[test]
+    fn test_schema_v2_migration() {
+        // Simulate a v2 state file (no formation_thresholds field)
+        let v2_state = serde_json::json!({
+            "schema_version": 2,
+            "thresholds": {
+                "RIG:mse": {
+                    "equipment_id": "RIG",
+                    "sensor_id": "mse",
+                    "composite_id": "RIG:mse",
+                    "baseline_mean": 35000.0,
+                    "baseline_std": 5000.0,
+                    "warning_sigma": 3.0,
+                    "critical_sigma": 5.0,
+                    "locked": true,
+                    "locked_timestamp": 1000,
+                    "sample_count": 150,
+                    "min_value": 25000.0,
+                    "max_value": 45000.0
+                }
+            }
+        });
+
+        let tmp = std::env::temp_dir().join("test_baseline_v2_migration.json");
+        std::fs::write(&tmp, serde_json::to_string_pretty(&v2_state).unwrap()).unwrap();
+
+        let manager = ThresholdManager::load_from_file(&tmp);
+        assert!(manager.is_some(), "Should load v2 state file");
+        let manager = manager.unwrap();
+        assert_eq!(manager.schema_version, SCHEMA_VERSION);
+        assert!(manager.is_locked("RIG", "mse"));
+        assert!(
+            manager.formation_thresholds.is_empty(),
+            "v2 should have no formation thresholds"
+        );
+
+        std::fs::remove_file(&tmp).ok();
     }
 }

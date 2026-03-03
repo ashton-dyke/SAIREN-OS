@@ -204,6 +204,8 @@ pub struct PipelineCoordinator {
     alerted_boundaries: HashSet<String>,
     /// Active damping feedback monitor state
     damping_monitor: DampingMonitorState,
+    /// Proactive damping recipe (set on formation transition, cleared on next transition)
+    proactive_damping: Option<super::state::ProactiveDamping>,
 }
 
 impl PipelineCoordinator {
@@ -242,6 +244,7 @@ impl PipelineCoordinator {
             depth_tracker: crate::acquisition::wits_parser::DepthContinuityTracker::new(),
             alerted_boundaries: HashSet::new(),
             damping_monitor: DampingMonitorState::Idle { last_outcome: None },
+            proactive_damping: None,
         }
     }
 
@@ -291,6 +294,7 @@ impl PipelineCoordinator {
             depth_tracker: crate::acquisition::wits_parser::DepthContinuityTracker::new(),
             alerted_boundaries: HashSet::new(),
             damping_monitor: DampingMonitorState::Idle { last_outcome: None },
+            proactive_damping: None,
         }
     }
 
@@ -354,6 +358,13 @@ impl PipelineCoordinator {
             .current_formation_context(packet.bit_depth)
             .map(|f| (packet.bit_depth - f.depth_top_ft, f.hardness));
 
+        // Set current formation name on tactical agent for formation-aware baselines
+        let current_formation_name = self
+            .current_formation_context(packet.bit_depth)
+            .map(|f| f.name.clone());
+        self.tactical_agent
+            .set_current_formation(current_formation_name);
+
         // PHASE 2-3: Tactical Agent (Basic Physics + Decision)
         let has_active_advisory = self.latest_advisory.is_some();
         let (ticket_opt, mut metrics, history_entry) =
@@ -377,6 +388,19 @@ impl PipelineCoordinator {
                 // Clear lookahead alert for the formation we just entered
                 // (allow future re-alert if driller trips out and back)
                 self.alerted_boundaries.remove(&current_name);
+
+                // Look up proactive damping recipe for the new formation
+                self.proactive_damping =
+                    crate::storage::damping_recipes::best_recipe(&current_name)
+                        .filter(|r| r.cv_reduction_pct > 20.0)
+                        .map(|r| super::state::ProactiveDamping {
+                            formation_name: r.formation_name,
+                            recommended_wob_change_pct: r.wob_change_pct,
+                            recommended_rpm_change_pct: r.rpm_change_pct,
+                            historical_cv_reduction_pct: r.cv_reduction_pct,
+                            source_depth_ft: r.depth_ft,
+                            recorded_at: r.recorded_at,
+                        });
             }
             metrics.current_formation = Some(current_name);
             metrics.formation_depth_in_ft = Some(depth_into);
@@ -1425,6 +1449,23 @@ impl PipelineCoordinator {
             .as_ref()?
             .formation_at_depth(depth_ft)
             .cloned()
+    }
+
+    /// Get formation hardness at a given depth, if available.
+    pub fn formation_hardness_at_depth(&self, depth_ft: f64) -> Option<f64> {
+        self.current_formation_context(depth_ft)
+            .map(|f| f.hardness)
+    }
+
+    /// Get formation pore pressure and fracture gradient at depth (ppg).
+    pub fn current_formation_pressures(&self, depth_ft: f64) -> Option<(f64, f64)> {
+        self.current_formation_context(depth_ft)
+            .map(|f| (f.pore_pressure_ppg, f.fracture_gradient_ppg))
+    }
+
+    /// Get the current proactive damping recommendation (if any).
+    pub fn proactive_damping(&self) -> Option<&super::state::ProactiveDamping> {
+        self.proactive_damping.as_ref()
     }
 
     /// Get a reference to the tactical agent

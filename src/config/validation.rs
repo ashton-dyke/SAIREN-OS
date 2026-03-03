@@ -158,6 +158,14 @@ pub fn known_config_keys() -> HashSet<&'static str> {
         "ensemble_weights.hydraulic",
         "ensemble_weights.well_control",
         "ensemble_weights.formation",
+        "ensemble_weights.stuck_pipe",
+        // [trip_parameters]
+        "trip_parameters",
+        "trip_parameters.pipe_od_inches",
+        "trip_parameters.pipe_id_inches",
+        "trip_parameters.hole_diameter_inches",
+        "trip_parameters.plastic_viscosity_cp",
+        "trip_parameters.yield_point_lbf_100sqft",
         // [physics]
         "physics",
         "physics.formation_hardness_base_psi",

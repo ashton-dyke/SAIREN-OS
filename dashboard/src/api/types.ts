@@ -81,6 +81,7 @@ export interface SpecialistVotesV2 {
   hydraulic: string;
   well_control: string;
   formation: string;
+  stuck_pipe: string;
 }
 
 export interface VerificationV2 {
@@ -220,12 +221,92 @@ export interface LookaheadStatus {
   offset_notes: string | null;
 }
 
+// Swab/surge estimation
+export interface SwabSurgeEstimate {
+  trip_speed_ft_min: number;
+  pressure_change_psi: number;
+  equivalent_mud_weight_ppg: number;
+  margin_to_pore_pressure_ppg: number;
+  margin_to_frac_gradient_ppg: number;
+  risk_level: 'Safe' | 'Warning' | 'Critical';
+}
+
+// Shift handover report
+export interface HandoverReport {
+  generated_at: string;
+  shift_hours: number;
+  well_name: string;
+  depth_start_ft: number;
+  depth_end_ft: number;
+  footage_drilled_ft: number;
+  current_formation: string | null;
+  advisory_summary: {
+    total: number;
+    verified: number;
+    rejected: number;
+    peak_severity: string;
+  };
+  parameter_summary: {
+    avg_rop: number;
+    min_rop: number;
+    max_rop: number;
+    avg_wob: number;
+    avg_rpm: number;
+    avg_torque: number;
+    avg_mse_efficiency: number | null;
+  };
+  acknowledgments_in_period: number;
+  packets_processed: number;
+  has_drilling_data: boolean;
+}
+
 // Formation context types
 export interface FormationContext {
   current: CurrentFormation | null;
   next_boundary: NextBoundary | null;
   upcoming: UpcomingFormation[];
   target_depth_ft: number | null;
+  cfc_detection: CfcDetection | null;
+  connection_gas: ConnectionGasEvent[];
+  connection_gas_trending_up: boolean;
+  bit_wear: BitWearStatus | null;
+  proactive_damping: ProactiveDamping | null;
+}
+
+export interface ProactiveDamping {
+  formation_name: string;
+  recommended_wob_change_pct: number;
+  recommended_rpm_change_pct: number;
+  historical_cv_reduction_pct: number;
+  source_depth_ft: number;
+  recorded_at: number;
+}
+
+export interface CfcDetection {
+  last_transition_depth_ft: number;
+  last_transition_timestamp: number;
+  surprised_features: string[];
+  /**
+   * Depth offset between actual CfC-detected boundary and prognosis boundary.
+   * Positive = actual boundary deeper than prognosis, Negative = shallower.
+   */
+  depth_offset_from_prognosis_ft: number;
+}
+
+export interface ConnectionGasEvent {
+  timestamp: number;
+  depth_ft: number;
+  pre_gas: number;
+  peak_gas: number;
+  post_gas: number;
+  delta: number;
+  above_background: number;
+}
+
+export interface BitWearStatus {
+  wear_index: number;
+  advisory: string | null;
+  buckets_tracked: number;
 }
 
 export interface CurrentFormation {

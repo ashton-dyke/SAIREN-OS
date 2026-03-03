@@ -11,6 +11,8 @@ import type {
   ThresholdSuggestion,
   LookaheadStatus,
   FormationContext,
+  SwabSurgeEstimate,
+  HandoverReport,
 } from './types';
 
 const BASE = '/api/v2';
@@ -70,4 +72,16 @@ export async function fetchLookaheadStatus(): Promise<LookaheadStatus> {
 
 export async function fetchFormationContext(): Promise<FormationContext> {
   return fetchJson<FormationContext>(`${BASE}/formation/context`);
+}
+
+export async function fetchSwabSurge(): Promise<SwabSurgeEstimate | null> {
+  const resp = await fetch(`${BASE}/trip/swab-surge`);
+  if (resp.status === 204) return null;
+  if (!resp.ok) throw new Error(`API ${resp.status}: ${resp.statusText}`);
+  const envelope: ApiEnvelope<SwabSurgeEstimate> = await resp.json();
+  return envelope.data;
+}
+
+export async function fetchHandoverReport(hours = 12): Promise<HandoverReport> {
+  return fetchJson<HandoverReport>(`${BASE}/shift/handover?hours=${hours}`);
 }

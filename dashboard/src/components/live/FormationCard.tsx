@@ -1,6 +1,6 @@
 import { fetchFormationContext } from '../../api/client';
 import { usePolling } from '../../hooks/usePolling';
-import type { FormationContext } from '../../api/types';
+import type { FormationContext, CfcDetection, BitWearStatus } from '../../api/types';
 
 export function FormationCard() {
   const { data } = usePolling(fetchFormationContext, 10_000);
@@ -24,7 +24,7 @@ export function FormationCard() {
 
       <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
         {/* Current Formation */}
-        <CurrentFormationSection current={data.current} />
+        <CurrentFormationSection current={data.current} cfcDetection={data.cfc_detection} />
 
         {/* Next Boundary */}
         {data.next_boundary ? (
@@ -34,6 +34,30 @@ export function FormationCard() {
         )}
       </div>
 
+      {/* Bit wear indicator */}
+      {data.bit_wear && (
+        <BitWearIndicator wear={data.bit_wear} />
+      )}
+
+      {/* Proactive damping recipe */}
+      {data.proactive_damping && (
+        <div className="text-xs text-accent-green border border-accent-green/30 rounded px-2 py-1">
+          Proven recipe: WOB {(data.proactive_damping.recommended_wob_change_pct ?? 0) > 0 ? '+' : ''}
+          {(data.proactive_damping.recommended_wob_change_pct ?? 0).toFixed(0)}%, RPM{' '}
+          {(data.proactive_damping.recommended_rpm_change_pct ?? 0) > 0 ? '+' : ''}
+          {(data.proactive_damping.recommended_rpm_change_pct ?? 0).toFixed(0)}%
+          {' '}(reduced CV by {(data.proactive_damping.historical_cv_reduction_pct ?? 0).toFixed(0)}%)
+        </div>
+      )}
+
+      {/* Connection gas trending warning */}
+      {data.connection_gas_trending_up && (
+        <div className="text-xs text-accent-yellow border border-accent-yellow/30 rounded px-2 py-1">
+          <span className="mr-1">&#9888;</span>
+          Connection gas trending up ({data.connection_gas.length} events)
+        </div>
+      )}
+
       {/* Upcoming formations + TD */}
       {(data.upcoming.length > 0 || data.target_depth_ft) && (
         <UpcomingStrip upcoming={data.upcoming} targetDepth={data.target_depth_ft} />
@@ -42,7 +66,13 @@ export function FormationCard() {
   );
 }
 
-function CurrentFormationSection({ current }: { current: NonNullable<FormationContext['current']> }) {
+function CurrentFormationSection({
+  current,
+  cfcDetection,
+}: {
+  current: NonNullable<FormationContext['current']>;
+  cfcDetection: FormationContext['cfc_detection'];
+}) {
   const pct = current.formation_thickness_ft > 0
     ? (current.depth_in_formation_ft / current.formation_thickness_ft) * 100
     : 0;
@@ -54,6 +84,9 @@ function CurrentFormationSection({ current }: { current: NonNullable<FormationCo
         {current.name}{' '}
         <span className="text-text-muted font-normal">({current.lithology})</span>
       </div>
+      {cfcDetection && (
+        <CfcAnnotation detection={cfcDetection} />
+      )}
       <div className="grid grid-cols-2 gap-x-3 gap-y-0.5 text-xs">
         <div className="flex justify-between">
           <span className="text-text-secondary">Hardness</span>
@@ -155,6 +188,51 @@ function NextBoundarySection({ boundary }: { boundary: NonNullable<FormationCont
           {boundary.offset_notes}
         </div>
       )}
+    </div>
+  );
+}
+
+function CfcAnnotation({ detection }: { detection: CfcDetection }) {
+  const offset = Math.abs(detection.depth_offset_from_prognosis_ft);
+  const color = offset < 20
+    ? 'text-accent-green'
+    : offset < 50
+      ? 'text-accent-yellow'
+      : 'text-accent-red';
+
+  return (
+    <div className={`text-[10px] ${color}`}>
+      CfC boundary at {detection.last_transition_depth_ft.toFixed(0)} ft
+      {' '}({detection.depth_offset_from_prognosis_ft > 0 ? '+' : ''}
+      {detection.depth_offset_from_prognosis_ft.toFixed(1)} ft from prognosis)
+    </div>
+  );
+}
+
+function BitWearIndicator({ wear }: { wear: BitWearStatus }) {
+  const pct = Math.min(Math.max((wear.wear_index ?? 0) * 100, 0), 100);
+  const color = pct > 80
+    ? 'bg-accent-red'
+    : pct > 50
+      ? 'bg-accent-yellow'
+      : pct > 30
+        ? 'bg-accent-blue'
+        : 'bg-accent-green';
+
+  return (
+    <div className="text-xs space-y-0.5">
+      <div className="flex items-center justify-between">
+        <span className="text-text-secondary">Bit Wear</span>
+        <span className="font-mono text-text-primary">
+          {pct.toFixed(0)}%
+          {wear.advisory && (
+            <span className="text-accent-yellow ml-1">- {wear.advisory}</span>
+          )}
+        </span>
+      </div>
+      <div className="w-full h-1 bg-bg-hover rounded-full overflow-hidden">
+        <div className={`h-full ${color} rounded-full transition-all duration-500`} style={{ width: `${pct}%` }} />
+      </div>
     </div>
   );
 }

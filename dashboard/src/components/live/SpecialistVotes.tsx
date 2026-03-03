@@ -40,6 +40,7 @@ export function SpecialistVotes({ votes }: Props) {
         <VoteChip label="Hydraulic" vote={votes.hydraulic} />
         <VoteChip label="Well Control" vote={votes.well_control} />
         <VoteChip label="Formation" vote={votes.formation} />
+        <VoteChip label="Stuck Pipe" vote={votes.stuck_pipe} />
       </div>
     </div>
   );

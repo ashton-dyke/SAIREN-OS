@@ -1,0 +1,243 @@
+# Formation Prognosis — Volve Field, Well F-5
+# North Sea, Norwegian Continental Shelf, Block 15/9
+# Depth range: 0–4643 ft (0–1415 m)
+
+[well]
+name = "15/9-F-5"
+field = "Volve"
+spud_date = "2007-12-17"
+target_depth_ft = 4643.0
+coordinate_system = "ED50 UTM Zone 31N"
+
+# --- Formation intervals (sorted by depth) ---
+
+[[formation]]
+name = "Nordland"
+depth_top_ft = 0.0
+depth_base_ft = 2625.0
+lithology = "Clay"
+hardness = 2.0
+drillability = "Easy"
+pore_pressure_ppg = 8.6
+fracture_gradient_ppg = 12.5
+hazards = ["Shallow gas pockets"]
+
+[formation.parameters]
+mud_weight_ppg = 9.0
+bit_type = "PDC"
+
+[formation.parameters.wob_klbs]
+min = 5.0
+optimal = 12.0
+max = 20.0
+
+[formation.parameters.rpm]
+min = 60.0
+optimal = 120.0
+max = 180.0
+
+[formation.parameters.flow_gpm]
+min = 400.0
+optimal = 600.0
+max = 800.0
+
+[formation.offset_performance]
+wells = ["15/9-F-1", "15/9-F-4"]
+avg_rop_ft_hr = 80.0
+best_rop_ft_hr = 150.0
+avg_mse_psi = 8000.0
+notes = "Soft clay, high ROP achievable"
+
+[formation.offset_performance.best_params]
+wob_klbs = 12.0
+rpm = 120.0
+
+[[formation]]
+name = "Hordaland"
+depth_top_ft = 2625.0
+depth_base_ft = 3445.0
+lithology = "Shale/Marl"
+hardness = 4.0
+drillability = "Moderate"
+pore_pressure_ppg = 8.8
+fracture_gradient_ppg = 13.5
+hazards = ["Reactive shale", "Washouts"]
+
+[formation.parameters]
+mud_weight_ppg = 9.5
+bit_type = "PDC"
+
+[formation.parameters.wob_klbs]
+min = 8.0
+optimal = 18.0
+max = 28.0
+
+[formation.parameters.rpm]
+min = 60.0
+optimal = 100.0
+max = 150.0
+
+[formation.parameters.flow_gpm]
+min = 500.0
+optimal = 700.0
+max = 900.0
+
+[formation.offset_performance]
+wells = ["15/9-F-1", "15/9-F-4"]
+avg_rop_ft_hr = 45.0
+best_rop_ft_hr = 80.0
+avg_mse_psi = 18000.0
+notes = "Inhibitive mud recommended for shale stability"
+
+[formation.offset_performance.best_params]
+wob_klbs = 18.0
+rpm = 100.0
+
+[[formation]]
+name = "Rogaland"
+depth_top_ft = 3445.0
+depth_base_ft = 3940.0
+lithology = "Limestone/Marl"
+hardness = 5.5
+drillability = "Moderate-Hard"
+pore_pressure_ppg = 9.0
+fracture_gradient_ppg = 14.0
+hazards = ["Tight hole", "Differential sticking"]
+
+[formation.parameters]
+mud_weight_ppg = 10.0
+bit_type = "PDC"
+
+[formation.parameters.wob_klbs]
+min = 10.0
+optimal = 22.0
+max = 35.0
+
+[formation.parameters.rpm]
+min = 50.0
+optimal = 90.0
+max = 130.0
+
+[formation.parameters.flow_gpm]
+min = 500.0
+optimal = 700.0
+max = 900.0
+
+[formation.offset_performance]
+wells = ["15/9-F-1", "15/9-F-4"]
+avg_rop_ft_hr = 25.0
+best_rop_ft_hr = 50.0
+avg_mse_psi = 25000.0
+notes = "Monitor for differential sticking in permeable limestone"
+
+[formation.offset_performance.best_params]
+wob_klbs = 22.0
+rpm = 90.0
+
+[[formation]]
+name = "Shetland"
+depth_top_ft = 3940.0
+depth_base_ft = 4265.0
+lithology = "Chalk/Marl"
+hardness = 6.0
+drillability = "Hard"
+pore_pressure_ppg = 9.2
+fracture_gradient_ppg = 13.8
+hazards = ["Lost circulation in fractured chalk"]
+
+[formation.parameters]
+mud_weight_ppg = 10.2
+bit_type = "PDC"
+
+[formation.parameters.wob_klbs]
+min = 12.0
+optimal = 25.0
+max = 38.0
+
+[formation.parameters.rpm]
+min = 40.0
+optimal = 80.0
+max = 120.0
+
+[formation.parameters.flow_gpm]
+min = 450.0
+optimal = 650.0
+max = 850.0
+
+[formation.offset_performance]
+wells = ["15/9-F-1", "15/9-F-4"]
+avg_rop_ft_hr = 15.0
+best_rop_ft_hr = 30.0
+avg_mse_psi = 35000.0
+notes = "LCM on standby for fractured chalk intervals"
+
+[formation.offset_performance.best_params]
+wob_klbs = 25.0
+rpm = 80.0
+
+[[formation]]
+name = "Hugin"
+depth_top_ft = 4265.0
+depth_base_ft = 4643.0
+lithology = "Sandstone"
+hardness = 4.5
+drillability = "Moderate"
+pore_pressure_ppg = 9.5
+fracture_gradient_ppg = 14.5
+hazards = ["Reservoir section", "Potential hydrocarbon influx"]
+
+[formation.parameters]
+mud_weight_ppg = 10.5
+bit_type = "PDC"
+
+[formation.parameters.wob_klbs]
+min = 10.0
+optimal = 20.0
+max = 30.0
+
+[formation.parameters.rpm]
+min = 50.0
+optimal = 100.0
+max = 140.0
+
+[formation.parameters.flow_gpm]
+min = 400.0
+optimal = 600.0
+max = 800.0
+
+[formation.offset_performance]
+wells = ["15/9-F-1", "15/9-F-4"]
+avg_rop_ft_hr = 30.0
+best_rop_ft_hr = 55.0
+avg_mse_psi = 20000.0
+notes = "Reservoir target — control ROP for formation evaluation"
+
+[formation.offset_performance.best_params]
+wob_klbs = 20.0
+rpm = 100.0
+
+# --- Casing program ---
+
+[[casing]]
+name = "Conductor"
+depth_ft = 500.0
+size_in = 30.0
+cement_top_ft = 0.0
+
+[[casing]]
+name = "Surface"
+depth_ft = 1640.0
+size_in = 20.0
+cement_top_ft = 0.0
+
+[[casing]]
+name = "Intermediate"
+depth_ft = 3445.0
+size_in = 13.375
+cement_top_ft = 2000.0
+
+[[casing]]
+name = "Production"
+depth_ft = 4265.0
+size_in = 9.625
+cement_top_ft = 3200.0

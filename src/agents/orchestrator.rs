@@ -49,10 +49,19 @@ struct RegimeProfile {
     hydraulic_mult: f64,
     well_control_mult: f64,
     formation_mult: f64,
+    stuck_pipe_mult: f64,
     label: &'static str,
 }
 
 /// Four regime profiles indexed by regime_id (0–3).
+///
+/// Regime weight adjustments reflect operational physics:
+/// - **Hydraulic-stress** (regime 1) boosts `stuck_pipe_mult` because elevated SPP/ECD
+///   patterns indicate annular backpressure, which increases pack-off risk.
+/// - **High-WOB** (regime 2) boosts `stuck_pipe_mult` because excessive weight on bit
+///   in tight formations promotes tight hole conditions and differential sticking.
+/// - Both adjustments are multiplicative and re-normalised so severity thresholds
+///   remain calibrated (see `apply_regime_weights`).
 const REGIME_PROFILES: [RegimeProfile; 4] = [
     // 0: Baseline — no adjustment (clusterer not yet calibrated, or normal state)
     RegimeProfile {
@@ -60,6 +69,7 @@ const REGIME_PROFILES: [RegimeProfile; 4] = [
         hydraulic_mult: 1.0,
         well_control_mult: 1.0,
         formation_mult: 1.0,
+        stuck_pipe_mult: 1.0,
         label: "baseline",
     },
     // 1: Hydraulic-stress — elevated SPP/ECD motor patterns
@@ -68,6 +78,7 @@ const REGIME_PROFILES: [RegimeProfile; 4] = [
         hydraulic_mult: 1.4,
         well_control_mult: 1.0,
         formation_mult: 0.8,
+        stuck_pipe_mult: 1.3,
         label: "hydraulic-stress",
     },
     // 2: High-WOB/MSE — heavy-WOB efficiency-focused drilling
@@ -76,6 +87,7 @@ const REGIME_PROFILES: [RegimeProfile; 4] = [
         hydraulic_mult: 0.8,
         well_control_mult: 0.9,
         formation_mult: 1.1,
+        stuck_pipe_mult: 1.4,
         label: "high-wob",
     },
     // 3: Unstable/kick — erratic motor outputs, potential well-control event
@@ -84,6 +96,7 @@ const REGIME_PROFILES: [RegimeProfile; 4] = [
         hydraulic_mult: 1.0,
         well_control_mult: 1.5,
         formation_mult: 0.8,
+        stuck_pipe_mult: 0.8,
         label: "unstable",
     },
 ];
@@ -100,6 +113,7 @@ fn apply_regime_weights(votes: &mut [SpecialistVote], regime_id: u8) -> &'static
             "Hydraulic" => profile.hydraulic_mult,
             "WellControl" => profile.well_control_mult,
             "Formation" => profile.formation_mult,
+            "StuckPipe" => profile.stuck_pipe_mult,
             _ => 1.0,
         };
         vote.weight *= mult;
@@ -351,7 +365,7 @@ mod tests {
 
         let result = orchestrator.vote(&ticket, &physics, 0);
 
-        assert_eq!(result.votes.len(), 4);
+        assert_eq!(result.votes.len(), 5);
         assert!(result.efficiency_score > 0 && result.efficiency_score <= 100);
     }
 
@@ -384,12 +398,14 @@ mod tests {
 
         let result = orchestrator.vote(&ticket, &physics, 0);
 
-        // Verify all 4 specialists voted
+        // Verify all 5 specialists voted
+        assert_eq!(result.votes.len(), 5);
         let specialists: Vec<&str> = result.votes.iter().map(|v| v.specialist.as_str()).collect();
         assert!(specialists.contains(&"MSE"));
         assert!(specialists.contains(&"Hydraulic"));
         assert!(specialists.contains(&"WellControl"));
         assert!(specialists.contains(&"Formation"));
+        assert!(specialists.contains(&"StuckPipe"));
 
         // Verify weights sum to 1.0
         let total_weight: f64 = result.votes.iter().map(|v| v.weight).sum();

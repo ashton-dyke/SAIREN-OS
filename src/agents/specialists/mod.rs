@@ -13,11 +13,13 @@
 pub mod formation;
 pub mod hydraulic;
 pub mod mse;
+pub mod stuck_pipe;
 pub mod well_control;
 
 pub use formation::FormationSpecialist;
 pub use hydraulic::HydraulicSpecialist;
 pub use mse::MseSpecialist;
+pub use stuck_pipe::StuckPipeSpecialist;
 pub use well_control::WellControlSpecialist;
 
 use crate::types::{AdvisoryTicket, DrillingPhysicsReport, SpecialistVote};
@@ -34,12 +36,13 @@ pub trait Specialist: Send + Sync {
     fn evaluate(&self, ticket: &AdvisoryTicket, physics: &DrillingPhysicsReport) -> SpecialistVote;
 }
 
-/// Create the default set of 4 drilling specialists
+/// Create the default set of 5 drilling specialists
 pub fn default_specialists() -> Vec<Box<dyn Specialist>> {
     vec![
         Box::new(MseSpecialist),
         Box::new(HydraulicSpecialist),
         Box::new(WellControlSpecialist),
         Box::new(FormationSpecialist),
+        Box::new(StuckPipeSpecialist),
     ]
 }

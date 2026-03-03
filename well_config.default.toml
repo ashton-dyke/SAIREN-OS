@@ -21,7 +21,6 @@
 name       = "DEFAULT"
 field      = ""
 rig        = ""
-operator   = ""
 # Bit diameter affects MSE calculation and rig state classification
 bit_diameter_inches = 8.5
 
@@ -53,7 +52,6 @@ h2s_critical_ppm            = 20.0   # H2S critical (ppm)
 # Lower percentages = more wasted energy.
 
 [thresholds.mse]
-efficiency_optimal_percent = 85.0    # Above this = optimal drilling
 efficiency_warning_percent = 70.0    # Below this = optimisation advisory
 efficiency_poor_percent    = 50.0    # Below this = poor efficiency
 
@@ -202,13 +200,14 @@ sustained_reset_normal_count    = 500   # Non-anomalous drilling packets to rese
 # ==============================================================================
 # ENSEMBLE VOTING WEIGHTS
 # ==============================================================================
-# Weights for the 4-specialist voting system. Must sum to ~1.0.
+# Weights for the 5-specialist voting system. Must sum to ~1.0.
 
 [ensemble_weights]
-mse          = 0.25   # MSE / drilling efficiency specialist
-hydraulic    = 0.25   # Hydraulic specialist
+mse          = 0.20   # MSE / drilling efficiency specialist
+hydraulic    = 0.20   # Hydraulic specialist
 well_control = 0.30   # Well control specialist (highest for safety)
-formation    = 0.20   # Formation specialist
+formation    = 0.15   # Formation specialist
+stuck_pipe   = 0.15   # Stuck pipe specialist
 
 
 # ==============================================================================

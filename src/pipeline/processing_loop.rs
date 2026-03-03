@@ -164,6 +164,88 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
                 // Store damping monitor snapshot for API visibility
                 state.damping_monitor_snapshot = Some(self.coordinator.damping_monitor_snapshot());
 
+                // Update connection gas tracker with rig state from latest metrics
+                let rig_state = state
+                    .latest_drilling_metrics
+                    .as_ref()
+                    .map(|m| m.state)
+                    .unwrap_or_default();
+                state.connection_gas_tracker.update(&packet, rig_state);
+
+                // Update swab/surge estimation during tripping
+                if rig_state == crate::types::RigState::TrippingIn
+                    || rig_state == crate::types::RigState::TrippingOut
+                {
+                    let is_tripping_in = rig_state == crate::types::RigState::TrippingIn;
+                    // Estimate trip speed from depth change between packets (1 Hz assumed)
+                    let trip_speed = {
+                        let history = &state.wits_history;
+                        if history.len() >= 2 {
+                            let prev = &history[history.len() - 2];
+                            let dt = (packet.timestamp as f64 - prev.timestamp as f64).max(1.0);
+                            ((packet.bit_depth - prev.bit_depth).abs() / dt * 60.0).min(150.0)
+                        } else {
+                            0.0
+                        }
+                    };
+
+                    if trip_speed > 0.5 {
+                        let cfg = crate::config::get();
+                        let trip = &cfg.trip_parameters;
+
+                        // Hole diameter: auto = use bit_diameter_inches as fallback
+                        let hole_dia = if trip.hole_diameter_inches > 0.0 {
+                            trip.hole_diameter_inches
+                        } else {
+                            warn!(
+                                bit_dia = cfg.well.bit_diameter_inches,
+                                "hole_diameter_inches not set; using bit_diameter_inches as fallback"
+                            );
+                            cfg.well.bit_diameter_inches
+                        };
+
+                        // Formation pressures from prognosis or defaults
+                        let (pp, fg) = self
+                            .coordinator
+                            .current_formation_pressures(packet.bit_depth)
+                            .unwrap_or((9.0, 16.0));
+
+                        let estimate = crate::physics_engine::swab_surge::estimate_swab_surge(
+                            trip_speed,
+                            packet.bit_depth,
+                            packet.mud_weight_in,
+                            pp,
+                            fg,
+                            trip.pipe_od_inches,
+                            hole_dia,
+                            trip.plastic_viscosity_cp,
+                            trip.yield_point_lbf_100sqft,
+                            is_tripping_in,
+                        );
+                        state.latest_swab_surge = Some(estimate);
+                    }
+                } else {
+                    // Clear swab/surge when not tripping
+                    state.latest_swab_surge = None;
+                }
+
+                // Update bit wear tracker during active drilling
+                if rig_state == crate::types::RigState::Drilling
+                    || rig_state == crate::types::RigState::Reaming
+                {
+                    let hardness = self
+                        .coordinator
+                        .formation_hardness_at_depth(packet.bit_depth)
+                        .unwrap_or(5.0);
+                    state.bit_wear_tracker.update(
+                        packet.bit_depth,
+                        packet.mse,
+                        packet.wob,
+                        packet.rpm,
+                        hardness,
+                    );
+                }
+
                 // Store CfC formation transition event (if any)
                 if let Some(event) = self
                     .coordinator
@@ -177,7 +259,14 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
                         state.formation_transition_timestamps.drain(..excess);
                     }
                     state.latest_formation_transition = Some(event.clone());
+
+                    // Notify bit wear tracker of formation change so it restarts
+                    // its comparison window with new-formation hardness
+                    state.bit_wear_tracker.notify_formation_change();
                 }
+
+                // Proactive damping recipe (set on formation transition by coordinator)
+                state.proactive_damping = self.coordinator.proactive_damping().cloned();
 
                 // Any remaining mode-specific hooks (no-op for () — see PostProcessHooks)
                 self.hooks

@@ -357,6 +357,8 @@ pub struct TacticalAgent {
     depth_ahead: Option<crate::cfc::depth_ahead::DepthAheadNetwork>,
     /// Latest depth-ahead result (only during drilling/reaming)
     depth_ahead_result: Option<crate::cfc::depth_ahead::DepthAheadResult>,
+    /// Current formation name (set by coordinator for formation-aware baselines)
+    current_formation_name: Option<String>,
 }
 
 impl std::fmt::Debug for TacticalAgent {
@@ -404,6 +406,7 @@ impl TacticalAgent {
             pit_rate_consecutive_count: 0,
             depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
             depth_ahead_result: None,
+            current_formation_name: None,
         }
     }
 
@@ -440,6 +443,7 @@ impl TacticalAgent {
             pit_rate_consecutive_count: 0,
             depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
             depth_ahead_result: None,
+            current_formation_name: None,
         }
     }
 
@@ -520,7 +524,43 @@ impl TacticalAgent {
             pit_rate_consecutive_count: 0,
             depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
             depth_ahead_result: None,
+            current_formation_name: None,
         }
+    }
+
+    /// Set the current formation name for formation-aware baseline learning.
+    /// Called by the coordinator before processing each packet.
+    ///
+    /// When the formation changes and the agent is in `DynamicThresholds` mode,
+    /// baseline overrides are recomputed using formation-specific baselines
+    /// (if available) to tighten anomaly detection for the new formation.
+    pub fn set_current_formation(&mut self, name: Option<String>) {
+        let changed = self.current_formation_name != name;
+        self.current_formation_name = name;
+        if changed && self.mode == TacticalMode::DynamicThresholds {
+            self.recompute_formation_overrides();
+        }
+    }
+
+    /// Recompute baseline overrides using formation-specific baselines when
+    /// available, falling back to global baselines otherwise.
+    fn recompute_formation_overrides(&mut self) {
+        let Some(ref manager) = self.threshold_manager else {
+            return;
+        };
+        let mgr = match manager.read() {
+            Ok(m) => m,
+            Err(e) => {
+                warn!(error = %e, "Failed to read ThresholdManager for formation override recompute");
+                return;
+            }
+        };
+        let overrides = if let Some(ref formation) = self.current_formation_name {
+            mgr.compute_overrides_with_formation(&self.equipment_id, formation)
+        } else {
+            mgr.compute_overrides(&self.equipment_id)
+        };
+        self.baseline_overrides = Some(overrides);
     }
 
     /// Get current operating mode
@@ -803,6 +843,9 @@ impl TacticalAgent {
     /// Feed samples to the baseline accumulator during learning phase.
     /// Only feeds during active drilling/reaming states so baselines represent
     /// actual drilling conditions, not idle/connection noise.
+    ///
+    /// When `current_formation_name` is set, also feeds formation-specific
+    /// accumulators via `add_sample_with_formation()`.
     fn feed_baseline_samples(&mut self, packet: &WitsPacket) {
         // Only learn from drilling/reaming states — baselines trained on idle data
         // (zero WOB, zero torque, zero ROP) produce meaningless thresholds.
@@ -823,45 +866,34 @@ impl TacticalAgent {
                 }
             };
             let timestamp = packet.timestamp;
+            let formation = self.current_formation_name.as_deref();
+
+            // Helper macro: feed global + formation-specific when available
+            macro_rules! feed_metric {
+                ($metric:expr, $value:expr) => {
+                    if let Some(fm) = formation {
+                        mgr.add_sample_with_formation(
+                            &self.equipment_id, $metric, $value, fm, timestamp,
+                        );
+                    } else {
+                        mgr.add_sample(&self.equipment_id, $metric, $value, timestamp);
+                    }
+                };
+            }
 
             // Feed all WITS metrics for baseline learning
-            mgr.add_sample(&self.equipment_id, wits_metrics::MSE, packet.mse, timestamp);
-            mgr.add_sample(
-                &self.equipment_id,
-                wits_metrics::D_EXPONENT,
-                packet.d_exponent,
-                timestamp,
-            );
-            mgr.add_sample(&self.equipment_id, wits_metrics::DXC, packet.dxc, timestamp);
-            mgr.add_sample(
-                &self.equipment_id,
-                wits_metrics::FLOW_BALANCE,
-                packet.flow_balance(),
-                timestamp,
-            );
-            mgr.add_sample(&self.equipment_id, wits_metrics::SPP, packet.spp, timestamp);
-            mgr.add_sample(
-                &self.equipment_id,
-                wits_metrics::TORQUE,
-                packet.torque,
-                timestamp,
-            );
-            mgr.add_sample(&self.equipment_id, wits_metrics::ROP, packet.rop, timestamp);
-            mgr.add_sample(&self.equipment_id, wits_metrics::WOB, packet.wob, timestamp);
-            mgr.add_sample(&self.equipment_id, wits_metrics::RPM, packet.rpm, timestamp);
-            mgr.add_sample(&self.equipment_id, wits_metrics::ECD, packet.ecd, timestamp);
-            mgr.add_sample(
-                &self.equipment_id,
-                wits_metrics::PIT_VOLUME,
-                packet.pit_volume,
-                timestamp,
-            );
-            mgr.add_sample(
-                &self.equipment_id,
-                wits_metrics::GAS_UNITS,
-                packet.gas_units,
-                timestamp,
-            );
+            feed_metric!(wits_metrics::MSE, packet.mse);
+            feed_metric!(wits_metrics::D_EXPONENT, packet.d_exponent);
+            feed_metric!(wits_metrics::DXC, packet.dxc);
+            feed_metric!(wits_metrics::FLOW_BALANCE, packet.flow_balance());
+            feed_metric!(wits_metrics::SPP, packet.spp);
+            feed_metric!(wits_metrics::TORQUE, packet.torque);
+            feed_metric!(wits_metrics::ROP, packet.rop);
+            feed_metric!(wits_metrics::WOB, packet.wob);
+            feed_metric!(wits_metrics::RPM, packet.rpm);
+            feed_metric!(wits_metrics::ECD, packet.ecd);
+            feed_metric!(wits_metrics::PIT_VOLUME, packet.pit_volume);
+            feed_metric!(wits_metrics::GAS_UNITS, packet.gas_units);
         }
     }
 
@@ -2222,6 +2254,93 @@ mod tests {
             (progressive - 500.0).abs() < 0.01,
             "Should cap at 500ft, got {}",
             progressive
+        );
+    }
+
+    #[test]
+    fn test_set_current_formation_triggers_override_recompute() {
+        ensure_config();
+
+        // Create a ThresholdManager with all WITS baselines locked so the agent
+        // starts in DynamicThresholds mode.
+        let mut manager = ThresholdManager::new();
+        let equip = "test-rig";
+        // Lock all 12 WITS metrics required by all_wits_locked()
+        use crate::baseline::wits_metrics;
+        let all_sensors = [
+            wits_metrics::MSE,
+            wits_metrics::D_EXPONENT,
+            wits_metrics::DXC,
+            wits_metrics::FLOW_BALANCE,
+            wits_metrics::SPP,
+            wits_metrics::TORQUE,
+            wits_metrics::ROP,
+            wits_metrics::WOB,
+            wits_metrics::RPM,
+            wits_metrics::ECD,
+            wits_metrics::PIT_VOLUME,
+            wits_metrics::GAS_UNITS,
+        ];
+        for sensor in &all_sensors {
+            // Feed enough samples to lock (needs ≥ min_samples=100)
+            for i in 0..200 {
+                manager.add_sample(equip, sensor, 100.0 + (i as f64 * 0.01), i as u64);
+            }
+            // Actually lock each baseline
+            manager
+                .lock_baseline(equip, sensor, 200)
+                .expect("should lock baseline");
+        }
+
+        let tm = Arc::new(RwLock::new(manager));
+        let mut agent =
+            TacticalAgent::new_with_thresholds(equip, tm.clone(), false);
+
+        // Should have started in DynamicThresholds since all metrics are locked
+        assert_eq!(agent.mode(), TacticalMode::DynamicThresholds);
+
+        // Initially, overrides may be None (no persisted overrides on fresh manager)
+        assert!(
+            agent.baseline_overrides.is_none(),
+            "Fresh manager has no persisted overrides"
+        );
+
+        // Set a formation name — this should trigger recompute_formation_overrides
+        agent.set_current_formation(Some("Wolfcamp".to_string()));
+        assert_eq!(
+            agent.current_formation_name,
+            Some("Wolfcamp".to_string())
+        );
+
+        // Overrides should now be Some (recomputed from locked baselines,
+        // falls back to global since no formation-specific baselines exist)
+        assert!(
+            agent.baseline_overrides.is_some(),
+            "Overrides should be computed after formation change"
+        );
+
+        // Setting the same formation again should NOT trigger recompute
+        // (changed == false). We verify by checking it doesn't panic or clear.
+        agent.set_current_formation(Some("Wolfcamp".to_string()));
+        assert!(agent.baseline_overrides.is_some());
+
+        // Changing to a different formation should trigger recompute again
+        agent.set_current_formation(Some("Spraberry".to_string()));
+        assert_eq!(
+            agent.current_formation_name,
+            Some("Spraberry".to_string())
+        );
+        assert!(
+            agent.baseline_overrides.is_some(),
+            "Overrides should be recomputed on formation change"
+        );
+
+        // Clearing formation (None) should also trigger recompute
+        agent.set_current_formation(None);
+        assert_eq!(agent.current_formation_name, None);
+        assert!(
+            agent.baseline_overrides.is_some(),
+            "Overrides should fall back to global when formation cleared"
         );
     }
 }

@@ -93,6 +93,10 @@ pub struct WellConfig {
     #[serde(default)]
     pub gossip: GossipConfig,
 
+    /// Trip parameters for swab/surge estimation
+    #[serde(default)]
+    pub trip_parameters: TripParameters,
+
     /// Formation tops table (depth -> formation name)
     #[serde(default)]
     pub formation_tops: Vec<FormationTop>,
@@ -113,6 +117,7 @@ impl Default for WellConfig {
             damping: DampingConfig::default(),
             mesh: MeshConfig::default(),
             gossip: GossipConfig::default(),
+            trip_parameters: TripParameters::default(),
             formation_tops: Vec::new(),
         }
     }
@@ -348,7 +353,7 @@ impl WellConfig {
 
         // Ensemble weights: should sum to ~1.0 (allow 0.95-1.05)
         let w = &self.ensemble_weights;
-        let weight_sum = w.mse + w.hydraulic + w.well_control + w.formation;
+        let weight_sum = w.mse + w.hydraulic + w.well_control + w.formation + w.stuck_pipe;
         if !(0.95..=1.05).contains(&weight_sum) {
             errors.push(format!(
                 "ensemble_weights must sum to ~1.0, got {:.2}",
@@ -387,6 +392,32 @@ impl WellConfig {
         }
         if p.confidence_full_window == 0 {
             errors.push("physics.confidence_full_window must be > 0".to_string());
+        }
+
+        // Trip parameters: pipe geometry and rheology
+        let tp = &self.trip_parameters;
+        if tp.pipe_od_inches <= 0.0 {
+            errors.push("trip_parameters.pipe_od_inches must be > 0".to_string());
+        }
+        if tp.pipe_id_inches <= 0.0 {
+            errors.push("trip_parameters.pipe_id_inches must be > 0".to_string());
+        } else if tp.pipe_id_inches >= tp.pipe_od_inches {
+            errors.push(format!(
+                "trip_parameters.pipe_id_inches ({:.3}) must be < pipe_od_inches ({:.3})",
+                tp.pipe_id_inches, tp.pipe_od_inches
+            ));
+        }
+        if tp.hole_diameter_inches > 0.0 && tp.hole_diameter_inches < tp.pipe_od_inches {
+            errors.push(format!(
+                "trip_parameters.hole_diameter_inches ({:.3}) must be >= pipe_od_inches ({:.3})",
+                tp.hole_diameter_inches, tp.pipe_od_inches
+            ));
+        }
+        if tp.plastic_viscosity_cp < 0.0 {
+            errors.push("trip_parameters.plastic_viscosity_cp must be >= 0".to_string());
+        }
+        if tp.yield_point_lbf_100sqft < 0.0 {
+            errors.push("trip_parameters.yield_point must be >= 0".to_string());
         }
 
         // Physical range validation
@@ -1444,19 +1475,26 @@ pub struct EnsembleWeightsConfig {
     /// Formation specialist weight.
     #[serde(default = "default_weight_formation")]
     pub formation: f64,
+
+    /// Stuck pipe specialist weight.
+    #[serde(default = "default_weight_stuck_pipe")]
+    pub stuck_pipe: f64,
 }
 
 fn default_weight_mse() -> f64 {
-    0.25
+    0.20
 }
 fn default_weight_hydraulic() -> f64 {
-    0.25
+    0.20
 }
 fn default_weight_well_control() -> f64 {
     0.30
 }
 fn default_weight_formation() -> f64 {
-    0.20
+    0.15
+}
+fn default_weight_stuck_pipe() -> f64 {
+    0.15
 }
 
 impl Default for EnsembleWeightsConfig {
@@ -1466,6 +1504,68 @@ impl Default for EnsembleWeightsConfig {
             hydraulic: default_weight_hydraulic(),
             well_control: default_weight_well_control(),
             formation: default_weight_formation(),
+            stuck_pipe: default_weight_stuck_pipe(),
+        }
+    }
+}
+
+// ============================================================================
+// Trip Parameters (Swab/Surge)
+// ============================================================================
+
+/// Wellbore geometry and rheology parameters for swab/surge estimation.
+///
+/// Used by all 5 specialists:
+/// - MSE (20%): Drilling efficiency analysis
+/// - Hydraulic (20%): SPP, flow, ECD margin
+/// - WellControl (30%): Kick/loss, gas, pit volume (safety-critical)
+/// - Formation (15%): D-exponent, torque trends
+/// - StuckPipe (15%): Mechanical sticking risk analysis
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TripParameters {
+    /// Drill pipe outer diameter (inches)
+    #[serde(default = "default_pipe_od")]
+    pub pipe_od_inches: f64,
+
+    /// Drill pipe inner diameter (inches).
+    /// Default 4.276" = ID of 19.50 lb/ft S-135 5" drill pipe (API Spec 5DP standard).
+    #[serde(default = "default_pipe_id")]
+    pub pipe_id_inches: f64,
+
+    /// Hole diameter (inches). 0 = auto-detect from bit size.
+    #[serde(default)]
+    pub hole_diameter_inches: f64,
+
+    /// Mud plastic viscosity (cP)
+    #[serde(default = "default_pv")]
+    pub plastic_viscosity_cp: f64,
+
+    /// Mud yield point (lbf/100ft²)
+    #[serde(default = "default_yp")]
+    pub yield_point_lbf_100sqft: f64,
+}
+
+fn default_pipe_od() -> f64 {
+    5.0
+}
+fn default_pipe_id() -> f64 {
+    4.276
+}
+fn default_pv() -> f64 {
+    15.0
+}
+fn default_yp() -> f64 {
+    10.0
+}
+
+impl Default for TripParameters {
+    fn default() -> Self {
+        Self {
+            pipe_od_inches: default_pipe_od(),
+            pipe_id_inches: default_pipe_id(),
+            hole_diameter_inches: 0.0,
+            plastic_viscosity_cp: default_pv(),
+            yield_point_lbf_100sqft: default_yp(),
         }
     }
 }
@@ -1953,6 +2053,37 @@ flow_imbalance_critical_gpm = 50.0
         assert_eq!(
             original.thresholds.hydraulics.normal_mud_weight_ppg,
             roundtripped.thresholds.hydraulics.normal_mud_weight_ppg
+        );
+    }
+
+    #[test]
+    fn test_trip_params_validation_pipe_id_exceeds_od() {
+        let mut config = WellConfig::default();
+        config.trip_parameters.pipe_id_inches = 6.0; // bigger than OD (5.0)
+        let result = config.validate();
+        assert!(
+            result.is_err(),
+            "pipe_id >= pipe_od should fail validation"
+        );
+    }
+
+    #[test]
+    fn test_trip_params_validation_hole_smaller_than_pipe() {
+        let mut config = WellConfig::default();
+        config.trip_parameters.hole_diameter_inches = 4.0; // smaller than pipe OD (5.0)
+        let result = config.validate();
+        assert!(
+            result.is_err(),
+            "hole_diameter < pipe_od should fail validation"
+        );
+    }
+
+    #[test]
+    fn test_trip_params_validation_defaults_pass() {
+        let config = WellConfig::default();
+        assert!(
+            config.validate().is_ok(),
+            "Default trip parameters should pass validation"
         );
     }
 

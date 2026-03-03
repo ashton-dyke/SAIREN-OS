@@ -89,6 +89,7 @@ pub struct SpecialistVotesV2 {
     pub hydraulic: String,
     pub well_control: String,
     pub formation: String,
+    pub stuck_pipe: String,
 }
 
 /// Verification status.
@@ -354,6 +355,7 @@ fn build_drilling(state: &crate::pipeline::AppState, dashboard: &DashboardState)
         let mut hv = "--".to_string();
         let mut wv = "--".to_string();
         let mut fv = "--".to_string();
+        let mut spv = "--".to_string();
         for v in &adv.votes {
             let vs = format!("{:?}", v.vote);
             match v.specialist.to_lowercase().as_str() {
@@ -361,6 +363,7 @@ fn build_drilling(state: &crate::pipeline::AppState, dashboard: &DashboardState)
                 "hydraulic" => hv = vs,
                 "wellcontrol" | "well_control" => wv = vs,
                 "formation" => fv = vs,
+                "stuckpipe" | "stuck_pipe" => spv = vs,
                 _ => {}
             }
         }
@@ -369,6 +372,7 @@ fn build_drilling(state: &crate::pipeline::AppState, dashboard: &DashboardState)
             hydraulic: hv,
             well_control: wv,
             formation: fv,
+            stuck_pipe: spv,
         }
     });
 
@@ -1506,6 +1510,11 @@ pub struct FormationContext {
     pub next_boundary: Option<NextBoundary>,
     pub upcoming: Vec<UpcomingFormation>,
     pub target_depth_ft: Option<f64>,
+    pub cfc_detection: Option<CfcDetection>,
+    pub connection_gas: Vec<crate::physics_engine::connection_gas::ConnectionGasEvent>,
+    pub connection_gas_trending_up: bool,
+    pub bit_wear: Option<BitWearStatus>,
+    pub proactive_damping: Option<crate::pipeline::ProactiveDamping>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1543,6 +1552,25 @@ pub struct UpcomingFormation {
     pub hazards: Vec<String>,
 }
 
+/// CfC formation transition detection info.
+#[derive(Debug, Serialize)]
+pub struct CfcDetection {
+    pub last_transition_depth_ft: f64,
+    pub last_transition_timestamp: u64,
+    pub surprised_features: Vec<String>,
+    /// Depth offset between actual CfC-detected boundary and prognosis boundary.
+    /// Positive = actual boundary deeper than prognosis, Negative = shallower.
+    pub depth_offset_from_prognosis_ft: f64,
+}
+
+/// Bit wear status for formation context response.
+#[derive(Debug, Clone, Serialize)]
+pub struct BitWearStatus {
+    pub wear_index: f64,
+    pub advisory: Option<String>,
+    pub buckets_tracked: usize,
+}
+
 /// GET /api/v2/formation/context — current formation, next boundary, upcoming formations.
 pub async fn formation_context(State(state): State<DashboardState>) -> Response {
     let app = state.app_state.read().await;
@@ -1556,6 +1584,28 @@ pub async fn formation_context(State(state): State<DashboardState>) -> Response 
         .as_ref()
         .map(|p| p.rop)
         .unwrap_or(0.0);
+
+    // Capture CfC transition before dropping lock
+    let formation_transition = app.latest_formation_transition.clone();
+    // Proactive damping recipe
+    let proactive_damping = app.proactive_damping.clone();
+    // Connection gas events
+    let connection_gas: Vec<_> = app.connection_gas_tracker.latest_events().iter().cloned().collect();
+    let connection_gas_trending_up = app.connection_gas_tracker.is_trending_up();
+    // Bit wear status
+    let bit_wear = {
+        let tracker = &app.bit_wear_tracker;
+        let wi = tracker.wear_index();
+        if wi > 0.0 || tracker.buckets().len() > 0 {
+            Some(BitWearStatus {
+                wear_index: (wi * 100.0).round() / 100.0,
+                advisory: tracker.wear_advisory().map(|s| s.to_string()),
+                buckets_tracked: tracker.buckets().len(),
+            })
+        } else {
+            None
+        }
+    };
     drop(app);
 
     // Load prognosis (same path as lookahead_status)
@@ -1572,6 +1622,11 @@ pub async fn formation_context(State(state): State<DashboardState>) -> Response 
             next_boundary: None,
             upcoming: Vec::new(),
             target_depth_ft: None,
+            cfc_detection: None,
+            connection_gas: connection_gas.clone(),
+            connection_gas_trending_up,
+            bit_wear: bit_wear.clone(),
+            proactive_damping: proactive_damping.clone(),
         });
     };
 
@@ -1669,12 +1724,209 @@ pub async fn formation_context(State(state): State<DashboardState>) -> Response 
         })
         .collect();
 
+    // CfC detection — find nearest prognosis boundary to compute depth offset
+    let cfc_detection = formation_transition.map(|event| {
+        // Find nearest formation boundary depth in the prognosis
+        let nearest_boundary_depth = prognosis
+            .formations
+            .iter()
+            .map(|f| f.depth_top_ft)
+            .filter(|&d| d > 0.0)
+            .min_by(|a, b| {
+                let da = (a - event.bit_depth).abs();
+                let db = (b - event.bit_depth).abs();
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(0.0);
+
+        let offset = event.bit_depth - nearest_boundary_depth;
+
+        CfcDetection {
+            last_transition_depth_ft: event.bit_depth,
+            last_transition_timestamp: event.timestamp,
+            surprised_features: event.surprised_features.clone(),
+            depth_offset_from_prognosis_ft: (offset * 10.0).round() / 10.0,
+        }
+    });
+
     ApiResponse::ok(FormationContext {
         current,
         next_boundary,
         upcoming,
         target_depth_ft,
+        cfc_detection,
+        connection_gas,
+        connection_gas_trending_up,
+        bit_wear,
+        proactive_damping,
     })
+}
+
+/// GET /api/v2/trip/swab-surge — returns latest swab/surge estimate during tripping.
+///
+/// Returns 204 No Content when rig is not in a tripping state.
+pub async fn swab_surge_status(State(state): State<DashboardState>) -> Response {
+    let app = state.app_state.read().await;
+
+    // Only return data when in a tripping state
+    let is_tripping = app
+        .latest_drilling_metrics
+        .as_ref()
+        .map(|m| {
+            matches!(
+                m.state,
+                crate::types::RigState::TrippingIn | crate::types::RigState::TrippingOut
+            )
+        })
+        .unwrap_or(false);
+
+    if !is_tripping {
+        return (axum::http::StatusCode::NO_CONTENT, "").into_response();
+    }
+
+    match &app.latest_swab_surge {
+        Some(estimate) => ApiResponse::ok(estimate),
+        None => (axum::http::StatusCode::NO_CONTENT, "").into_response(),
+    }
+}
+
+/// GET /api/v2/shift/handover — structured shift handover report.
+pub async fn shift_handover(
+    State(state): State<DashboardState>,
+    Query(q): Query<ShiftQuery>,
+) -> Response {
+    let hours = q.hours.unwrap_or(12.0).max(0.1);
+    let app = state.app_state.read().await;
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+    let duration_secs = (hours * 3600.0) as u64;
+    let from_ts = now.saturating_sub(duration_secs);
+
+    // Depth range from WITS history (filtered to the requested time window)
+    let (depth_start, depth_end) = {
+        let mut d_start = f64::MAX;
+        let mut d_end = 0.0_f64;
+        for pkt in app.wits_history.iter() {
+            if pkt.timestamp < from_ts {
+                continue;
+            }
+            if pkt.bit_depth < d_start {
+                d_start = pkt.bit_depth;
+            }
+            if pkt.bit_depth > d_end {
+                d_end = pkt.bit_depth;
+            }
+        }
+        if d_start == f64::MAX {
+            d_start = 0.0;
+        }
+        (d_start, d_end)
+    };
+
+    // Parameter averages from WITS history (filtered to the last N hours)
+    let (avg_rop, avg_wob, avg_rpm, avg_torque, min_rop, max_rop, param_count) = {
+        let mut rop_sum = 0.0_f64;
+        let mut wob_sum = 0.0_f64;
+        let mut rpm_sum = 0.0_f64;
+        let mut torque_sum = 0.0_f64;
+        let mut r_min = f64::MAX;
+        let mut r_max = 0.0_f64;
+        let mut count = 0usize;
+        for pkt in app.wits_history.iter() {
+            if pkt.timestamp < from_ts {
+                continue;
+            }
+            rop_sum += pkt.rop;
+            wob_sum += pkt.wob;
+            rpm_sum += pkt.rpm;
+            torque_sum += pkt.torque;
+            if pkt.rop < r_min {
+                r_min = pkt.rop;
+            }
+            if pkt.rop > r_max {
+                r_max = pkt.rop;
+            }
+            count += 1;
+        }
+        if count > 0 {
+            let n = count as f64;
+            (
+                rop_sum / n,
+                wob_sum / n,
+                rpm_sum / n,
+                torque_sum / n,
+                r_min,
+                r_max,
+                count,
+            )
+        } else {
+            (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0)
+        }
+    };
+
+    // Acknowledgments in period
+    let acks_in_period = app
+        .acknowledgments
+        .iter()
+        .filter(|a| a.acknowledged_at >= from_ts && a.acknowledged_at <= now)
+        .count();
+
+    // Current formation name — look up from prognosis using bit depth
+    let current_formation: Option<String> = {
+        let depth = app
+            .latest_wits_packet
+            .as_ref()
+            .map(|p| p.bit_depth)
+            .unwrap_or(0.0);
+        if depth > 0.0 {
+            let kb = crate::knowledge_base::KnowledgeBase::init();
+            let prognosis = if let Some(ref kb) = kb {
+                kb.prognosis()
+            } else {
+                crate::types::FormationPrognosis::load()
+            };
+            prognosis.and_then(|p| p.formation_at_depth(depth).map(|f| f.name.clone()))
+        } else {
+            None
+        }
+    };
+
+    let well_name = if crate::config::is_initialized() {
+        crate::config::get().well.name.clone()
+    } else {
+        "DEFAULT".to_string()
+    };
+
+    ApiResponse::ok(serde_json::json!({
+        "generated_at": Utc::now().to_rfc3339(),
+        "shift_hours": hours,
+        "well_name": well_name,
+        "depth_start_ft": depth_start,
+        "depth_end_ft": depth_end,
+        "footage_drilled_ft": (depth_end - depth_start).max(0.0),
+        "current_formation": current_formation,
+        "advisory_summary": {
+            "total": app.tickets_created,
+            "verified": app.tickets_verified,
+            "rejected": app.tickets_rejected,
+            "peak_severity": format!("{:?}", app.peak_severity),
+        },
+        "parameter_summary": {
+            "avg_rop": (avg_rop * 10.0).round() / 10.0,
+            "min_rop": (min_rop * 10.0).round() / 10.0,
+            "max_rop": (max_rop * 10.0).round() / 10.0,
+            "avg_wob": (avg_wob * 10.0).round() / 10.0,
+            "avg_rpm": (avg_rpm * 10.0).round() / 10.0,
+            "avg_torque": (avg_torque * 10.0).round() / 10.0,
+            "avg_mse_efficiency": app.avg_mse_efficiency,
+        },
+        "acknowledgments_in_period": acks_in_period,
+        "packets_processed": app.packets_processed,
+        "has_drilling_data": param_count > 0,
+    }))
 }
 
 /// GET /api/v2/metrics — Prometheus text format (unchanged from v1).

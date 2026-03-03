@@ -4,6 +4,8 @@
 //! indexed columns for fast structured queries. The full event is stored
 //! as a zstd-compressed JSON blob in the `data` column.
 
+#[cfg(test)]
+use crate::config::FormationTop;
 use crate::fleet::types::FleetEvent;
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::Path;

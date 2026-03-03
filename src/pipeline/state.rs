@@ -125,6 +125,39 @@ pub struct AppState {
     #[serde(skip)]
     pub damping_monitor_snapshot: Option<crate::types::DampingMonitorSnapshot>,
 
+    /// Connection gas event tracker (v6: Phase 3)
+    #[serde(skip)]
+    pub connection_gas_tracker: crate::physics_engine::connection_gas::ConnectionGasTracker,
+
+    /// Bit wear tracker (v6: Phase 4)
+    #[serde(skip)]
+    pub bit_wear_tracker: crate::optimization::bit_wear::BitWearTracker,
+
+    /// Latest swab/surge estimate (v6: Phase 5, only during tripping)
+    #[serde(skip)]
+    pub latest_swab_surge: Option<crate::physics_engine::swab_surge::SwabSurgeEstimate>,
+
+    /// Proactive damping recipe recommendation (v6: Phase 7, set on formation transition)
+    #[serde(skip)]
+    pub proactive_damping: Option<ProactiveDamping>,
+}
+
+/// A proactive damping recommendation based on a proven recipe from a prior run
+/// through the same formation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProactiveDamping {
+    /// Formation name where the recipe was proven
+    pub formation_name: String,
+    /// Recommended WOB change percentage
+    pub recommended_wob_change_pct: f64,
+    /// Recommended RPM change percentage
+    pub recommended_rpm_change_pct: f64,
+    /// Historical CV reduction achieved (percentage)
+    pub historical_cv_reduction_pct: f64,
+    /// Depth at which the original recipe was recorded
+    pub source_depth_ft: f64,
+    /// Unix timestamp when the recipe was originally recorded
+    pub recorded_at: u64,
 }
 
 impl Default for AppState {
@@ -164,6 +197,10 @@ impl Default for AppState {
             formation_transition_timestamps: Vec::new(),
             regime_centroids: [[0.0; 8]; 4],
             damping_monitor_snapshot: None,
+            connection_gas_tracker: crate::physics_engine::connection_gas::ConnectionGasTracker::new(),
+            bit_wear_tracker: crate::optimization::bit_wear::BitWearTracker::new(),
+            latest_swab_surge: None,
+            proactive_damping: None,
         }
     }
 }

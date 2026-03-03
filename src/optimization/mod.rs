@@ -4,6 +4,7 @@
 //! ranges and produces bounded, confidence-scored recommendations. Entirely
 //! algorithmic — no LLM involved.
 
+pub mod bit_wear;
 mod confidence;
 pub mod look_ahead;
 mod optimizer;
