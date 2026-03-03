@@ -41,7 +41,8 @@ impl RateLimiter {
 
     /// Record that a recommendation was issued for this parameter.
     pub fn record(&mut self, param: DrillingParameter, value: f64) {
-        self.last_recommendation.insert(param, (Instant::now(), value));
+        self.last_recommendation
+            .insert(param, (Instant::now(), value));
     }
 }
 

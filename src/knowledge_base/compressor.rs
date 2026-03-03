@@ -28,8 +28,12 @@ pub fn read_toml<T: DeserializeOwned>(path: &Path) -> io::Result<T> {
 /// Decompress a `.toml.zst` file and return its content as a string.
 pub fn decompress_to_string(path: &Path) -> io::Result<String> {
     let compressed = std::fs::read(path)?;
-    let decompressed = zstd::decode_all(compressed.as_slice())
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("zstd decode error: {}", e)))?;
+    let decompressed = zstd::decode_all(compressed.as_slice()).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("zstd decode error: {}", e),
+        )
+    })?;
     String::from_utf8(decompressed)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("UTF-8 error: {}", e)))
 }
@@ -52,7 +56,10 @@ pub fn compress_file(path: &Path) -> io::Result<()> {
 /// Write a value as TOML to a file
 pub fn write_toml<T: serde::Serialize>(path: &Path, value: &T) -> io::Result<()> {
     let content = toml::to_string_pretty(value).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("TOML serialize error: {}", e))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("TOML serialize error: {}", e),
+        )
     })?;
     std::fs::write(path, content)
 }
@@ -73,7 +80,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("test.toml");
 
-        let data = TestData { name: "hello".to_string(), value: 42.0 };
+        let data = TestData {
+            name: "hello".to_string(),
+            value: 42.0,
+        };
         write_toml(&path, &data).expect("write");
 
         let loaded: TestData = read_toml(&path).expect("read");
@@ -85,7 +95,10 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path = tmp.path().join("test.toml");
 
-        let data = TestData { name: "compressed".to_string(), value: 99.9 };
+        let data = TestData {
+            name: "compressed".to_string(),
+            value: 99.9,
+        };
         write_toml(&path, &data).expect("write");
 
         // Compress

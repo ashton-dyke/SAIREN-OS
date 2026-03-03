@@ -148,7 +148,10 @@ pub async fn get_ml_latest(State(state): State<DashboardState>) -> Json<MLInsigh
     let app_state = state.app_state.read().await;
 
     // First check AppState for latest report
-    let latest = app_state.latest_ml_report.as_ref().map(MLReportSummary::from);
+    let latest = app_state
+        .latest_ml_report
+        .as_ref()
+        .map(MLReportSummary::from);
 
     // If we have ML storage, get history and counts
     if let Some(storage) = &state.ml_storage {
@@ -188,7 +191,10 @@ pub async fn get_ml_history(
 ) -> Json<Vec<MLReportSummary>> {
     let app_state = state.app_state.read().await;
     let limit = query.limit.unwrap_or(24).min(1000);
-    let campaign = query.campaign.as_ref().and_then(|c| crate::types::Campaign::from_str(c));
+    let campaign = query
+        .campaign
+        .as_ref()
+        .and_then(|c| crate::types::Campaign::from_str(c));
 
     if let Some(storage) = &state.ml_storage {
         let history: Vec<MLReportSummary> = storage
@@ -242,7 +248,11 @@ pub async fn get_ml_optimal(
                         return (StatusCode::OK, Json(response)).into_response();
                     }
                 }
-                (StatusCode::NOT_FOUND, "No successful analysis for this depth").into_response()
+                (
+                    StatusCode::NOT_FOUND,
+                    "No successful analysis for this depth",
+                )
+                    .into_response()
             }
             Ok(_) => (StatusCode::NOT_FOUND, "No ML data for this depth").into_response(),
             Err(e) => {

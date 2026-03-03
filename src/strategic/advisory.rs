@@ -139,10 +139,7 @@ pub fn calculate_efficiency_score(
 }
 
 /// Calculate risk level from specialist votes and metrics
-pub fn calculate_risk_level(
-    votes: &[SpecialistVote],
-    metrics: &DrillingMetrics,
-) -> RiskLevel {
+pub fn calculate_risk_level(votes: &[SpecialistVote], metrics: &DrillingMetrics) -> RiskLevel {
     let critical_count = votes
         .iter()
         .filter(|v| v.vote == TicketSeverity::Critical)
@@ -173,7 +170,7 @@ pub fn calculate_risk_level(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DrillingMetrics, RigState, Operation};
+    use crate::types::{DrillingMetrics, Operation, RigState};
 
     fn make_voting_result(severity: FinalSeverity) -> VotingResult {
         VotingResult {
@@ -219,13 +216,25 @@ mod tests {
 
         // First CRITICAL should pass
         let result = composer.compose(
-            &ticket, &physics, &[], "rec", "ben", "rea", &critical_voting,
+            &ticket,
+            &physics,
+            &[],
+            "rec",
+            "ben",
+            "rea",
+            &critical_voting,
         );
         assert!(result.is_some());
 
         // Second CRITICAL within cooldown should be suppressed
         let result = composer.compose(
-            &ticket, &physics, &[], "rec", "ben", "rea", &critical_voting,
+            &ticket,
+            &physics,
+            &[],
+            "rec",
+            "ben",
+            "rea",
+            &critical_voting,
         );
         assert!(result.is_none());
     }
@@ -239,12 +248,18 @@ mod tests {
         let low_voting = make_voting_result(FinalSeverity::Low);
 
         // Send a CRITICAL
-        composer.compose(&ticket, &physics, &[], "rec", "ben", "rea", &critical_voting);
+        composer.compose(
+            &ticket,
+            &physics,
+            &[],
+            "rec",
+            "ben",
+            "rea",
+            &critical_voting,
+        );
 
         // Non-CRITICAL should still pass even within cooldown
-        let result = composer.compose(
-            &ticket, &physics, &[], "rec", "ben", "rea", &low_voting,
-        );
+        let result = composer.compose(&ticket, &physics, &[], "rec", "ben", "rea", &low_voting);
         assert!(result.is_some());
     }
 }

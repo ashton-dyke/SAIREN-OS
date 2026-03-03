@@ -11,10 +11,7 @@ use axum::response::Response;
 ///
 /// - `Deprecation: true`
 /// - `Sunset: 2026-09-01`
-pub async fn add_v1_deprecation_headers(
-    request: axum::extract::Request,
-    next: Next,
-) -> Response {
+pub async fn add_v1_deprecation_headers(request: axum::extract::Request, next: Next) -> Response {
     let mut response = next.run(request).await;
 
     let headers = response.headers_mut();

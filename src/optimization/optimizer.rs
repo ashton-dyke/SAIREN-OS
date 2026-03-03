@@ -1,9 +1,8 @@
 //! Core ParameterOptimizer — proactive drilling parameter recommendation engine
 
 use crate::types::{
-    DrillingParameter, DrillingPhysicsReport, FormationInterval, FormationPrognosis,
-    HistoryEntry, OptimizationAdvisory, OptimizationSkipReason, ParameterRecommendation,
-    RigState, WitsPacket,
+    DrillingParameter, DrillingPhysicsReport, FormationInterval, FormationPrognosis, HistoryEntry,
+    OptimizationAdvisory, OptimizationSkipReason, ParameterRecommendation, RigState, WitsPacket,
 };
 
 use super::confidence::score_confidence;
@@ -84,8 +83,7 @@ impl ParameterOptimizer {
 
         // 5. Calculate MSE efficiency vs formation offset data
         let mse_efficiency = if formation.offset_performance.avg_mse_psi > 0.0 {
-            (formation.offset_performance.avg_mse_psi / physics.avg_mse.max(1.0) * 100.0)
-                .min(100.0)
+            (formation.offset_performance.avg_mse_psi / physics.avg_mse.max(1.0) * 100.0).min(100.0)
         } else {
             physics.mse_efficiency
         };
@@ -145,15 +143,26 @@ impl ParameterOptimizer {
         });
 
         // 10. Score confidence
-        let confidence =
-            score_confidence(formation, physics, history, cfc_anomaly_score, sensor_quality);
+        let confidence = score_confidence(
+            formation,
+            physics,
+            history,
+            cfc_anomaly_score,
+            sensor_quality,
+        );
 
         if confidence.percent() < MIN_CONFIDENCE_PERCENT {
             return Err(OptimizationSkipReason::LowConfidence);
         }
 
         // 11. Check look-ahead
-        let look_ahead = check_look_ahead(prognosis, packet.bit_depth, packet.rop, formation, super::look_ahead::LOOK_AHEAD_THRESHOLD_MINUTES);
+        let look_ahead = check_look_ahead(
+            prognosis,
+            packet.bit_depth,
+            packet.rop,
+            formation,
+            super::look_ahead::LOOK_AHEAD_THRESHOLD_MINUTES,
+        );
 
         // 12. Need at least one recommendation or a look-ahead to produce an advisory
         if recommendations.is_empty() && look_ahead.is_none() {
@@ -162,7 +171,8 @@ impl ParameterOptimizer {
 
         // 13. Record rate limiter state for accepted recommendations
         for rec in &recommendations {
-            self.rate_limiter.record(rec.parameter, rec.recommended_value);
+            self.rate_limiter
+                .record(rec.parameter, rec.recommended_value);
         }
 
         let advisory = OptimizationAdvisory {
@@ -258,7 +268,6 @@ impl ParameterOptimizer {
 mod tests {
     use super::*;
     use crate::types::*;
-    use std::sync::Arc;
 
     fn make_formation() -> FormationInterval {
         FormationInterval {
@@ -272,9 +281,21 @@ mod tests {
             fracture_gradient_ppg: 14.0,
             hazards: vec![],
             parameters: FormationParameters {
-                wob_klbs: ParameterRange { min: 15.0, optimal: 25.0, max: 35.0 },
-                rpm: ParameterRange { min: 80.0, optimal: 120.0, max: 160.0 },
-                flow_gpm: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+                wob_klbs: ParameterRange {
+                    min: 15.0,
+                    optimal: 25.0,
+                    max: 35.0,
+                },
+                rpm: ParameterRange {
+                    min: 80.0,
+                    optimal: 120.0,
+                    max: 160.0,
+                },
+                flow_gpm: ParameterRange {
+                    min: 400.0,
+                    optimal: 500.0,
+                    max: 600.0,
+                },
                 mud_weight_ppg: 12.0,
                 bit_type: "PDC".to_string(),
             },
@@ -283,7 +304,10 @@ mod tests {
                 avg_rop_ft_hr: 80.0,
                 best_rop_ft_hr: 100.0,
                 avg_mse_psi: 20000.0,
-                best_params: BestParams { wob_klbs: 28.0, rpm: 130.0 },
+                best_params: BestParams {
+                    wob_klbs: 28.0,
+                    rpm: 130.0,
+                },
                 notes: String::new(),
             },
         }
@@ -310,8 +334,8 @@ mod tests {
             hole_depth: 5550.0,
             rop: 50.0,
             hook_load: 200.0,
-            wob: 20.0,  // Below offset best of 28
-            rpm: 90.0,  // Below offset best of 130
+            wob: 20.0, // Below offset best of 28
+            rpm: 90.0, // Below offset best of 130
             torque: 15.0,
             bit_diameter: 8.5,
             spp: 2800.0,
@@ -342,7 +366,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     fn make_physics(wob: f64, rpm: f64, flow_in: f64) -> DrillingPhysicsReport {

@@ -101,7 +101,7 @@ fn csv_replay_50_packets_smoke() {
         target_count, packets_processed
     );
 
-    // Note: CfC warm-up suppresses non-safety tickets for the first 500 drilling
+    // Note: CfC warm-up suppresses non-safety tickets for the first 300 drilling
     // packets, so 50 packets may produce 0 tickets unless WellControl events are
     // present. This smoke test validates no-panic processing, not ticket generation.
     // Ticket generation is validated by csv_replay_200_packets_baseline_and_tickets
@@ -126,10 +126,19 @@ fn csv_replay_context_lookup_non_empty() {
 
     // These queries mirror the exact strings used by coordinator.rs Phase 6
     let test_queries: &[(&str, &str)] = &[
-        ("well control kick loss circulation flow imbalance", "WellControl"),
-        ("MSE drilling efficiency ROP optimization", "DrillingEfficiency"),
+        (
+            "well control kick loss circulation flow imbalance",
+            "WellControl",
+        ),
+        (
+            "MSE drilling efficiency ROP optimization",
+            "DrillingEfficiency",
+        ),
         ("hydraulics standpipe pressure ECD mud weight", "Hydraulics"),
-        ("formation change lithology d-exponent pressure", "FormationEvaluation"),
+        (
+            "formation change lithology d-exponent pressure",
+            "FormationEvaluation",
+        ),
     ];
 
     for (query, label) in test_queries {
@@ -186,8 +195,7 @@ fn csv_replay_drilling_data_quality() {
 
     eprintln!(
         "csv_replay_drilling_data_quality: {} drilling packets validated (of {} total)",
-        sample_size,
-        replay.info.packet_count
+        sample_size, replay.info.packet_count
     );
 }
 
@@ -200,7 +208,7 @@ fn csv_replay_200_packets_baseline_and_tickets() {
 
     let replay = load_volve();
     let drilling = replay.drilling_packets();
-    let target_count: usize = 200.min(drilling.len());
+    let target_count: usize = 4000.min(drilling.len());
 
     let mut tactical = TacticalAgent::new();
     let mut history: VecDeque<HistoryEntry> = VecDeque::with_capacity(60);

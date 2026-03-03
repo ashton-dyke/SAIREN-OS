@@ -6,9 +6,7 @@
 //! - Sensor glitches (MSE/ROP out of plausible range)
 //! - Non-drilling rig states
 
-use crate::types::{
-    ml_quality_thresholds::*, DrillingMetrics, RigState, WitsPacket,
-};
+use crate::types::{ml_quality_thresholds::*, DrillingMetrics, RigState, WitsPacket};
 
 /// Result of quality filtering
 #[derive(Debug, Clone)]
@@ -147,7 +145,6 @@ enum RejectionReason {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     fn make_valid_packet() -> WitsPacket {
         WitsPacket {
@@ -188,7 +185,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     fn make_valid_metric() -> DrillingMetrics {

@@ -7,15 +7,15 @@
 //! - **Tactical Agent**: Fast real-time drilling anomaly detection
 //! - **Strategic Agent**: Deep analysis for advisory generation
 //! - **Physics Engine**: Drilling calculations (MSE, d-exponent, kick/loss detection)
-//! - **LLM Module**: Dual-model inference for drilling advisories
+//! - **CfC Networks**: Continuous-time neural networks for pattern recognition
 
 // Multi-agent architecture modules
-pub mod config;
-pub mod types;
 pub mod agents;
-pub mod physics_engine;
+pub mod config;
 pub mod context;
+pub mod physics_engine;
 pub mod sensors;
+pub mod types;
 // Expose storage sub-modules needed by both lib and bin crates.
 // The full storage module (ProcessLock, persistence, etc.) is only
 // available in the binary crate which declares its own `mod storage;`.
@@ -28,53 +28,46 @@ pub mod storage {
     pub mod suggestions;
     pub use strategic::StrategicStorage;
 }
-pub mod llm;
-pub mod baseline;
 pub mod aci;
-pub mod cfc;
-pub mod ml_engine;
-pub mod strategic;
-pub mod optimization;
-pub mod causal;
-pub mod background;
-pub mod fleet;
-pub mod knowledge_base;
-pub mod debrief;
-pub mod volve;
-#[cfg(feature = "fleet-hub")]
-pub mod hub;
 pub mod acquisition;
-pub mod pipeline;
 pub mod api;
+pub mod background;
+pub mod baseline;
+pub mod causal;
+pub mod cfc;
+pub mod debrief;
+pub mod fleet;
+pub mod gossip;
+pub mod knowledge_base;
+pub mod ml_engine;
+pub mod optimization;
+pub mod pipeline;
+pub mod strategic;
+pub mod volve;
 
 // Re-export well configuration
 pub use config::WellConfig;
 
 // Re-export commonly used types
 pub use types::{
-    AdvisoryTicket, AnomalyCategory, DrillingMetrics, DrillingPhysicsReport,
-    RigState, RiskLevel, StrategicAdvisory, TicketSeverity, TicketType, WitsPacket,
+    AdvisoryTicket, AnomalyCategory, DrillingMetrics, DrillingPhysicsReport, RigState, RiskLevel,
+    StrategicAdvisory, TicketSeverity, TicketType, WitsPacket,
 };
 
 // Re-export ML Engine types
 pub use types::{
-    AnalysisFailure, AnalysisInsights, AnalysisResult, ConfidenceLevel,
-    FormationSegment, HourlyDataset, MLInsightsReport, OptimalParams,
-    SignificantCorrelation, ml_quality_thresholds,
+    ml_quality_thresholds, AnalysisFailure, AnalysisInsights, AnalysisResult, ConfidenceLevel,
+    FormationSegment, HourlyDataset, MLInsightsReport, OptimalParams, SignificantCorrelation,
 };
 
 // Re-export agents
-pub use agents::{TacticalAgent, StrategicAgent};
+pub use agents::{StrategicAgent, TacticalAgent};
 
 // Re-export storage
 pub use storage::history::StorageError;
 
-// Re-export LLM components
-#[cfg(feature = "llm")]
-pub use llm::TacticalLLM;
-
 // Re-export baseline components
 pub use baseline::{
-    AnomalyCheckResult, AnomalyLevel, BaselineAccumulator, BaselineError, DynamicThresholds,
-    LearningStatus, ThresholdManager, wits_metrics,
+    wits_metrics, AnomalyCheckResult, AnomalyLevel, BaselineAccumulator, BaselineError,
+    DynamicThresholds, LearningStatus, ThresholdManager,
 };

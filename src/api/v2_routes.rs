@@ -30,11 +30,20 @@ pub fn v2_api_routes(state: DashboardState) -> Router {
         .route("/campaign", get(v2_handlers::get_campaign))
         .route("/campaign", post(v2_handlers::set_campaign))
         // Advisory
-        .route("/advisory/acknowledge", post(v2_handlers::acknowledge_advisory))
-        .route("/advisory/acknowledgments", get(v2_handlers::get_acknowledgments))
+        .route(
+            "/advisory/acknowledge",
+            post(v2_handlers::acknowledge_advisory),
+        )
+        .route(
+            "/advisory/acknowledgments",
+            get(v2_handlers::get_acknowledgments),
+        )
         // Feedback (stats before parameterized route to avoid capture)
         .route("/advisory/feedback/stats", get(v2_handlers::feedback_stats))
-        .route("/advisory/feedback/:timestamp", post(v2_handlers::submit_feedback))
+        .route(
+            "/advisory/feedback/:timestamp",
+            post(v2_handlers::submit_feedback),
+        )
         // Lookahead
         .route("/lookahead/status", get(v2_handlers::lookahead_status))
         // Damping
@@ -48,7 +57,10 @@ pub fn v2_api_routes(state: DashboardState) -> Router {
         // Debug
         .route("/debug/baseline", get(v2_handlers::debug_baseline))
         .route("/debug/ml/history", get(v2_handlers::debug_ml_history))
-        .route("/debug/fleet/intelligence", get(v2_handlers::debug_fleet_intelligence))
+        .route(
+            "/debug/fleet/intelligence",
+            get(v2_handlers::debug_fleet_intelligence),
+        )
         // Prometheus metrics (unchanged format)
         .route("/metrics", get(v2_handlers::metrics))
         .with_state(state)

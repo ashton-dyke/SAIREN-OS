@@ -19,7 +19,6 @@
 
 pub mod assembler;
 pub mod compressor;
-pub mod fleet_bridge;
 pub mod layout;
 pub mod mid_well;
 pub mod migration;
@@ -27,8 +26,8 @@ pub mod post_well;
 pub mod watcher;
 
 use crate::types::{
-    FormationInterval, FormationPrognosis, KnowledgeBaseConfig, MLInsightsReport,
-    PostWellSummary, WitsPacket,
+    FormationInterval, FormationPrognosis, KnowledgeBaseConfig, MLInsightsReport, PostWellSummary,
+    WitsPacket,
 };
 use std::sync::Arc;
 use std::time::Duration;

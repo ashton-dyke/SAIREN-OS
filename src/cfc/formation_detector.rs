@@ -101,9 +101,22 @@ mod tests {
 
     fn make_sigmas(surprised_count: usize, sigma_val: f64) -> Vec<(usize, &'static str, f64)> {
         let names = [
-            "wob", "rop", "rpm", "torque", "mse", "spp", "d_exp", "hookload",
-            "ecd", "flow_balance", "pit_rate", "dxc", "pump_spm", "mud_weight",
-            "gas_units", "pit_volume",
+            "wob",
+            "rop",
+            "rpm",
+            "torque",
+            "mse",
+            "spp",
+            "d_exp",
+            "hookload",
+            "ecd",
+            "flow_balance",
+            "pit_rate",
+            "dxc",
+            "pump_spm",
+            "mud_weight",
+            "gas_units",
+            "pit_volume",
         ];
         names
             .iter()

@@ -1,11 +1,9 @@
-//! Template-based advisory generation (Phase 7 fallback)
+//! Template-based advisory generation
 //!
 //! Provides structured advisory templates for each `AnomalyCategory` that produce
-//! useful recommendations when the LLM is unavailable, timed out, or returned
-//! garbage. Templates include actual metric values from the current drilling state.
-//!
-//! Templates produce advisories with reduced confidence (0.70 vs LLM's 0.85+)
-//! and are tagged with `source: "template"` so the dashboard can display a banner.
+//! actionable recommendations with actual metric values from the current drilling state.
+//! Templates are the primary advisory system — every confirmed ticket gets a template
+//! advisory with specific WOB/RPM adjustments, formation context, and causal leads.
 
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, Campaign, DrillingPhysicsReport, OscillationType,
@@ -99,8 +97,11 @@ fn well_control_template(
              Check trip tank, confirm flow out reading, prepare for shut-in if trend continues. \
              Current mud weight {:.1} ppg, ECD {:.1} ppg at {:.0} ft.",
             campaign_note,
-            flow, pit,
-            physics.current_mud_weight, physics.current_ecd, physics.current_depth
+            flow,
+            pit,
+            physics.current_mud_weight,
+            physics.current_ecd,
+            physics.current_depth
         ),
         "Well control incident prevention — immediate safety priority".to_string(),
         format!(
@@ -113,13 +114,17 @@ fn well_control_template(
 }
 
 fn efficiency_template(
-    _ticket: &AdvisoryTicket,
+    ticket: &AdvisoryTicket,
     physics: &DrillingPhysicsReport,
 ) -> (String, String, String) {
     let eff = physics.mse_efficiency;
     let optimal = physics.optimal_mse;
     let avg = physics.avg_mse;
-    let trend_dir = if physics.mse_trend > 0.0 { "increasing (worsening)" } else { "stable/improving" };
+    let trend_dir = if physics.mse_trend > 0.0 {
+        "increasing (worsening)"
+    } else {
+        "stable/improving"
+    };
 
     let action = if eff < 50.0 {
         format!(
@@ -135,6 +140,13 @@ fn efficiency_template(
         )
     };
 
+    let formation_note = ticket
+        .current_metrics
+        .current_formation
+        .as_deref()
+        .map(|f| format!(" Formation: {}.", f))
+        .unwrap_or_default();
+
     (
         action,
         format!(
@@ -143,9 +155,14 @@ fn efficiency_template(
         ),
         format!(
             "MSE {}: avg {:.0} psi vs optimal {:.0} psi ({:.0}% efficiency). \
-             Torque {:.1} kft-lb at {:.0} ft depth. Formation hardness {:.1}/10.",
-            trend_dir, avg, optimal, eff,
-            physics.current_torque, physics.current_depth, physics.formation_hardness
+             Torque {:.1} kft-lb at {:.0} ft depth. Formation hardness {:.1}/10.{formation_note}",
+            trend_dir,
+            avg,
+            optimal,
+            eff,
+            physics.current_torque,
+            physics.current_depth,
+            physics.formation_hardness
         ),
     )
 }
@@ -184,8 +201,11 @@ fn hydraulics_template(
         format!(
             "Flow balance trend: {:.1} gpm/10min. ECD margin: {:.2} ppg. \
              SPP delta: {:.0} psi. Mud weight in {:.1} ppg, ECD {:.1} ppg.",
-            physics.flow_balance_trend, ecd, spp_delta,
-            physics.current_mud_weight, physics.current_ecd
+            physics.flow_balance_trend,
+            ecd,
+            spp_delta,
+            physics.current_mud_weight,
+            physics.current_ecd
         ),
     )
 }
@@ -210,8 +230,12 @@ fn mechanical_template(
             },
             damping.analysis.estimated_frequency_hz,
             damping.analysis.severity * 100.0,
-            damping.current_wob, damping.recommended_wob, damping.wob_change_pct,
-            damping.current_rpm, damping.recommended_rpm, damping.rpm_change_pct,
+            damping.current_wob,
+            damping.recommended_wob,
+            damping.wob_change_pct,
+            damping.current_rpm,
+            damping.recommended_rpm,
+            damping.rpm_change_pct,
             damping.rationale,
         );
         let benefit = format!(
@@ -244,39 +268,56 @@ fn mechanical_template(
             "Torque elevated {:.0}% above baseline ({:.1} kft-lb). \
              Monitor for pack-off. Consider backreaming if torque continues to rise. \
              Reduce WOB if stick-slip develops.",
-            torque_delta * 100.0, physics.current_torque
+            torque_delta * 100.0,
+            physics.current_torque
         )
     } else {
         format!(
             "Mechanical parameter deviation detected. Torque {:.1} kft-lb (delta {:.0}%). \
              Continue monitoring torque and drag trends.",
-            physics.current_torque, torque_delta * 100.0
+            physics.current_torque,
+            torque_delta * 100.0
         )
     };
+
+    let formation_note = ticket
+        .current_metrics
+        .current_formation
+        .as_deref()
+        .map(|f| format!(" Formation: {}.", f))
+        .unwrap_or_default();
 
     (
         action,
         "Pack-off/stick-slip prevention, reduced NPT risk".to_string(),
         format!(
             "Torque delta {:.0}% at {:.0} ft. WOB {:.0} klbs, RPM {:.0}. \
-             Founder detected: {}. Current ROP {:.1} ft/hr.",
-            torque_delta * 100.0, physics.current_depth,
-            physics.current_wob, physics.current_rpm,
-            physics.founder_detected, physics.current_rop
+             Founder detected: {}. Current ROP {:.1} ft/hr.{formation_note}",
+            torque_delta * 100.0,
+            physics.current_depth,
+            physics.current_wob,
+            physics.current_rpm,
+            physics.founder_detected,
+            physics.current_rop
         ),
     )
 }
 
 fn formation_template(
-    _ticket: &AdvisoryTicket,
+    ticket: &AdvisoryTicket,
     physics: &DrillingPhysicsReport,
 ) -> (String, String, String) {
     let dxc_trend = physics.dxc_trend;
     let hardness = physics.formation_hardness;
+    let formation_name = ticket
+        .current_metrics
+        .current_formation
+        .as_deref()
+        .unwrap_or("unknown");
 
     let action = if dxc_trend < -0.1 {
         format!(
-            "D-exponent DECREASING ({:.3}) — possible abnormal pore pressure. \
+            "D-exponent DECREASING ({:.3}) in {formation_name} — possible abnormal pore pressure. \
              Monitor mud weight vs pore pressure closely. Consider increasing mud weight. \
              Current depth {:.0} ft, formation hardness {:.1}/10.",
             dxc_trend, physics.current_depth, hardness
@@ -284,13 +325,13 @@ fn formation_template(
     } else if dxc_trend.abs() > 0.05 {
         let dir = if dxc_trend > 0.0 { "harder" } else { "softer" };
         format!(
-            "Formation transition detected — drilling into {} rock. \
+            "Formation transition detected — entering {formation_name} ({dir} rock). \
              Adjust WOB/RPM for new formation. D-exponent trend {:.3} at {:.0} ft.",
-            dir, dxc_trend, physics.current_depth
+            dxc_trend, physics.current_depth
         )
     } else {
         format!(
-            "Formation change indicated. D-exponent trend {:.3}, hardness {:.1}/10. \
+            "Formation change indicated in {formation_name}. D-exponent trend {:.3}, hardness {:.1}/10. \
              Continue with current parameters, monitor ROP response.",
             dxc_trend, hardness
         )
@@ -300,10 +341,9 @@ fn formation_template(
         action,
         "Optimized drilling through formation transition, pore pressure awareness".to_string(),
         format!(
-            "D-exponent trend: {:.3}. Formation hardness: {:.1}/10. \
+            "D-exponent trend: {:.3}. Formation: {formation_name} (hardness {:.1}/10). \
              MSE efficiency: {:.0}%. Current ROP: {:.1} ft/hr at {:.0} ft.",
-            dxc_trend, hardness, physics.mse_efficiency,
-            physics.current_rop, physics.current_depth
+            dxc_trend, hardness, physics.mse_efficiency, physics.current_rop, physics.current_depth
         ),
     )
 }
@@ -323,7 +363,9 @@ fn normal_template(physics: &DrillingPhysicsReport) -> (String, String, String) 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{DrillingMetrics, DrillingPhysicsReport, Operation, RigState, TicketSeverity, TicketType};
+    use crate::types::{
+        DrillingMetrics, DrillingPhysicsReport, Operation, RigState, TicketSeverity, TicketType,
+    };
 
     fn make_ticket(category: AnomalyCategory) -> AdvisoryTicket {
         AdvisoryTicket {
@@ -397,8 +439,16 @@ mod tests {
         ] {
             let ticket = make_ticket(cat.clone());
             let result = template_advisory(&ticket, &physics, Campaign::Production);
-            assert!(!result.recommendation.is_empty(), "Empty recommendation for {:?}", cat);
-            assert!(!result.reasoning.is_empty(), "Empty reasoning for {:?}", cat);
+            assert!(
+                !result.recommendation.is_empty(),
+                "Empty recommendation for {:?}",
+                cat
+            );
+            assert!(
+                !result.reasoning.is_empty(),
+                "Empty reasoning for {:?}",
+                cat
+            );
             assert_eq!(result.confidence, 0.70);
             assert_eq!(result.source, "template");
         }
@@ -409,7 +459,10 @@ mod tests {
         let ticket = make_ticket(AnomalyCategory::WellControl);
         let physics = make_physics();
         let result = template_advisory(&ticket, &physics, Campaign::Production);
-        assert!(result.recommendation.contains("15.0"), "Should include flow balance value");
+        assert!(
+            result.recommendation.contains("15.0"),
+            "Should include flow balance value"
+        );
         assert!(result.recommendation.contains("WELL CONTROL"));
     }
 
@@ -418,7 +471,10 @@ mod tests {
         let ticket = make_ticket(AnomalyCategory::WellControl);
         let physics = make_physics();
         let result = template_advisory(&ticket, &physics, Campaign::PlugAbandonment);
-        assert!(result.recommendation.contains("P&A"), "Should include P&A campaign note");
+        assert!(
+            result.recommendation.contains("P&A"),
+            "Should include P&A campaign note"
+        );
     }
 
     #[test]
@@ -428,12 +484,15 @@ mod tests {
         physics.founder_detected = true;
         physics.optimal_wob_estimate = 25.0;
         let result = template_advisory(&ticket, &physics, Campaign::Production);
-        assert!(result.recommendation.contains("FOUNDER"), "Should detect founder condition");
+        assert!(
+            result.recommendation.contains("FOUNDER"),
+            "Should detect founder condition"
+        );
     }
 
     #[test]
     fn test_mechanical_template_with_damping() {
-        use crate::types::{OscillationAnalysis, OscillationType, DampingRecommendation};
+        use crate::types::{DampingRecommendation, OscillationAnalysis, OscillationType};
 
         let mut ticket = make_ticket(AnomalyCategory::Mechanical);
         ticket.damping_recommendation = Some(DampingRecommendation {
@@ -456,11 +515,17 @@ mod tests {
 
         let physics = make_physics();
         let result = template_advisory(&ticket, &physics, Campaign::Production);
-        assert!(result.recommendation.contains("STICK-SLIP DAMPING"),
-            "Should contain STICK-SLIP DAMPING header");
-        assert!(result.recommendation.contains("21.3"),
-            "Should contain recommended WOB value");
-        assert!(result.recommendation.contains("131"),
-            "Should contain recommended RPM value (130.8 rounded to 131)");
+        assert!(
+            result.recommendation.contains("STICK-SLIP DAMPING"),
+            "Should contain STICK-SLIP DAMPING header"
+        );
+        assert!(
+            result.recommendation.contains("21.3"),
+            "Should contain recommended WOB value"
+        );
+        assert!(
+            result.recommendation.contains("131"),
+            "Should contain recommended RPM value (130.8 rounded to 131)"
+        );
     }
 }

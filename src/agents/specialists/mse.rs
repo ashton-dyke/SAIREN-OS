@@ -43,7 +43,10 @@ impl Specialist for MseSpecialist {
         } else {
             (
                 TicketSeverity::Low,
-                format!("MSE efficiency {:.0}% adequate for current formation", efficiency),
+                format!(
+                    "MSE efficiency {:.0}% adequate for current formation",
+                    efficiency
+                ),
             )
         };
 

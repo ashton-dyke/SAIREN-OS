@@ -12,7 +12,7 @@
 //! for O(log n) approximate nearest neighbor search.
 
 use crate::context::knowledge_store::KnowledgeStore;
-use crate::fleet::types::{FleetEpisode, EpisodeMetrics};
+use crate::fleet::types::{EpisodeMetrics, FleetEpisode};
 use crate::types::{AnomalyCategory, Campaign};
 use std::sync::RwLock;
 use tracing::debug;
@@ -36,7 +36,7 @@ impl RAMRecall {
 
     /// Load episodes into memory (e.g., from fleet library sync)
     pub fn load_episodes(&self, episodes: Vec<FleetEpisode>) {
-        let mut store = self.episodes.write().expect("RAMRecall lock poisoned");
+        let mut store = self.episodes.write().unwrap_or_else(|e| e.into_inner());
         store.clear();
         store.extend(episodes);
         if store.len() > MAX_EPISODES {
@@ -49,7 +49,7 @@ impl RAMRecall {
 
     /// Add a single episode (e.g., from a local advisory)
     pub fn add_episode(&self, episode: FleetEpisode) {
-        let mut store = self.episodes.write().expect("RAMRecall lock poisoned");
+        let mut store = self.episodes.write().unwrap_or_else(|e| e.into_inner());
 
         // Dedup by ID
         if store.iter().any(|e| e.id == episode.id) {
@@ -82,13 +82,16 @@ impl RAMRecall {
 
     /// Remove episodes by ID (e.g., pruned by the hub)
     pub fn remove_episodes(&self, ids: &[String]) {
-        let mut store = self.episodes.write().expect("RAMRecall lock poisoned");
+        let mut store = self.episodes.write().unwrap_or_else(|e| e.into_inner());
         store.retain(|ep| !ids.contains(&ep.id));
     }
 
     /// Get total episode count
     pub fn episode_count(&self) -> usize {
-        self.episodes.read().expect("RAMRecall lock poisoned").len()
+        self.episodes
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
     }
 
     /// Search episodes and return formatted context strings
@@ -98,7 +101,7 @@ impl RAMRecall {
         campaign: &Campaign,
         max_results: usize,
     ) -> Vec<String> {
-        let store = self.episodes.read().expect("RAMRecall lock poisoned");
+        let store = self.episodes.read().unwrap_or_else(|e| e.into_inner());
 
         // Newest timestamp in store (for recency scoring)
         let newest_ts = store.iter().map(|e| e.timestamp).max().unwrap_or(0);
@@ -158,15 +161,25 @@ impl Default for RAMRecall {
 impl KnowledgeStore for RAMRecall {
     fn query(&self, query: &str, max_results: usize) -> Vec<String> {
         // Parse category from query string keywords
-        let category = if query.contains("well control") || query.contains("kick") || query.contains("loss") {
+        let category = if query.contains("well control")
+            || query.contains("kick")
+            || query.contains("loss")
+        {
             AnomalyCategory::WellControl
         } else if query.contains("MSE") || query.contains("efficiency") || query.contains("ROP") {
             AnomalyCategory::DrillingEfficiency
-        } else if query.contains("pressure") || query.contains("ECD") || query.contains("hydraulic") {
+        } else if query.contains("pressure") || query.contains("ECD") || query.contains("hydraulic")
+        {
             AnomalyCategory::Hydraulics
-        } else if query.contains("torque") || query.contains("pack-off") || query.contains("stick-slip") {
+        } else if query.contains("torque")
+            || query.contains("pack-off")
+            || query.contains("stick-slip")
+        {
             AnomalyCategory::Mechanical
-        } else if query.contains("d-exponent") || query.contains("formation") || query.contains("pore") {
+        } else if query.contains("d-exponent")
+            || query.contains("formation")
+            || query.contains("pore")
+        {
             AnomalyCategory::Formation
         } else {
             AnomalyCategory::None
@@ -190,7 +203,7 @@ impl KnowledgeStore for RAMRecall {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fleet::types::{EventOutcome, FleetEpisode, EpisodeMetrics};
+    use crate::fleet::types::{EpisodeMetrics, EventOutcome, FleetEpisode};
     use crate::types::{FinalSeverity, RiskLevel};
 
     fn make_episode(id: &str, category: AnomalyCategory, campaign: Campaign) -> FleetEpisode {
@@ -203,7 +216,9 @@ mod tests {
             risk_level: RiskLevel::High,
             severity: FinalSeverity::High,
             resolution_summary: "Reduced WOB, resolved pack-off".to_string(),
-            outcome: EventOutcome::Resolved { action_taken: "Reduced WOB".to_string() },
+            outcome: EventOutcome::Resolved {
+                action_taken: "Reduced WOB".to_string(),
+            },
             timestamp: 1000,
             key_metrics: EpisodeMetrics {
                 mse_efficiency: 60.0,
@@ -229,7 +244,11 @@ mod tests {
         let recall = RAMRecall::new();
         recall.load_episodes(vec![
             make_episode("ep-1", AnomalyCategory::WellControl, Campaign::Production),
-            make_episode("ep-2", AnomalyCategory::DrillingEfficiency, Campaign::Production),
+            make_episode(
+                "ep-2",
+                AnomalyCategory::DrillingEfficiency,
+                Campaign::Production,
+            ),
         ]);
 
         assert_eq!(recall.episode_count(), 2);

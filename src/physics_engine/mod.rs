@@ -21,12 +21,10 @@ pub mod models;
 // Export drilling-specific functions
 pub use drilling_models::{
     calculate_d_exponent, calculate_dxc, calculate_ecd, calculate_mse, calculate_mse_efficiency,
-    calculate_r_squared, calculate_trend, classify_rig_state,
-    characterize_oscillation, recommend_damping,
+    calculate_r_squared, calculate_trend, characterize_oscillation, classify_rig_state,
     detect_founder, detect_founder_quick, detect_kick, detect_lost_circulation, detect_packoff,
-    detect_stick_slip, estimate_optimal_mse,
+    detect_stick_slip, estimate_optimal_mse, recommend_damping,
 };
-
 
 use tracing::warn;
 
@@ -81,7 +79,10 @@ pub fn tactical_update(
 
     // Calculate corrected d-exponent using configurable normal mud weight
     let normal_mud_weight = if crate::config::is_initialized() {
-        crate::config::get().thresholds.hydraulics.normal_mud_weight_ppg
+        crate::config::get()
+            .thresholds
+            .hydraulics
+            .normal_mud_weight_ppg
     } else {
         8.6
     };
@@ -111,15 +112,8 @@ pub fn tactical_update(
             // Real kicks/losses rarely exceed 30-40 bbl/hr initially
             raw_rate.clamp(-50.0, 50.0)
         } else {
-            // For high-frequency sampling, use pit_volume_change if available
-            // Otherwise return 0 to avoid noise
-            if packet.pit_volume_change.abs() > 0.01 {
-                // pit_volume_change is per-interval, convert to hourly rate
-                let rate = packet.pit_volume_change * 3600.0 / time_delta_secs.max(1.0);
-                rate.clamp(-50.0, 50.0)
-            } else {
-                0.0
-            }
+            // High-frequency sampling — return 0 to avoid noise amplification
+            0.0
         }
     } else {
         0.0
@@ -130,7 +124,11 @@ pub fn tactical_update(
     // silences alarms and could mask a real well control issue.
     let ecd_margin = packet.ecd_margin();
     if packet.fracture_gradient <= 0.0 && packet.ecd > 0.0 {
-        warn!("Fracture gradient unavailable (0.0) — ECD margin defaulting to 1.5 ppg; alarms suppressed");
+        use std::sync::Once;
+        static FRAC_GRAD_WARN: Once = Once::new();
+        FRAC_GRAD_WARN.call_once(|| {
+            warn!("Fracture gradient unavailable (0.0) — ECD margin defaulting to 1.5 ppg; alarms suppressed");
+        });
     }
 
     // Calculate deltas from previous packet
@@ -151,13 +149,24 @@ pub fn tactical_update(
     };
 
     // Estimate MSE efficiency
-    let formation_hardness = estimate_formation_hardness_from_rop(packet.rop, packet.wob, packet.rpm);
+    let formation_hardness =
+        estimate_formation_hardness_from_rop(packet.rop, packet.wob, packet.rpm);
     let optimal_mse = estimate_optimal_mse(formation_hardness);
     let mse_efficiency = calculate_mse_efficiency(mse, optimal_mse);
 
     // Detect anomalies
-    let (is_anomaly, anomaly_category, anomaly_description) =
-        detect_anomalies(packet, prev_packet, &state, flow_balance, pit_rate, mse_efficiency, torque_delta_percent, spp_delta, flow_out_available, baseline_overrides);
+    let (is_anomaly, anomaly_category, anomaly_description) = detect_anomalies(
+        packet,
+        prev_packet,
+        &state,
+        flow_balance,
+        pit_rate,
+        mse_efficiency,
+        torque_delta_percent,
+        spp_delta,
+        flow_out_available,
+        baseline_overrides,
+    );
 
     DrillingMetrics {
         state,
@@ -215,7 +224,10 @@ fn detect_anomalies(
     baseline_overrides: Option<&BaselineOverrides>,
 ) -> (bool, AnomalyCategory, Option<String>) {
     // Only check during active drilling states
-    if *state != RigState::Drilling && *state != RigState::Reaming && *state != RigState::Circulating {
+    if *state != RigState::Drilling
+        && *state != RigState::Reaming
+        && *state != RigState::Circulating
+    {
         return (false, AnomalyCategory::None, None);
     }
 
@@ -233,12 +245,20 @@ fn detect_anomalies(
             packet.background_gas,
         );
         if is_kick {
-            let severity_str = if kick_severity > 0.7 { "CRITICAL" } else if kick_severity > 0.4 { "HIGH" } else { "WARNING" };
+            let severity_str = if kick_severity > 0.7 {
+                "CRITICAL"
+            } else if kick_severity > 0.4 {
+                "HIGH"
+            } else {
+                "WARNING"
+            };
             return (
                 true,
                 AnomalyCategory::WellControl,
-                Some(format!("{}: Potential kick detected - flow imbalance {:.1} gpm, gas {:.0} units",
-                    severity_str, flow_balance, packet.gas_units)),
+                Some(format!(
+                    "{}: Potential kick detected - flow imbalance {:.1} gpm, gas {:.0} units",
+                    severity_str, flow_balance, packet.gas_units
+                )),
             );
         }
 
@@ -250,7 +270,13 @@ fn detect_anomalies(
             spp_delta.max(0.0),
         );
         if is_loss {
-            let severity_str = if loss_severity > 0.7 { "CRITICAL" } else if loss_severity > 0.4 { "HIGH" } else { "WARNING" };
+            let severity_str = if loss_severity > 0.7 {
+                "CRITICAL"
+            } else if loss_severity > 0.4 {
+                "HIGH"
+            } else {
+                "WARNING"
+            };
             return (
                 true,
                 AnomalyCategory::WellControl,
@@ -265,69 +291,111 @@ fn detect_anomalies(
     let (gas_warn, gas_crit) = if cfg_available {
         let wc = &crate::config::get().thresholds.well_control;
         (wc.gas_units_warning, wc.gas_units_critical)
-    } else { (100.0, 500.0) };
+    } else {
+        (100.0, 500.0)
+    };
     let (h2s_warn, h2s_crit) = if cfg_available {
         let wc = &crate::config::get().thresholds.well_control;
         (wc.h2s_warning_ppm, wc.h2s_critical_ppm)
-    } else { (10.0, 20.0) };
+    } else {
+        (10.0, 20.0)
+    };
     let (pr_warn, pr_crit) = if cfg_available {
         let wc = &crate::config::get().thresholds.well_control;
         (wc.pit_rate_warning_bbl_hr, wc.pit_rate_critical_bbl_hr)
-    } else { (5.0, 15.0) };
+    } else {
+        (5.0, 15.0)
+    };
     let (ecd_warn, ecd_crit) = if cfg_available {
         let h = &crate::config::get().thresholds.hydraulics;
         (h.ecd_margin_warning_ppg, h.ecd_margin_critical_ppg)
-    } else { (0.3, 0.1) };
+    } else {
+        (0.3, 0.1)
+    };
     let (spp_warn, spp_crit) = {
         let (cfg_warn, cfg_crit) = if cfg_available {
             let h = &crate::config::get().thresholds.hydraulics;
             (h.spp_deviation_warning_psi, h.spp_deviation_critical_psi)
-        } else { (100.0, 200.0) };
+        } else {
+            (100.0, 200.0)
+        };
         (
-            baseline_overrides.and_then(|o| o.spp_deviation_warning_psi).unwrap_or(cfg_warn),
-            baseline_overrides.and_then(|o| o.spp_deviation_critical_psi).unwrap_or(cfg_crit),
+            baseline_overrides
+                .and_then(|o| o.spp_deviation_warning_psi)
+                .unwrap_or(cfg_warn),
+            baseline_overrides
+                .and_then(|o| o.spp_deviation_critical_psi)
+                .unwrap_or(cfg_crit),
         )
     };
     let (torq_warn, torq_crit) = {
         let (cfg_warn, cfg_crit) = if cfg_available {
             let m = &crate::config::get().thresholds.mechanical;
             (m.torque_increase_warning, m.torque_increase_critical)
-        } else { (0.15, 0.25) };
+        } else {
+            (0.15, 0.25)
+        };
         (
-            baseline_overrides.and_then(|o| o.torque_warning_fraction).unwrap_or(cfg_warn),
-            baseline_overrides.and_then(|o| o.torque_critical_fraction).unwrap_or(cfg_crit),
+            baseline_overrides
+                .and_then(|o| o.torque_warning_fraction)
+                .unwrap_or(cfg_warn),
+            baseline_overrides
+                .and_then(|o| o.torque_critical_fraction)
+                .unwrap_or(cfg_crit),
         )
     };
 
     // Gas warning
     if packet.gas_units > gas_warn {
-        let severity_str = if packet.gas_units > gas_crit { "CRITICAL" } else { "WARNING" };
+        let severity_str = if packet.gas_units > gas_crit {
+            "CRITICAL"
+        } else {
+            "WARNING"
+        };
         return (
             true,
             AnomalyCategory::WellControl,
-            Some(format!("{}: Elevated gas {:.0} units (background: {:.0})",
-                severity_str, packet.gas_units, packet.background_gas)),
+            Some(format!(
+                "{}: Elevated gas {:.0} units (background: {:.0})",
+                severity_str, packet.gas_units, packet.background_gas
+            )),
         );
     }
 
     // H2S warning
     if packet.h2s > h2s_warn {
-        let severity_str = if packet.h2s > h2s_crit { "CRITICAL" } else { "WARNING" };
+        let severity_str = if packet.h2s > h2s_crit {
+            "CRITICAL"
+        } else {
+            "WARNING"
+        };
         return (
             true,
             AnomalyCategory::WellControl,
-            Some(format!("{}: H2S detected at {:.1} ppm", severity_str, packet.h2s)),
+            Some(format!(
+                "{}: H2S detected at {:.1} ppm",
+                severity_str, packet.h2s
+            )),
         );
     }
 
     // Pit rate anomaly
     if pit_rate.abs() > pr_warn {
-        let severity_str = if pit_rate.abs() > pr_crit { "CRITICAL" } else { "WARNING" };
+        let severity_str = if pit_rate.abs() > pr_crit {
+            "CRITICAL"
+        } else {
+            "WARNING"
+        };
         let direction = if pit_rate > 0.0 { "gain" } else { "loss" };
         return (
             true,
             AnomalyCategory::WellControl,
-            Some(format!("{}: Pit {} rate {:.1} bbl/hr", severity_str, direction, pit_rate.abs())),
+            Some(format!(
+                "{}: Pit {} rate {:.1} bbl/hr",
+                severity_str,
+                direction,
+                pit_rate.abs()
+            )),
         );
     }
 
@@ -335,22 +403,43 @@ fn detect_anomalies(
 
     // ECD margin
     if packet.ecd_margin() < ecd_warn {
-        let severity_str = if packet.ecd_margin() < ecd_crit { "CRITICAL" } else { "WARNING" };
+        let severity_str = if packet.ecd_margin() < ecd_crit {
+            "CRITICAL"
+        } else {
+            "WARNING"
+        };
         return (
             true,
             AnomalyCategory::Hydraulics,
-            Some(format!("{}: ECD margin only {:.2} ppg to fracture", severity_str, packet.ecd_margin())),
+            Some(format!(
+                "{}: ECD margin only {:.2} ppg to fracture",
+                severity_str,
+                packet.ecd_margin()
+            )),
         );
     }
 
     // SPP deviation
     if spp_delta.abs() > spp_warn {
-        let severity_str = if spp_delta.abs() > spp_crit { "HIGH" } else { "WARNING" };
-        let direction = if spp_delta > 0.0 { "increase" } else { "decrease" };
+        let severity_str = if spp_delta.abs() > spp_crit {
+            "HIGH"
+        } else {
+            "WARNING"
+        };
+        let direction = if spp_delta > 0.0 {
+            "increase"
+        } else {
+            "decrease"
+        };
         return (
             true,
             AnomalyCategory::Hydraulics,
-            Some(format!("{}: SPP {} of {:.0} psi", severity_str, direction, spp_delta.abs())),
+            Some(format!(
+                "{}: SPP {} of {:.0} psi",
+                severity_str,
+                direction,
+                spp_delta.abs()
+            )),
         );
     }
 
@@ -358,23 +447,27 @@ fn detect_anomalies(
 
     // Torque increase (potential pack-off or stuck pipe)
     if torque_delta_percent > torq_warn {
-        let severity_str = if torque_delta_percent > torq_crit { "HIGH" } else { "WARNING" };
+        let severity_str = if torque_delta_percent > torq_crit {
+            "HIGH"
+        } else {
+            "WARNING"
+        };
         return (
             true,
             AnomalyCategory::Mechanical,
-            Some(format!("{}: Torque increase {:.1}% - potential pack-off", severity_str, torque_delta_percent * 100.0)),
+            Some(format!(
+                "{}: Torque increase {:.1}% - potential pack-off",
+                severity_str,
+                torque_delta_percent * 100.0
+            )),
         );
     }
 
     // Founder detection (WOB increasing but ROP not responding)
     // Quick check using two consecutive packets - strategic agent will verify with full history
     if let Some(prev) = prev_packet {
-        let (is_potential_founder, wob_delta, rop_delta) = detect_founder_quick(
-            prev.wob,
-            prev.rop,
-            packet.wob,
-            packet.rop,
-        );
+        let (is_potential_founder, wob_delta, rop_delta) =
+            detect_founder_quick(prev.wob, prev.rop, packet.wob, packet.rop);
         if is_potential_founder && *state == RigState::Drilling {
             let severity_str = if rop_delta < -0.05 { "HIGH" } else { "WARNING" };
             return (
@@ -384,7 +477,11 @@ fn detect_anomalies(
                     "{}: Founder condition - WOB increased {:.1}% but ROP {} {:.1}%. Reduce WOB.",
                     severity_str,
                     wob_delta * 100.0,
-                    if rop_delta < 0.0 { "decreased" } else { "flat at" },
+                    if rop_delta < 0.0 {
+                        "decreased"
+                    } else {
+                        "flat at"
+                    },
                     rop_delta.abs() * 100.0
                 )),
             );
@@ -397,13 +494,22 @@ fn detect_anomalies(
     let (mse_warn, mse_poor) = if cfg_available {
         let m = &crate::config::get().thresholds.mse;
         (m.efficiency_warning_percent, m.efficiency_poor_percent)
-    } else { (70.0, 50.0) };
+    } else {
+        (70.0, 50.0)
+    };
     if *state == RigState::Drilling && mse_efficiency < mse_warn {
-        let severity_str = if mse_efficiency < mse_poor { "HIGH" } else { "LOW" };
+        let severity_str = if mse_efficiency < mse_poor {
+            "HIGH"
+        } else {
+            "LOW"
+        };
         return (
             true,
             AnomalyCategory::DrillingEfficiency,
-            Some(format!("{}: MSE efficiency {:.0}% - optimization opportunity", severity_str, mse_efficiency)),
+            Some(format!(
+                "{}: MSE efficiency {:.0}% - optimization opportunity",
+                severity_str, mse_efficiency
+            )),
         );
     }
 
@@ -448,14 +554,17 @@ pub fn enhanced_strategic_analysis(history: &[HistoryEntry]) -> EnhancedPhysicsR
     // Calculate confidence factor
     let depth_factor = (history.len() as f64 / 60.0).min(1.0);
     let consistency_factor = trend_consistency;
-    let operating_count = history.iter()
+    let operating_count = history
+        .iter()
         .filter(|h| h.metrics.state == RigState::Drilling || h.metrics.state == RigState::Reaming)
         .count();
     let operating_factor = operating_count as f64 / history.len().max(1) as f64;
-    let confidence_factor = (depth_factor * 0.4 + consistency_factor * 0.3 + operating_factor * 0.3).min(1.0);
+    let confidence_factor =
+        (depth_factor * 0.4 + consistency_factor * 0.3 + operating_factor * 0.3).min(1.0);
 
     // Check if anomaly is sustained
-    let anomaly_count = history.iter()
+    let anomaly_count = history
+        .iter()
         .rev()
         .take(10)
         .filter(|h| h.metrics.is_anomaly)
@@ -475,7 +584,6 @@ pub fn enhanced_strategic_analysis(history: &[HistoryEntry]) -> EnhancedPhysicsR
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     fn create_drilling_packet() -> WitsPacket {
         WitsPacket {
@@ -516,7 +624,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     #[test]
@@ -525,11 +634,20 @@ mod tests {
         let metrics = tactical_update(&packet, None, None);
 
         assert_eq!(metrics.state, RigState::Drilling);
-        assert!(metrics.mse > 0.0, "MSE should be calculated during drilling");
+        assert!(
+            metrics.mse > 0.0,
+            "MSE should be calculated during drilling"
+        );
         // D-exponent can be negative for certain drilling parameter combinations
         // Just verify it's a finite number (not NaN or Inf)
-        assert!(metrics.d_exponent.is_finite(), "D-exponent should be finite");
-        assert!(!metrics.is_anomaly, "Normal drilling should not trigger anomaly");
+        assert!(
+            metrics.d_exponent.is_finite(),
+            "D-exponent should be finite"
+        );
+        assert!(
+            !metrics.is_anomaly,
+            "Normal drilling should not trigger anomaly"
+        );
     }
 
     #[test]
@@ -550,14 +668,17 @@ mod tests {
         let mut packet = create_drilling_packet();
         packet.rop = 10.0; // Low ROP
         packet.wob = 35.0; // High WOB
-        // This should result in poor MSE efficiency
+                           // This should result in poor MSE efficiency
 
         let metrics = tactical_update(&packet, None, None);
 
         // Low efficiency is detected when MSE is higher than optimal
         // MSE efficiency is capped at 100.0, so just verify metrics were calculated
         assert!(metrics.mse > 0.0, "MSE should be calculated");
-        assert!(metrics.mse_efficiency <= 100.0, "MSE efficiency should be <= 100");
+        assert!(
+            metrics.mse_efficiency <= 100.0,
+            "MSE efficiency should be <= 100"
+        );
     }
 
     #[test]

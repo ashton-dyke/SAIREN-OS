@@ -5,7 +5,19 @@
       "Bash(cargo build:*)",
       "Bash(cargo test:*)",
       "Bash(cargo check:*)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(cargo clippy:*)",
+      "Bash(grep:*)",
+      "Bash(git -C /home/ashton/SAIREN-OS_test diff --stat)",
+      "Bash(git -C /home/ashton/SAIREN-OS_test diff -- src/agents/tactical.rs)",
+      "Bash(cargo run:*)",
+      "Bash(find:*)",
+      "Bash(./target/release/volve-replay:*)",
+      "Bash(CARGO_TARGET_DIR=/tmp/rigwatch-target cargo test:*)",
+      "Bash(wc:*)",
+      "Bash(python3:*)",
+      "Bash(timeout 30 ./target/release/sairen-os:*)",
+      "Bash(cargo fmt:*)"
     ]
   }
 }

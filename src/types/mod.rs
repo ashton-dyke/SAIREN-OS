@@ -10,27 +10,27 @@
 //! - Phase 8: StrategicAdvisory (orchestrator output with weighted voting)
 
 mod state;
-mod wits;
 mod tactical;
+mod wits;
 // Public because it contains the legacy `thresholds` sub-module
 // which must remain accessible as `types::thresholds`.
-pub mod thresholds;
 mod advisory;
-mod ticket;
-mod ml;
-mod formation;
-mod optimization;
-mod knowledge_base;
 mod debrief;
+mod formation;
+mod knowledge_base;
+mod ml;
+mod optimization;
+pub mod thresholds;
+mod ticket;
 
+pub use advisory::*;
+pub use debrief::*;
+pub use formation::*;
+pub use knowledge_base::*;
+pub use ml::*;
+pub use optimization::*;
 pub use state::*;
-pub use wits::*;
 pub use tactical::*;
 pub use thresholds::*;
-pub use advisory::*;
 pub use ticket::*;
-pub use ml::*;
-pub use formation::*;
-pub use optimization::*;
-pub use knowledge_base::*;
-pub use debrief::*;
+pub use wits::*;

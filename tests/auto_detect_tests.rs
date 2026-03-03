@@ -3,9 +3,9 @@
 //! - AutoDetector from WITS packets
 //! - BaselineOverrides computation
 
-use sairen_os::baseline::{BaselineOverrides, ThresholdManager, wits_metrics};
+use sairen_os::baseline::{wits_metrics, BaselineOverrides, ThresholdManager};
+use sairen_os::config::auto_detect::AutoDetector;
 use sairen_os::config::{self, ConfigProvenance, WellConfig};
-use sairen_os::config::auto_detect::{AutoDetector, AutoDetectedValues};
 use sairen_os::types::WitsPacket;
 
 fn ensure_config() {
@@ -29,7 +29,9 @@ normal_mud_weight_ppg = 9.2
         sairen_os::config::validation::walk_toml_keys(&value, "")
             .into_iter()
             .collect();
-    let prov = ConfigProvenance { explicit_keys: keys };
+    let prov = ConfigProvenance {
+        explicit_keys: keys,
+    };
 
     assert!(prov.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg"));
     assert!(prov.is_user_set("thresholds.hydraulics"));
@@ -59,7 +61,9 @@ normal_mud_weight_ppg = 10.5
         sairen_os::config::validation::walk_toml_keys(&value, "")
             .into_iter()
             .collect();
-    let prov = ConfigProvenance { explicit_keys: keys };
+    let prov = ConfigProvenance {
+        explicit_keys: keys,
+    };
 
     // User-set
     assert!(prov.is_user_set("well.name"));
@@ -91,7 +95,9 @@ fn auto_detect_stable_mud_weight() {
     }
     assert!(detector.ready());
     let detected = detector.detect();
-    let mw = detected.normal_mud_weight_ppg.expect("should detect stable mud weight");
+    let mw = detected
+        .normal_mud_weight_ppg
+        .expect("should detect stable mud weight");
     assert!((mw - 10.5).abs() < 0.01);
 }
 
@@ -120,7 +126,9 @@ fn auto_detect_skips_zeros() {
     }
     assert!(detector.ready());
     let detected = detector.detect();
-    let mw = detected.normal_mud_weight_ppg.expect("valid samples should be detected");
+    let mw = detected
+        .normal_mud_weight_ppg
+        .expect("valid samples should be detected");
     assert!((mw - 9.8).abs() < 0.01);
 }
 
@@ -146,7 +154,9 @@ normal_mud_weight_ppg = 12.0
             sairen_os::config::validation::walk_toml_keys(&value, "")
                 .into_iter()
                 .collect();
-        ConfigProvenance { explicit_keys: keys }
+        ConfigProvenance {
+            explicit_keys: keys,
+        }
     };
 
     let mut detector = AutoDetector::new();
@@ -202,7 +212,10 @@ fn baseline_overrides_computed_from_known_data() {
     // Flow imbalance: 3σ of std
     assert!(overrides.flow_imbalance_warning_gpm.is_some());
     let flow_warn = overrides.flow_imbalance_warning_gpm.unwrap();
-    assert!(flow_warn > 0.0, "Flow imbalance override should be positive");
+    assert!(
+        flow_warn > 0.0,
+        "Flow imbalance override should be positive"
+    );
 
     // SPP: 2σ and 3σ
     assert!(overrides.spp_deviation_warning_psi.is_some());

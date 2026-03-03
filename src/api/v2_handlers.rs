@@ -13,6 +13,7 @@ use super::envelope::{ApiErrorResponse, ApiResponse};
 use super::handlers::DashboardState;
 use crate::baseline::{wits_metrics, LearningStatus};
 use crate::ml_engine::OptimalFinder;
+use crate::types::ConfidenceLevel;
 
 // ============================================================================
 // Response types
@@ -175,23 +176,28 @@ pub struct ShiftQuery {
 // ============================================================================
 
 fn build_health(state: &crate::pipeline::AppState, dashboard: &DashboardState) -> HealthV2 {
-    let (score, severity, diagnosis, recommendation, confidence) =
-        match &state.latest_advisory {
-            Some(adv) => (
-                adv.efficiency_score as f64,
-                format!("{:?}", adv.severity),
-                adv.reasoning.clone(),
-                adv.recommendation.clone(),
-                0.85,
-            ),
-            None => (
-                100.0,
-                "Healthy".to_string(),
-                "System initializing, collecting baseline data.".to_string(),
-                "Wait for learning phase to complete.".to_string(),
-                0.0,
-            ),
-        };
+    let (score, severity, diagnosis, recommendation) = match &state.latest_advisory {
+        Some(adv) => (
+            adv.efficiency_score as f64,
+            format!("{:?}", adv.severity),
+            adv.reasoning.clone(),
+            adv.recommendation.clone(),
+        ),
+        None => (
+            100.0,
+            "Healthy".to_string(),
+            "System initializing, collecting baseline data.".to_string(),
+            "Wait for learning phase to complete.".to_string(),
+        ),
+    };
+
+    // Derive confidence from sample count using calibrated thresholds
+    let confidence = match ConfidenceLevel::from_sample_count(state.samples_collected) {
+        ConfidenceLevel::High => 0.95,
+        ConfidenceLevel::Medium => 0.75,
+        ConfidenceLevel::Low => 0.50,
+        ConfidenceLevel::Insufficient => 0.0,
+    };
 
     let baseline_status = dashboard
         .threshold_manager
@@ -228,15 +234,24 @@ fn build_health(state: &crate::pipeline::AppState, dashboard: &DashboardState) -
 }
 
 fn build_status(state: &crate::pipeline::AppState) -> StatusV2 {
-    let (rig_state, operation, operation_code) = match (&state.latest_wits_packet, &state.latest_drilling_metrics) {
-        (Some(pkt), Some(metrics)) => (
-            format!("{:?}", pkt.rig_state),
-            metrics.operation.display_name().to_string(),
-            metrics.operation.short_code().to_string(),
-        ),
-        (Some(pkt), None) => (format!("{:?}", pkt.rig_state), "Static".to_string(), "STATIC".to_string()),
-        _ => ("Unknown".to_string(), "Static".to_string(), "STATIC".to_string()),
-    };
+    let (rig_state, operation, operation_code) =
+        match (&state.latest_wits_packet, &state.latest_drilling_metrics) {
+            (Some(pkt), Some(metrics)) => (
+                format!("{:?}", pkt.rig_state),
+                metrics.operation.display_name().to_string(),
+                metrics.operation.short_code().to_string(),
+            ),
+            (Some(pkt), None) => (
+                format!("{:?}", pkt.rig_state),
+                "Static".to_string(),
+                "STATIC".to_string(),
+            ),
+            _ => (
+                "Unknown".to_string(),
+                "Static".to_string(),
+                "STATIC".to_string(),
+            ),
+        };
 
     StatusV2 {
         system_status: format!("{:?}", state.status),
@@ -252,21 +267,53 @@ fn build_status(state: &crate::pipeline::AppState) -> StatusV2 {
 }
 
 fn build_drilling(state: &crate::pipeline::AppState, dashboard: &DashboardState) -> DrillingV2 {
-    let (bit_depth, rop, wob, rpm, torque, spp, hook_load, flow_in, flow_out, pit_volume, mud_weight, ecd, gas_units, ecd_margin) =
-        match &state.latest_wits_packet {
-            Some(pkt) => (
-                pkt.bit_depth, pkt.rop, pkt.wob, pkt.rpm, pkt.torque,
-                pkt.spp, pkt.hook_load, pkt.flow_in, pkt.flow_out,
-                pkt.pit_volume, pkt.mud_weight_in, pkt.ecd, pkt.gas_units,
-                pkt.ecd_margin(),
-            ),
-            None => (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
-        };
+    let (
+        bit_depth,
+        rop,
+        wob,
+        rpm,
+        torque,
+        spp,
+        hook_load,
+        flow_in,
+        flow_out,
+        pit_volume,
+        mud_weight,
+        ecd,
+        gas_units,
+        ecd_margin,
+    ) = match &state.latest_wits_packet {
+        Some(pkt) => (
+            pkt.bit_depth,
+            pkt.rop,
+            pkt.wob,
+            pkt.rpm,
+            pkt.torque,
+            pkt.spp,
+            pkt.hook_load,
+            pkt.flow_in,
+            pkt.flow_out,
+            pkt.pit_volume,
+            pkt.mud_weight_in,
+            pkt.ecd,
+            pkt.gas_units,
+            pkt.ecd_margin(),
+        ),
+        None => (
+            0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        ),
+    };
 
     let flow_balance = flow_out - flow_in;
 
     let (mse, mse_efficiency, mse_delta, d_exponent, dxc) = match &state.latest_drilling_metrics {
-        Some(m) => (m.mse, m.mse_efficiency, m.mse_delta_percent, m.d_exponent, m.dxc),
+        Some(m) => (
+            m.mse,
+            m.mse_efficiency,
+            m.mse_delta_percent,
+            m.d_exponent,
+            m.dxc,
+        ),
         None => (0.0, 100.0, 0.0, 1.0, 1.0),
     };
 
@@ -290,10 +337,17 @@ fn build_drilling(state: &crate::pipeline::AppState, dashboard: &DashboardState)
     };
 
     // Formation transition check
-    let formation_change = state.latest_formation_transition.as_ref().map_or(false, |event| {
-        let latest_ts = state.latest_wits_packet.as_ref().map(|p| p.timestamp).unwrap_or(0);
-        latest_ts.saturating_sub(event.timestamp) <= 60
-    });
+    let formation_change = state
+        .latest_formation_transition
+        .as_ref()
+        .map_or(false, |event| {
+            let latest_ts = state
+                .latest_wits_packet
+                .as_ref()
+                .map(|p| p.timestamp)
+                .unwrap_or(0);
+            latest_ts.saturating_sub(event.timestamp) <= 60
+        });
 
     let votes = state.latest_advisory.as_ref().map(|adv| {
         let mut mv = "--".to_string();
@@ -310,18 +364,45 @@ fn build_drilling(state: &crate::pipeline::AppState, dashboard: &DashboardState)
                 _ => {}
             }
         }
-        SpecialistVotesV2 { mse: mv, hydraulic: hv, well_control: wv, formation: fv }
+        SpecialistVotesV2 {
+            mse: mv,
+            hydraulic: hv,
+            well_control: wv,
+            formation: fv,
+        }
     });
 
     DrillingV2 {
-        bit_depth, rop, wob, rpm, torque, spp, hook_load,
-        flow_in, flow_out, flow_balance, pit_volume, mud_weight,
-        ecd, ecd_margin, gas_units, mse, mse_efficiency,
+        bit_depth,
+        rop,
+        wob,
+        rpm,
+        torque,
+        spp,
+        hook_load,
+        flow_in,
+        flow_out,
+        flow_balance,
+        pit_volume,
+        mud_weight,
+        ecd,
+        ecd_margin,
+        gas_units,
+        mse,
+        mse_efficiency,
         mse_baseline: mse_baseline_display,
-        d_exponent, dxc,
+        d_exponent,
+        dxc,
         formation_type: "Normal".to_string(),
         formation_change,
-        trend: if mse_delta.abs() < 0.05 { "Stable" } else if mse_delta > 0.0 { "Increasing" } else { "Decreasing" }.to_string(),
+        trend: if mse_delta.abs() < 0.05 {
+            "Stable"
+        } else if mse_delta > 0.0 {
+            "Increasing"
+        } else {
+            "Decreasing"
+        }
+        .to_string(),
         votes,
     }
 }
@@ -351,10 +432,18 @@ fn build_verification(state: &crate::pipeline::AppState) -> VerificationV2 {
 
 fn build_baseline_summary(dashboard: &DashboardState) -> BaselineSummaryV2 {
     let metrics_to_check = [
-        wits_metrics::MSE, wits_metrics::D_EXPONENT, wits_metrics::DXC,
-        wits_metrics::FLOW_BALANCE, wits_metrics::SPP, wits_metrics::TORQUE,
-        wits_metrics::ROP, wits_metrics::WOB, wits_metrics::RPM,
-        wits_metrics::ECD, wits_metrics::PIT_VOLUME, wits_metrics::GAS_UNITS,
+        wits_metrics::MSE,
+        wits_metrics::D_EXPONENT,
+        wits_metrics::DXC,
+        wits_metrics::FLOW_BALANCE,
+        wits_metrics::SPP,
+        wits_metrics::TORQUE,
+        wits_metrics::ROP,
+        wits_metrics::WOB,
+        wits_metrics::RPM,
+        wits_metrics::ECD,
+        wits_metrics::PIT_VOLUME,
+        wits_metrics::GAS_UNITS,
     ];
 
     let mgr = match &dashboard.threshold_manager {
@@ -505,7 +594,11 @@ pub async fn reports_daily(
 pub async fn reports_critical(
     Query(params): Query<std::collections::HashMap<String, String>>,
 ) -> Response {
-    let limit: usize = params.get("limit").and_then(|s| s.parse().ok()).unwrap_or(50).min(1000);
+    let limit: usize = params
+        .get("limit")
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(50)
+        .min(1000);
     let reports = crate::storage::history::get_critical_reports(limit);
 
     let entries: Vec<super::handlers::CriticalReportEntry> = reports
@@ -514,12 +607,16 @@ pub async fn reports_critical(
             let physics = &report.physics_report;
             let sig_content = format!(
                 "{}:{}:{}:{}:{}",
-                report.timestamp, report.efficiency_score, report.recommendation,
-                physics.current_depth, physics.current_rop
+                report.timestamp,
+                report.efficiency_score,
+                report.recommendation,
+                physics.current_depth,
+                physics.current_rop
             );
             let digital_signature = format!("MD5-{:x}", md5::compute(sig_content.as_bytes()));
 
-            let dt = chrono::DateTime::from_timestamp(report.timestamp as i64, 0).unwrap_or_default();
+            let dt =
+                chrono::DateTime::from_timestamp(report.timestamp as i64, 0).unwrap_or_default();
             let timestamp_formatted = dt.to_rfc3339();
             let signature_timestamp = Utc::now().to_rfc3339();
             let report_id = format!("RPT-{}", report.timestamp);
@@ -527,8 +624,17 @@ pub async fn reports_critical(
             let (trigger_param, trigger_val, threshold_val) =
                 super::handlers::extract_trigger_info(&report);
 
-            let votes_summary: Vec<String> = report.votes.iter()
-                .map(|v| format!("{} ({}%): {:?}", v.specialist, (v.weight * 100.0).clamp(0.0, 100.0) as u8, v.vote))
+            let votes_summary: Vec<String> = report
+                .votes
+                .iter()
+                .map(|v| {
+                    format!(
+                        "{} ({}%): {:?}",
+                        v.specialist,
+                        (v.weight * 100.0).clamp(0.0, 100.0) as u8,
+                        v.vote
+                    )
+                })
                 .collect();
 
             super::handlers::CriticalReportEntry {
@@ -572,7 +678,10 @@ pub async fn reports_critical(
 /// GET /api/v2/ml/latest
 pub async fn ml_latest(State(state): State<DashboardState>) -> Response {
     let app = state.app_state.read().await;
-    let latest = app.latest_ml_report.as_ref().map(super::handlers::MLReportSummary::from);
+    let latest = app
+        .latest_ml_report
+        .as_ref()
+        .map(super::handlers::MLReportSummary::from);
 
     if let Some(storage) = &state.ml_storage {
         let history: Vec<super::handlers::MLReportSummary> = storage
@@ -612,7 +721,10 @@ pub async fn ml_optimal(
     let app = state.app_state.read().await;
 
     let depth = q.depth.unwrap_or_else(|| {
-        app.latest_wits_packet.as_ref().map(|p| p.bit_depth).unwrap_or(0.0)
+        app.latest_wits_packet
+            .as_ref()
+            .map(|p| p.bit_depth)
+            .unwrap_or(0.0)
     });
 
     let Some(storage) = &state.ml_storage else {
@@ -657,9 +769,10 @@ pub async fn update_config(
     match request.config.validate() {
         Ok(()) => {}
         Err(crate::config::ConfigError::Validation(errors)) => {
-            return ApiErrorResponse::bad_request(
-                format!("Validation failed: {}", errors.join("; ")),
-            );
+            return ApiErrorResponse::bad_request(format!(
+                "Validation failed: {}",
+                errors.join("; ")
+            ));
         }
         Err(e) => {
             return ApiErrorResponse::bad_request(format!("Validation error: {e}"));
@@ -701,12 +814,10 @@ pub async fn validate_config(
             "valid": true,
             "message": "Configuration is valid"
         })),
-        Err(crate::config::ConfigError::Validation(errors)) => {
-            ApiResponse::ok(serde_json::json!({
-                "valid": false,
-                "errors": errors
-            }))
-        }
+        Err(crate::config::ConfigError::Validation(errors)) => ApiResponse::ok(serde_json::json!({
+            "valid": false,
+            "errors": errors
+        })),
         Err(e) => ApiErrorResponse::bad_request(format!("Validation error: {e}")),
     }
 }
@@ -809,7 +920,9 @@ pub async fn shift_summary(
     let from_ts = now.saturating_sub(duration_secs);
 
     let app = state.app_state.read().await;
-    let acks_in_period = app.acknowledgments.iter()
+    let acks_in_period = app
+        .acknowledgments
+        .iter()
         .filter(|a| a.acknowledged_at >= from_ts && a.acknowledged_at <= now)
         .count();
 
@@ -1015,7 +1128,11 @@ pub async fn lookahead_status(State(state): State<DashboardState>) -> Response {
             estimated_minutes: Some(la.estimated_minutes),
             hazards: la.hazards,
             parameter_changes: la.parameter_changes,
-            offset_notes: if la.offset_notes.is_empty() { None } else { Some(la.offset_notes) },
+            offset_notes: if la.offset_notes.is_empty() {
+                None
+            } else {
+                Some(la.offset_notes)
+            },
         }),
         None => ApiResponse::ok(LookaheadStatus {
             enabled: true,
@@ -1088,7 +1205,10 @@ pub async fn damping_status(State(state): State<DashboardState>) -> Response {
     }
 
     let app = state.app_state.read().await;
-    let monitor = app.damping_monitor_snapshot.clone().unwrap_or_else(default_monitor_snapshot);
+    let monitor = app
+        .damping_monitor_snapshot
+        .clone()
+        .unwrap_or_else(default_monitor_snapshot);
     let (wob, rpm) = match &app.latest_wits_packet {
         Some(pkt) => (pkt.wob, pkt.rpm),
         None => {
@@ -1105,11 +1225,7 @@ pub async fn damping_status(State(state): State<DashboardState>) -> Response {
     };
 
     // Collect torque values from the WITS packet history buffer
-    let torques: Vec<f64> = app
-        .wits_history
-        .iter()
-        .map(|pkt| pkt.torque)
-        .collect();
+    let torques: Vec<f64> = app.wits_history.iter().map(|pkt| pkt.torque).collect();
     drop(app);
 
     if torques.len() < config.damping.min_samples {
@@ -1124,10 +1240,8 @@ pub async fn damping_status(State(state): State<DashboardState>) -> Response {
         });
     }
 
-    let analysis = crate::physics_engine::characterize_oscillation(
-        &torques,
-        config.damping.min_samples,
-    );
+    let analysis =
+        crate::physics_engine::characterize_oscillation(&torques, config.damping.min_samples);
 
     match analysis {
         Some(a) => {
@@ -1189,9 +1303,7 @@ pub struct RecipeListResponse {
 }
 
 /// GET /api/v2/damping/recipes — list all stored formation damping recipes.
-pub async fn damping_recipes(
-    State(_state): State<DashboardState>,
-) -> Response {
+pub async fn damping_recipes(State(_state): State<DashboardState>) -> Response {
     let formations = crate::storage::damping_recipes::list_formations();
     let result: Vec<FormationRecipes> = formations
         .iter()
@@ -1222,9 +1334,7 @@ pub async fn damping_recipes(
 // ============================================================================
 
 /// POST /api/v2/well/debrief — generate and persist a post-well debrief.
-pub async fn generate_debrief_handler(
-    State(_state): State<DashboardState>,
-) -> Response {
+pub async fn generate_debrief_handler(State(_state): State<DashboardState>) -> Response {
     // Init knowledge base from env vars
     let kb = match crate::knowledge_base::KnowledgeBase::init() {
         Some(kb) => kb,
@@ -1291,9 +1401,7 @@ pub async fn generate_debrief_handler(
 }
 
 /// GET /api/v2/well/debrief — read persisted debrief.
-pub async fn get_debrief_handler(
-    State(_state): State<DashboardState>,
-) -> Response {
+pub async fn get_debrief_handler(State(_state): State<DashboardState>) -> Response {
     let kb = match crate::knowledge_base::KnowledgeBase::init() {
         Some(kb) => kb,
         None => {
@@ -1303,7 +1411,10 @@ pub async fn get_debrief_handler(
         }
     };
 
-    let debrief_path = kb.config().post_well_dir(&kb.config().well).join("debrief.json");
+    let debrief_path = kb
+        .config()
+        .post_well_dir(&kb.config().well)
+        .join("debrief.json");
 
     let json = match std::fs::read_to_string(&debrief_path) {
         Ok(s) => s,
@@ -1386,5 +1497,7 @@ pub async fn debug_fleet_intelligence(
 
 /// GET /api/v2/metrics — Prometheus text format (unchanged from v1).
 pub async fn metrics(State(state): State<DashboardState>) -> Response {
-    super::handlers::get_metrics(State(state)).await.into_response()
+    super::handlers::get_metrics(State(state))
+        .await
+        .into_response()
 }

@@ -41,9 +41,7 @@ impl ParamChangeTracker {
             let avg_wob: f64 = self.window.iter().map(|&(_, w, _)| w).sum::<f64>() / n;
             let avg_rpm: f64 = self.window.iter().map(|&(_, _, r)| r).sum::<f64>() / n;
 
-            if (wob - avg_wob).abs() > WOB_THRESHOLD_KLBS
-                || (rpm - avg_rpm).abs() > RPM_THRESHOLD
-            {
+            if (wob - avg_wob).abs() > WOB_THRESHOLD_KLBS || (rpm - avg_rpm).abs() > RPM_THRESHOLD {
                 self.last_change_ts = timestamp;
             }
         } else if self.last_change_ts == 0 {

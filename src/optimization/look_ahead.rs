@@ -41,7 +41,11 @@ pub fn check_look_ahead(
 
     let wob_delta = nxt.wob_klbs.optimal - cur.wob_klbs.optimal;
     if wob_delta.abs() > 1.0 {
-        let dir = if wob_delta > 0.0 { "increase" } else { "decrease" };
+        let dir = if wob_delta > 0.0 {
+            "increase"
+        } else {
+            "decrease"
+        };
         parameter_changes.push(format!(
             "WOB: {:.0} → {:.0} klbs ({} by {:.0})",
             cur.wob_klbs.optimal,
@@ -53,16 +57,27 @@ pub fn check_look_ahead(
 
     let rpm_delta = nxt.rpm.optimal - cur.rpm.optimal;
     if rpm_delta.abs() > 5.0 {
-        let dir = if rpm_delta > 0.0 { "increase" } else { "decrease" };
+        let dir = if rpm_delta > 0.0 {
+            "increase"
+        } else {
+            "decrease"
+        };
         parameter_changes.push(format!(
             "RPM: {:.0} → {:.0} ({} by {:.0})",
-            cur.rpm.optimal, nxt.rpm.optimal, dir, rpm_delta.abs()
+            cur.rpm.optimal,
+            nxt.rpm.optimal,
+            dir,
+            rpm_delta.abs()
         ));
     }
 
     let flow_delta = nxt.flow_gpm.optimal - cur.flow_gpm.optimal;
     if flow_delta.abs() > 10.0 {
-        let dir = if flow_delta > 0.0 { "increase" } else { "decrease" };
+        let dir = if flow_delta > 0.0 {
+            "increase"
+        } else {
+            "decrease"
+        };
         parameter_changes.push(format!(
             "Flow: {:.0} → {:.0} GPM ({} by {:.0})",
             cur.flow_gpm.optimal,
@@ -100,9 +115,21 @@ mod tests {
             fracture_gradient_ppg: 13.0,
             hazards: vec![],
             parameters: FormationParameters {
-                wob_klbs: ParameterRange { min: 10.0, optimal: 20.0, max: 30.0 },
-                rpm: ParameterRange { min: 80.0, optimal: 120.0, max: 160.0 },
-                flow_gpm: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+                wob_klbs: ParameterRange {
+                    min: 10.0,
+                    optimal: 20.0,
+                    max: 30.0,
+                },
+                rpm: ParameterRange {
+                    min: 80.0,
+                    optimal: 120.0,
+                    max: 160.0,
+                },
+                flow_gpm: ParameterRange {
+                    min: 400.0,
+                    optimal: 500.0,
+                    max: 600.0,
+                },
                 mud_weight_ppg: 10.0,
                 bit_type: "PDC".to_string(),
             },
@@ -111,7 +138,10 @@ mod tests {
                 avg_rop_ft_hr: 80.0,
                 best_rop_ft_hr: 100.0,
                 avg_mse_psi: 15000.0,
-                best_params: BestParams { wob_klbs: 22.0, rpm: 125.0 },
+                best_params: BestParams {
+                    wob_klbs: 22.0,
+                    rpm: 125.0,
+                },
                 notes: String::new(),
             },
         };
@@ -127,9 +157,21 @@ mod tests {
             fracture_gradient_ppg: 15.0,
             hazards: vec!["Lost circulation risk".into()],
             parameters: FormationParameters {
-                wob_klbs: ParameterRange { min: 20.0, optimal: 30.0, max: 40.0 },
-                rpm: ParameterRange { min: 60.0, optimal: 90.0, max: 120.0 },
-                flow_gpm: ParameterRange { min: 450.0, optimal: 550.0, max: 650.0 },
+                wob_klbs: ParameterRange {
+                    min: 20.0,
+                    optimal: 30.0,
+                    max: 40.0,
+                },
+                rpm: ParameterRange {
+                    min: 60.0,
+                    optimal: 90.0,
+                    max: 120.0,
+                },
+                flow_gpm: ParameterRange {
+                    min: 450.0,
+                    optimal: 550.0,
+                    max: 650.0,
+                },
                 mud_weight_ppg: 12.0,
                 bit_type: "PDC".to_string(),
             },
@@ -138,7 +180,10 @@ mod tests {
                 avg_rop_ft_hr: 40.0,
                 best_rop_ft_hr: 55.0,
                 avg_mse_psi: 35000.0,
-                best_params: BestParams { wob_klbs: 32.0, rpm: 95.0 },
+                best_params: BestParams {
+                    wob_klbs: 32.0,
+                    rpm: 95.0,
+                },
                 notes: "Reduce RPM before entering".into(),
             },
         };

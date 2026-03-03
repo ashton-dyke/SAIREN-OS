@@ -4,15 +4,17 @@
 //! The network is self-supervised: it predicts next-timestep sensor values
 //! and treats prediction error as an anomaly signal.
 
-use std::collections::VecDeque;
 use crate::cfc::cell::{CfcCell, CfcWeights, ForwardCache};
-use crate::cfc::normalizer::{OnlineNormalizer, NUM_FEATURES, FEATURE_NAMES};
-use crate::cfc::training::{AdamOptimizer, train_step_with_config, TrainingConfig};
+use crate::cfc::normalizer::{OnlineNormalizer, FEATURE_NAMES, NUM_FEATURES};
+use crate::cfc::training::{train_step_with_config, AdamOptimizer, TrainingConfig};
 use crate::cfc::wiring::{NcpConfig, NcpWiring, NUM_OUTPUTS};
+use std::collections::VecDeque;
 
 /// Calibration window: number of packets before the network is considered
 /// calibrated enough to produce meaningful anomaly scores.
-const CALIBRATION_WINDOW: u64 = 500;
+/// Reduced from 500 → 300: fast network loss stabilizes by ~200 packets on
+/// all three Volve wells. 300 provides margin while enabling earlier gating.
+const CALIBRATION_WINDOW: u64 = 300;
 
 /// EMA decay for anomaly score tracking.
 const ERROR_EMA_ALPHA: f64 = 0.01;
@@ -49,7 +51,7 @@ impl CfcNetworkConfig {
             ncp: NcpConfig::dual_64(),
             training: TrainingConfig::fast(),
             error_ema_alpha: 0.01,
-            calibration_window: 500,
+            calibration_window: 300,
         }
     }
 
@@ -60,7 +62,7 @@ impl CfcNetworkConfig {
             ncp: NcpConfig::dual_64(),
             training: TrainingConfig::slow(),
             error_ema_alpha: 0.005,
-            calibration_window: 750,
+            calibration_window: 500,
         }
     }
 }
@@ -152,7 +154,11 @@ impl CfcNetwork {
     /// Process one packet: normalize, train on previous predictions via BPTT, forward pass.
     ///
     /// Returns (predictions, training_loss).
-    pub fn process(&mut self, raw_features: &[f64; NUM_FEATURES], dt: f64) -> (Vec<f64>, Option<f64>) {
+    pub fn process(
+        &mut self,
+        raw_features: &[f64; NUM_FEATURES],
+        dt: f64,
+    ) -> (Vec<f64>, Option<f64>) {
         self.packets_processed += 1;
         let ema_alpha = self.config.error_ema_alpha;
 
@@ -174,19 +180,19 @@ impl CfcNetwork {
 
                     // Update per-feature error EMAs
                     let abs_err = err.abs();
-                    self.feature_error_ema[i] = self.feature_error_ema[i] * (1.0 - ema_alpha)
-                        + abs_err * ema_alpha;
+                    self.feature_error_ema[i] =
+                        self.feature_error_ema[i] * (1.0 - ema_alpha) + abs_err * ema_alpha;
                     self.feature_error_sq_ema[i] = self.feature_error_sq_ema[i] * (1.0 - ema_alpha)
                         + (abs_err * abs_err) * ema_alpha;
                 }
             }
 
             // Build cache slice for BPTT (most recent first)
-            let cache_vec: Vec<ForwardCache> = self.cache_history.iter().cloned().collect();
+            let cache_slice = self.cache_history.make_contiguous();
 
             let loss = train_step_with_config(
                 &mut self.weights,
-                &cache_vec,
+                cache_slice,
                 &target,
                 &self.wiring,
                 &mut self.optimizer,
@@ -199,10 +205,8 @@ impl CfcNetwork {
             // Update error EMA for anomaly scoring
             let rmse = loss.sqrt();
             self.last_rmse = rmse;
-            self.error_ema = self.error_ema * (1.0 - ema_alpha)
-                + rmse * ema_alpha;
-            self.error_sq_ema = self.error_sq_ema * (1.0 - ema_alpha)
-                + (rmse * rmse) * ema_alpha;
+            self.error_ema = self.error_ema * (1.0 - ema_alpha) + rmse * ema_alpha;
+            self.error_sq_ema = self.error_sq_ema * (1.0 - ema_alpha) + (rmse * rmse) * ema_alpha;
 
             Some(loss)
         } else {
@@ -212,13 +216,8 @@ impl CfcNetwork {
         // ====================================================================
         // Forward: predict next timestep
         // ====================================================================
-        let (h_new, predictions, cache) = CfcCell::forward(
-            &normalized,
-            &self.hidden,
-            dt,
-            &self.weights,
-            &self.wiring,
-        );
+        let (h_new, predictions, cache) =
+            CfcCell::forward(&normalized, &self.hidden, dt, &self.weights, &self.wiring);
 
         self.hidden = h_new;
 
@@ -287,7 +286,11 @@ impl CfcNetwork {
             })
             .collect();
 
-        surprises.sort_by(|a, b| b.magnitude.partial_cmp(&a.magnitude).unwrap_or(std::cmp::Ordering::Equal));
+        surprises.sort_by(|a, b| {
+            b.magnitude
+                .partial_cmp(&a.magnitude)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         surprises
     }
 
@@ -368,7 +371,9 @@ impl CfcNetwork {
     /// Get the latest motor neuron outputs (8-dimensional) from the most recent forward pass.
     /// Returns None if no forward pass has been computed yet.
     pub fn latest_motor_outputs(&self) -> Option<&[f64]> {
-        self.cache_history.front().map(|cache| cache.motor_out.as_slice())
+        self.cache_history
+            .front()
+            .map(|cache| cache.motor_out.as_slice())
     }
 
     /// Reset network state (hidden state and training history, but keep weights).
@@ -446,6 +451,41 @@ impl CfcNetwork {
     pub fn set_error_ema(&mut self, ema: f64) {
         self.error_ema = ema;
     }
+
+    /// Set squared error EMA value (anomaly scoring variance).
+    pub fn set_error_sq_ema(&mut self, ema: f64) {
+        self.error_sq_ema = ema;
+    }
+
+    /// Set training step counter.
+    pub fn set_train_steps(&mut self, steps: u64) {
+        self.train_steps = steps;
+    }
+
+    /// Set cumulative training loss.
+    pub fn set_total_loss(&mut self, loss: f64) {
+        self.total_loss = loss;
+    }
+
+    /// Set per-feature error EMA array.
+    pub fn set_feature_error_ema(&mut self, ema: [f64; NUM_FEATURES]) {
+        self.feature_error_ema = ema;
+    }
+
+    /// EMA of squared prediction error.
+    pub fn error_sq_ema(&self) -> f64 {
+        self.error_sq_ema
+    }
+
+    /// Cumulative training loss.
+    pub fn total_loss(&self) -> f64 {
+        self.total_loss
+    }
+
+    /// Per-feature error EMA.
+    pub fn feature_error_ema(&self) -> [f64; NUM_FEATURES] {
+        self.feature_error_ema
+    }
 }
 
 #[cfg(test)]
@@ -456,18 +496,20 @@ mod tests {
     #[test]
     fn test_network_process() {
         let mut net = CfcNetwork::new(42);
-        let features = [10.0, 50.0, 120.0, 15.0, 30000.0, 3000.0,
-                        1.5, 200.0, 10.5, 5.0, 0.1, 1.3,
-                        60.0, 10.5, 20.0, 800.0];
+        let features = [
+            10.0, 50.0, 120.0, 15.0, 30000.0, 3000.0, 1.5, 200.0, 10.5, 5.0, 0.1, 1.3, 60.0, 10.5,
+            20.0, 800.0,
+        ];
 
         let (preds, loss) = net.process(&features, 1.0);
         assert_eq!(preds.len(), NUM_OUTPUTS);
         assert!(loss.is_none()); // No training on first packet
 
         // Second packet — should train
-        let features2 = [10.5, 52.0, 121.0, 15.5, 31000.0, 3050.0,
-                         1.6, 202.0, 10.6, 4.5, 0.2, 1.35,
-                         61.0, 10.6, 22.0, 801.0];
+        let features2 = [
+            10.5, 52.0, 121.0, 15.5, 31000.0, 3050.0, 1.6, 202.0, 10.6, 4.5, 0.2, 1.35, 61.0, 10.6,
+            22.0, 801.0,
+        ];
         let (preds2, loss2) = net.process(&features2, 1.0);
         assert_eq!(preds2.len(), NUM_OUTPUTS);
         assert!(loss2.is_some());
@@ -501,9 +543,10 @@ mod tests {
         let mut net = CfcNetwork::new(42);
         assert!(!net.is_calibrated());
 
-        let features = [10.0, 50.0, 120.0, 15.0, 30000.0, 3000.0,
-                        1.5, 200.0, 10.5, 5.0, 0.1, 1.3,
-                        60.0, 10.5, 20.0, 800.0];
+        let features = [
+            10.0, 50.0, 120.0, 15.0, 30000.0, 3000.0, 1.5, 200.0, 10.5, 5.0, 0.1, 1.3, 60.0, 10.5,
+            20.0, 800.0,
+        ];
         for _ in 0..CALIBRATION_WINDOW {
             net.process(&features, 1.0);
         }
@@ -513,9 +556,10 @@ mod tests {
     #[test]
     fn test_anomaly_score_bounds() {
         let mut net = CfcNetwork::new(42);
-        let features = [10.0, 50.0, 120.0, 15.0, 30000.0, 3000.0,
-                        1.5, 200.0, 10.5, 5.0, 0.1, 1.3,
-                        60.0, 10.5, 20.0, 800.0];
+        let features = [
+            10.0, 50.0, 120.0, 15.0, 30000.0, 3000.0, 1.5, 200.0, 10.5, 5.0, 0.1, 1.3, 60.0, 10.5,
+            20.0, 800.0,
+        ];
 
         assert_eq!(net.anomaly_score(), 0.0);
 
@@ -526,7 +570,11 @@ mod tests {
         }
 
         let score = net.anomaly_score();
-        assert!(score >= 0.0 && score <= 1.0, "score out of bounds: {}", score);
+        assert!(
+            score >= 0.0 && score <= 1.0,
+            "score out of bounds: {}",
+            score
+        );
     }
 
     #[test]
@@ -556,7 +604,7 @@ mod tests {
     fn test_with_config_slow() {
         let mut net = CfcNetwork::with_config(42, CfcNetworkConfig::slow());
         assert_eq!(net.config.ncp.num_neurons, 64);
-        assert_eq!(net.config.calibration_window, 750);
+        assert_eq!(net.config.calibration_window, 500);
 
         let features = [10.0; NUM_FEATURES];
         for _ in 0..10 {

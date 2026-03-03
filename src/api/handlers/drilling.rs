@@ -57,20 +57,23 @@ pub struct SpecialistVotesResponse {
 }
 
 /// GET /api/v1/drilling - Get drilling metrics (MSE, formation analysis)
-pub async fn get_drilling_metrics(State(state): State<DashboardState>) -> Json<DrillingMetricsResponse> {
+pub async fn get_drilling_metrics(
+    State(state): State<DashboardState>,
+) -> Json<DrillingMetricsResponse> {
     let app_state = state.app_state.read().await;
 
     // Get drilling metrics from latest_drilling_metrics or strategic report
-    let (mse, mse_efficiency, mse_delta_percent, d_exponent, dxc) = match &app_state.latest_drilling_metrics {
-        Some(metrics) => (
-            metrics.mse,
-            metrics.mse_efficiency,
-            metrics.mse_delta_percent,
-            metrics.d_exponent,
-            metrics.dxc,
-        ),
-        None => (0.0, 100.0, 0.0, 1.0, 1.0),
-    };
+    let (mse, mse_efficiency, mse_delta_percent, d_exponent, dxc) =
+        match &app_state.latest_drilling_metrics {
+            Some(metrics) => (
+                metrics.mse,
+                metrics.mse_efficiency,
+                metrics.mse_delta_percent,
+                metrics.d_exponent,
+                metrics.dxc,
+            ),
+            None => (0.0, 100.0, 0.0, 1.0, 1.0),
+        };
 
     // Get actual MSE baseline from threshold manager if available
     let mse_baseline = if let Some(ref manager) = state.threshold_manager {
@@ -126,18 +129,25 @@ pub async fn get_drilling_metrics(State(state): State<DashboardState>) -> Json<D
     });
 
     // Check for CfC formation transition (within last 60 seconds)
-    let cfc_transition = app_state.latest_formation_transition.as_ref().and_then(|event| {
-        let latest_ts = app_state.latest_wits_packet.as_ref().map(|p| p.timestamp).unwrap_or(0);
-        if latest_ts.saturating_sub(event.timestamp) <= 60 {
-            Some(FormationTransitionInfo {
-                timestamp: event.timestamp,
-                bit_depth: event.bit_depth,
-                surprised_features: event.surprised_features.clone(),
-            })
-        } else {
-            None
-        }
-    });
+    let cfc_transition = app_state
+        .latest_formation_transition
+        .as_ref()
+        .and_then(|event| {
+            let latest_ts = app_state
+                .latest_wits_packet
+                .as_ref()
+                .map(|p| p.timestamp)
+                .unwrap_or(0);
+            if latest_ts.saturating_sub(event.timestamp) <= 60 {
+                Some(FormationTransitionInfo {
+                    timestamp: event.timestamp,
+                    bit_depth: event.bit_depth,
+                    surprised_features: event.surprised_features.clone(),
+                })
+            } else {
+                None
+            }
+        });
     let formation_change = cfc_transition.is_some();
 
     Json(DrillingMetricsResponse {

@@ -72,8 +72,8 @@ fn get_tree() -> Result<&'static Tree, StorageError> {
 /// Last write wins if the same advisory is re-rated.
 pub fn persist(record: &FeedbackRecord) -> Result<(), StorageError> {
     let tree = get_tree()?;
-    let bytes = serde_json::to_vec(record)
-        .map_err(|e| StorageError::SerializationError(e.to_string()))?;
+    let bytes =
+        serde_json::to_vec(record).map_err(|e| StorageError::SerializationError(e.to_string()))?;
     tree.insert(record.advisory_timestamp.to_be_bytes(), bytes)?;
     Ok(())
 }
@@ -86,14 +86,12 @@ pub fn load_all() -> Vec<FeedbackRecord> {
     };
 
     tree.iter()
-        .filter_map(|item| {
-            item.ok()
-                .and_then(|(_, v)| serde_json::from_slice(&v).ok())
-        })
+        .filter_map(|item| item.ok().and_then(|(_, v)| serde_json::from_slice(&v).ok()))
         .collect()
 }
 
 /// Look up feedback for a specific advisory timestamp.
+#[allow(dead_code)]
 pub fn get_by_advisory(timestamp: u64) -> Option<FeedbackRecord> {
     let tree = get_tree().ok()?;
     let bytes = tree.get(timestamp.to_be_bytes()).ok()??;
@@ -120,7 +118,11 @@ mod tests {
 
     #[test]
     fn test_feedback_serde_roundtrip() {
-        let record = make_record(1000, FeedbackOutcome::Confirmed, AnomalyCategory::DrillingEfficiency);
+        let record = make_record(
+            1000,
+            FeedbackOutcome::Confirmed,
+            AnomalyCategory::DrillingEfficiency,
+        );
         let json = serde_json::to_vec(&record).unwrap();
         let decoded: FeedbackRecord = serde_json::from_slice(&json).unwrap();
         assert_eq!(decoded.advisory_timestamp, 1000);

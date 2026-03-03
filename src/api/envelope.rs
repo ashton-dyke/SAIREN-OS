@@ -93,7 +93,9 @@ mod tests {
         let resp = ApiResponse::ok(serde_json::json!({"hello": "world"}));
         assert_eq!(resp.status(), StatusCode::OK);
 
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert!(v.get("data").is_some());
         assert!(v.get("meta").is_some());
@@ -105,7 +107,9 @@ mod tests {
         let resp = ApiErrorResponse::not_found("gone");
         assert_eq!(resp.status(), StatusCode::NOT_FOUND);
 
-        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+        let bytes = axum::body::to_bytes(resp.into_body(), usize::MAX)
+            .await
+            .unwrap();
         let v: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         assert_eq!(v["error"]["code"], "NOT_FOUND");
         assert_eq!(v["error"]["message"], "gone");

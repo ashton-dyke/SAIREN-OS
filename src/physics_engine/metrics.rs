@@ -30,9 +30,7 @@ pub fn kurtosis(signal: &[f64]) -> f64 {
     let mean = signal.iter().sum::<f64>() / n;
 
     // Calculate variance (2nd central moment)
-    let variance = signal.iter()
-        .map(|x| (x - mean).powi(2))
-        .sum::<f64>() / n;
+    let variance = signal.iter().map(|x| (x - mean).powi(2)).sum::<f64>() / n;
 
     if variance < 1e-10 {
         return 0.0; // Avoid division by zero
@@ -41,9 +39,7 @@ pub fn kurtosis(signal: &[f64]) -> f64 {
     let std_dev = variance.sqrt();
 
     // Calculate 4th central moment
-    let fourth_moment = signal.iter()
-        .map(|x| (x - mean).powi(4))
-        .sum::<f64>() / n;
+    let fourth_moment = signal.iter().map(|x| (x - mean).powi(4)).sum::<f64>() / n;
 
     // Kurtosis = 4th moment / variance^2
     // Excess kurtosis subtracts 3 (normal distribution has kurtosis of 3)
@@ -76,8 +72,15 @@ mod tests {
         // Uniform distribution should have negative excess kurtosis (~-1.2)
         let signal: Vec<f64> = (0..1000).map(|x| x as f64).collect();
         let k = kurtosis(&signal);
-        assert!(k < 0.0, "Uniform signal should have negative excess kurtosis");
-        assert!(k > -1.5 && k < -1.0, "Uniform excess kurtosis should be around -1.2, got {}", k);
+        assert!(
+            k < 0.0,
+            "Uniform signal should have negative excess kurtosis"
+        );
+        assert!(
+            k > -1.5 && k < -1.0,
+            "Uniform excess kurtosis should be around -1.2, got {}",
+            k
+        );
     }
 
     #[test]
@@ -96,7 +99,11 @@ mod tests {
             .collect();
         let k = kurtosis(&signal);
         // Sinusoidal sum gives roughly normal-ish kurtosis (within -1 to 1)
-        assert!(k.abs() < 2.0, "Sinusoidal mix should have low excess kurtosis, got {}", k);
+        assert!(
+            k.abs() < 2.0,
+            "Sinusoidal mix should have low excess kurtosis, got {}",
+            k
+        );
     }
 
     #[test]
@@ -105,14 +112,18 @@ mod tests {
         let mut signal: Vec<f64> = vec![0.0; 1024];
         signal[50] = 100.0; // Single impulse
         let k = kurtosis(&signal);
-        assert!(k > 10.0, "Impulse signal should have high kurtosis, got {}", k);
+        assert!(
+            k > 10.0,
+            "Impulse signal should have high kurtosis, got {}",
+            k
+        );
     }
 
     #[test]
     fn test_kurtosis_multiple_impacts() {
         // Simulate bearing fault: multiple impacts at regular intervals
         let mut signal: Vec<f64> = vec![0.015; 1024]; // Baseline noise level
-        // Add 10 impacts (simulating ~100 Hz BPFO in 100ms window)
+                                                      // Add 10 impacts (simulating ~100 Hz BPFO in 100ms window)
         for i in 0..10 {
             let pos = 50 + i * 100;
             if pos < 1024 {
@@ -120,7 +131,11 @@ mod tests {
             }
         }
         let k = kurtosis(&signal);
-        assert!(k > 3.0, "Multiple impacts should have kurtosis > 3.0, got {}", k);
+        assert!(
+            k > 3.0,
+            "Multiple impacts should have kurtosis > 3.0, got {}",
+            k
+        );
     }
 
     #[test]

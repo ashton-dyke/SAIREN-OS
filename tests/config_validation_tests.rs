@@ -195,9 +195,7 @@ fn mud_weight_8_6_ppg_is_valid() {
     let config = WellConfig::default(); // default is 8.6
     let (errors, _) = validate_physical_ranges(&config);
     assert!(
-        !errors
-            .iter()
-            .any(|e| e.contains("normal_mud_weight_ppg")),
+        !errors.iter().any(|e| e.contains("normal_mud_weight_ppg")),
         "Mud weight 8.6 ppg should be valid"
     );
 }
@@ -326,13 +324,10 @@ fn config_roundtrip_preserves_values() {
     original.ensemble_weights.formation = 0.25;
 
     let toml_str = original.to_toml().expect("Serialization should work");
-    let roundtripped: WellConfig =
-        toml::from_str(&toml_str).expect("Deserialization should work");
+    let roundtripped: WellConfig = toml::from_str(&toml_str).expect("Deserialization should work");
 
     assert_eq!(roundtripped.well.name, "Roundtrip-Test");
-    assert!(
-        (roundtripped.thresholds.hydraulics.normal_mud_weight_ppg - 10.5).abs() < f64::EPSILON
-    );
+    assert!((roundtripped.thresholds.hydraulics.normal_mud_weight_ppg - 10.5).abs() < f64::EPSILON);
     assert!((roundtripped.ensemble_weights.mse - 0.20).abs() < f64::EPSILON);
     assert!((roundtripped.ensemble_weights.formation - 0.25).abs() < f64::EPSILON);
 }
@@ -341,8 +336,7 @@ fn config_roundtrip_preserves_values() {
 fn config_roundtrip_passes_validation() {
     let original = WellConfig::default();
     let toml_str = original.to_toml().expect("Serialization should work");
-    let roundtripped: WellConfig =
-        toml::from_str(&toml_str).expect("Deserialization should work");
+    let roundtripped: WellConfig = toml::from_str(&toml_str).expect("Deserialization should work");
     assert!(
         roundtripped.validate().is_ok(),
         "Roundtripped config should pass validation"
@@ -450,9 +444,8 @@ mse_efficiency_warning = 70.0
 flow_imbalance_warning = 10.0
 "#;
     // serde(deny_unknown_fields) is NOT set, so this parses fine
-    let config: WellConfig = toml::from_str(toml_str).expect(
-        "Old config with removed fields should still parse"
-    );
+    let config: WellConfig =
+        toml::from_str(toml_str).expect("Old config with removed fields should still parse");
     assert_eq!(config.well.name, "Old-Config-Well");
     assert_eq!(config.thresholds.mse.efficiency_warning_percent, 70.0);
 }

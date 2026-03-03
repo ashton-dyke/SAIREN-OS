@@ -86,9 +86,10 @@ impl RegimeClusterer {
     /// Try to add a point to the init buffer. If we reach K distinct points, seed centroids.
     fn try_init(&mut self, point: [f64; DIM]) {
         // Check if this point is distinct from all buffered points
-        let is_distinct = self.init_buffer.iter().all(|existing| {
-            sq_dist(existing, &point) > DISTINCT_THRESHOLD_SQ
-        });
+        let is_distinct = self
+            .init_buffer
+            .iter()
+            .all(|existing| sq_dist(existing, &point) > DISTINCT_THRESHOLD_SQ);
 
         if is_distinct {
             self.init_buffer.push(point);

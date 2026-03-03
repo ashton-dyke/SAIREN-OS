@@ -10,15 +10,15 @@
 //! 3. **WellControl** (default 30%) - Kick/loss, gas, pit volume (safety-critical)
 //! 4. **Formation** (default 20%) - D-exponent, torque trends
 
-pub mod mse;
-pub mod hydraulic;
-pub mod well_control;
 pub mod formation;
+pub mod hydraulic;
+pub mod mse;
+pub mod well_control;
 
-pub use mse::MseSpecialist;
-pub use hydraulic::HydraulicSpecialist;
-pub use well_control::WellControlSpecialist;
 pub use formation::FormationSpecialist;
+pub use hydraulic::HydraulicSpecialist;
+pub use mse::MseSpecialist;
+pub use well_control::WellControlSpecialist;
 
 use crate::types::{AdvisoryTicket, DrillingPhysicsReport, SpecialistVote};
 
@@ -31,11 +31,7 @@ pub trait Specialist: Send + Sync {
     fn name(&self) -> &str;
 
     /// Evaluate the ticket and physics report, returning a vote
-    fn evaluate(
-        &self,
-        ticket: &AdvisoryTicket,
-        physics: &DrillingPhysicsReport,
-    ) -> SpecialistVote;
+    fn evaluate(&self, ticket: &AdvisoryTicket, physics: &DrillingPhysicsReport) -> SpecialistVote;
 }
 
 /// Create the default set of 4 drilling specialists

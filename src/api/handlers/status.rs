@@ -55,7 +55,8 @@ pub async fn get_health(State(state): State<DashboardState>) -> Json<HealthRespo
     let (diagnosis, action) = match &app_state.latest_advisory {
         Some(advisory) => (advisory.reasoning.clone(), advisory.recommendation.clone()),
         None => (
-            "System initializing, no analysis performed yet. Collecting baseline data...".to_string(),
+            "System initializing, no analysis performed yet. Collecting baseline data..."
+                .to_string(),
             "Wait for learning phase to complete.".to_string(),
         ),
     };
@@ -130,7 +131,6 @@ pub struct StatusResponse {
     pub gas_units: f64,
     /// ECD margin to fracture pressure in ppg
     pub ecd_margin: f64,
-
 }
 
 /// GET /api/v1/status - Get system status with WITS drilling parameters
@@ -138,30 +138,59 @@ pub async fn get_status(State(state): State<DashboardState>) -> Json<StatusRespo
     let app_state = state.app_state.read().await;
 
     // Extract WITS drilling parameters from latest packet if available
-    let (bit_depth, rop, wob, rpm, torque, spp, hook_load, flow_in, flow_out,
-         pit_volume, mud_weight, ecd, gas_units, ecd_margin, rig_state) =
-        match &app_state.latest_wits_packet {
-            Some(packet) => (
-                packet.bit_depth,
-                packet.rop,
-                packet.wob,
-                packet.rpm,
-                packet.torque,
-                packet.spp,
-                packet.hook_load,
-                packet.flow_in,
-                packet.flow_out,
-                packet.pit_volume,
-                packet.mud_weight_in,
-                packet.ecd,
-                packet.gas_units,
-                // Use actual ECD margin from packet (fracture_gradient - ecd)
-                packet.ecd_margin(),
-                format!("{:?}", packet.rig_state),
-            ),
-            None => (0.0, 0.0, 0.0, app_state.current_rpm, 0.0, 0.0, 0.0,
-                     0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, "Unknown".to_string()),
-        };
+    let (
+        bit_depth,
+        rop,
+        wob,
+        rpm,
+        torque,
+        spp,
+        hook_load,
+        flow_in,
+        flow_out,
+        pit_volume,
+        mud_weight,
+        ecd,
+        gas_units,
+        ecd_margin,
+        rig_state,
+    ) = match &app_state.latest_wits_packet {
+        Some(packet) => (
+            packet.bit_depth,
+            packet.rop,
+            packet.wob,
+            packet.rpm,
+            packet.torque,
+            packet.spp,
+            packet.hook_load,
+            packet.flow_in,
+            packet.flow_out,
+            packet.pit_volume,
+            packet.mud_weight_in,
+            packet.ecd,
+            packet.gas_units,
+            // Use actual ECD margin from packet (fracture_gradient - ecd)
+            packet.ecd_margin(),
+            format!("{:?}", packet.rig_state),
+        ),
+        None => (
+            0.0,
+            0.0,
+            0.0,
+            app_state.current_rpm,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            "Unknown".to_string(),
+        ),
+    };
 
     // Extract operation from latest drilling metrics
     let (operation, operation_code) = match &app_state.latest_drilling_metrics {
@@ -200,7 +229,6 @@ pub async fn get_status(State(state): State<DashboardState>) -> Json<StatusRespo
         ecd_margin,
     })
 }
-
 
 // ============================================================================
 // Legacy Endpoints (kept for compatibility)
@@ -325,7 +353,9 @@ pub struct BaselineStatusResponse {
 ///
 /// Returns the current state of baseline learning for all metrics.
 /// Includes learned thresholds for locked metrics.
-pub async fn get_baseline_status(State(state): State<DashboardState>) -> Json<BaselineStatusResponse> {
+pub async fn get_baseline_status(
+    State(state): State<DashboardState>,
+) -> Json<BaselineStatusResponse> {
     let manager = match &state.threshold_manager {
         Some(m) => m.read().unwrap_or_else(|e| {
             warn!("RwLock poisoned on ThresholdManager read, recovering");

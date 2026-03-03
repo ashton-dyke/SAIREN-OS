@@ -141,7 +141,10 @@ impl TcpSource {
     /// Connect to a WITS server and return a ready source.
     pub async fn connect(host: &str, port: u16) -> Result<Self> {
         let mut client = crate::acquisition::WitsClient::new(host, port);
-        client.connect().await.map_err(|e| anyhow::anyhow!("{}", e))?;
+        client
+            .connect()
+            .await
+            .map_err(|e| anyhow::anyhow!("{}", e))?;
         Ok(Self { client })
     }
 }

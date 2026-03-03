@@ -114,9 +114,9 @@ pub struct CampaignThresholds {
     pub mse_efficiency_poor: f64,
 
     // Pressure thresholds (more critical for P&A)
-    pub pressure_test_tolerance: f64,     // psi deviation allowed
-    pub cement_pressure_hold: f64,        // psi for cement test
-    pub barrier_pressure_margin: f64,     // psi margin for barrier
+    pub pressure_test_tolerance: f64, // psi deviation allowed
+    pub cement_pressure_hold: f64,    // psi for cement test
+    pub barrier_pressure_margin: f64, // psi margin for barrier
 
     // Flow thresholds (tighter for P&A due to cement/plug operations)
     pub flow_imbalance_warning: f64,
@@ -130,7 +130,7 @@ pub struct CampaignThresholds {
 
     // P&A specific
     pub cement_returns_expected: bool,
-    pub plug_depth_tolerance: f64,        // ft tolerance for plug depth
+    pub plug_depth_tolerance: f64, // ft tolerance for plug depth
 }
 
 impl CampaignThresholds {
@@ -143,8 +143,8 @@ impl CampaignThresholds {
 
             // Standard pressure thresholds
             pressure_test_tolerance: 50.0,
-            cement_pressure_hold: 0.0,      // N/A for production
-            barrier_pressure_margin: 0.0,   // N/A for production
+            cement_pressure_hold: 0.0,    // N/A for production
+            barrier_pressure_margin: 0.0, // N/A for production
 
             // Standard flow thresholds
             flow_imbalance_warning: 10.0,
@@ -166,8 +166,8 @@ impl CampaignThresholds {
     pub fn plug_abandonment() -> Self {
         Self {
             // MSE less important for P&A (not drilling for ROP)
-            mse_efficiency_warning: 50.0,   // Relaxed
-            mse_efficiency_poor: 30.0,      // Relaxed
+            mse_efficiency_warning: 50.0, // Relaxed
+            mse_efficiency_poor: 30.0,    // Relaxed
 
             // Pressure integrity is critical for P&A
             pressure_test_tolerance: 25.0,  // Tighter tolerance
@@ -175,18 +175,18 @@ impl CampaignThresholds {
             barrier_pressure_margin: 100.0, // 100 psi margin on barriers
 
             // Tighter flow control for cement operations
-            flow_imbalance_warning: 5.0,    // Tighter - cement returns matter
-            flow_imbalance_critical: 15.0,  // Tighter
+            flow_imbalance_warning: 5.0, // Tighter - cement returns matter
+            flow_imbalance_critical: 15.0, // Tighter
 
             // P&A weights: well control and hydraulics dominate
-            weight_mse: 0.10,               // Reduced - efficiency less critical
-            weight_hydraulic: 0.35,         // Increased - cement/mud critical
-            weight_well_control: 0.40,      // Increased - barrier integrity
-            weight_formation: 0.15,         // Reduced
+            weight_mse: 0.10,          // Reduced - efficiency less critical
+            weight_hydraulic: 0.35,    // Increased - cement/mud critical
+            weight_well_control: 0.40, // Increased - barrier integrity
+            weight_formation: 0.15,    // Reduced
 
             // P&A specific
             cement_returns_expected: true,
-            plug_depth_tolerance: 5.0,      // 5ft tolerance for plug setting
+            plug_depth_tolerance: 5.0, // 5ft tolerance for plug setting
         }
     }
 

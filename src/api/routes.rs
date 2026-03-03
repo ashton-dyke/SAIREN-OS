@@ -7,7 +7,10 @@
 //! - /api/v1/verification - Latest fault verification result
 //! - /api/v1/baseline - Baseline learning status and thresholds
 
-use axum::{routing::{get, post}, Router};
+use axum::{
+    routing::{get, post},
+    Router,
+};
 
 use super::handlers::{self, DashboardState};
 
@@ -42,18 +45,21 @@ pub fn api_routes(state: DashboardState) -> Router {
         .route("/config", post(handlers::update_config))
         .route("/config/validate", post(handlers::validate_config))
         // Advisory acknowledgment
-        .route("/advisory/acknowledge", post(handlers::acknowledge_advisory))
-        .route("/advisory/acknowledgments", get(handlers::get_acknowledgments))
+        .route(
+            "/advisory/acknowledge",
+            post(handlers::acknowledge_advisory),
+        )
+        .route(
+            "/advisory/acknowledgments",
+            get(handlers::get_acknowledgments),
+        )
         // Shift summary
         .route("/shift/summary", get(handlers::get_shift_summary))
         // Prometheus metrics (item 4.1)
         .route("/metrics", get(handlers::get_metrics));
 
     // Fleet intelligence cache endpoint
-    let router = router.route(
-        "/fleet/intelligence",
-        get(handlers::get_fleet_intelligence),
-    );
+    let router = router.route("/fleet/intelligence", get(handlers::get_fleet_intelligence));
 
     router.with_state(state)
 }

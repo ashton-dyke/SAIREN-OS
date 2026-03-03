@@ -25,15 +25,15 @@
 //! - Outputs: 16 next-step predictions, anomaly score (0-1), health score (0-1)
 //! - Online training: forward → predict → compare → backprop → Adam, every packet
 
-pub mod normalizer;
-pub mod wiring;
 pub mod cell;
-pub mod training;
-pub mod network;
-pub mod formation_detector;
-pub mod regime_clusterer;
 pub mod checkpoint;
 pub mod depth_ahead;
+pub mod formation_detector;
+pub mod network;
+pub mod normalizer;
+pub mod regime_clusterer;
+pub mod training;
+pub mod wiring;
 
 pub use network::{CfcNetwork, CfcNetworkConfig, FeatureSurprise};
 pub use normalizer::NUM_FEATURES;
@@ -210,7 +210,10 @@ pub fn update_from_drilling(
         avg_loss: network.avg_loss(),
         feature_surprises: network.feature_surprises(),
         feature_sigmas: network.all_feature_sigmas(),
-        motor_outputs: network.latest_motor_outputs().map(|s| s.to_vec()).unwrap_or_default(),
+        motor_outputs: network
+            .latest_motor_outputs()
+            .map(|s| s.to_vec())
+            .unwrap_or_default(),
     }
 }
 
@@ -260,7 +263,7 @@ pub fn update_dual_from_drilling(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::types::{RigState, Operation, AnomalyCategory};
+    use crate::types::{AnomalyCategory, Operation, RigState};
 
     pub(crate) fn make_test_packet() -> WitsPacket {
         let mut p = WitsPacket::default();
@@ -394,7 +397,9 @@ pub(crate) mod tests {
             let result = update_dual_from_drilling(&mut dual, &packet, &metrics, 1.0);
             // Combined score should be max of the two (both 0.0 when uncalibrated)
             assert!(
-                (result.anomaly_score - result.fast.anomaly_score.max(result.slow.anomaly_score)).abs() < 1e-12,
+                (result.anomaly_score - result.fast.anomaly_score.max(result.slow.anomaly_score))
+                    .abs()
+                    < 1e-12,
                 "Combined score should be max(fast, slow)"
             );
         }

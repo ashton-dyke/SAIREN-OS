@@ -10,11 +10,11 @@
 //!   h_new[i] = f[i] * g[i] + (1 - f[i]) * h[i]
 //! ```
 
-use crate::cfc::wiring::{NcpWiring, NUM_OUTPUTS};
 use crate::cfc::normalizer::NUM_FEATURES;
+use crate::cfc::wiring::{NcpWiring, NUM_OUTPUTS};
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use serde::{Serialize, Deserialize};
+use serde::{Deserialize, Serialize};
 
 /// CfC cell weights and biases.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -22,7 +22,6 @@ pub struct CfcWeights {
     // Per-neuron weight vectors for incoming connections (sparse).
     // For neuron i, w_tau[i], w_f[i], w_g[i] have length = number of incoming connections.
     // These are stored flat with an index map.
-
     /// Flat weight storage: 3 gates (tau, f, g) x NUM_NEURONS x max_incoming.
     /// Indexed via `weight_offset[neuron]` and `weight_count[neuron]`.
     pub w_tau: Vec<f64>,
@@ -102,19 +101,30 @@ impl CfcWeights {
             .collect();
 
         Self {
-            w_tau, w_f, w_g,
-            b_tau, b_f, b_g,
-            w_out, b_out,
+            w_tau,
+            w_f,
+            w_g,
+            b_tau,
+            b_f,
+            b_g,
+            w_out,
+            b_out,
             w_in,
-            weight_offset, weight_count,
+            weight_offset,
+            weight_count,
         }
     }
 
     /// Total number of trainable parameters.
     pub fn num_params(&self) -> usize {
-        self.w_tau.len() + self.w_f.len() + self.w_g.len()
-            + self.b_tau.len() + self.b_f.len() + self.b_g.len()
-            + self.w_out.len() + self.b_out.len()
+        self.w_tau.len()
+            + self.w_f.len()
+            + self.w_g.len()
+            + self.b_tau.len()
+            + self.b_f.len()
+            + self.b_g.len()
+            + self.w_out.len()
+            + self.b_out.len()
             + self.w_in.len()
     }
 }
@@ -239,8 +249,8 @@ impl CfcCell {
             g_gate[neuron] = sum_g.tanh();
 
             // h_new = f * g + (1 - f) * h_prev
-            h_new[neuron] = f_gate[neuron] * g_gate[neuron]
-                + (1.0 - f_gate[neuron]) * h_prev[neuron];
+            h_new[neuron] =
+                f_gate[neuron] * g_gate[neuron] + (1.0 - f_gate[neuron]) * h_prev[neuron];
         }
 
         // Output projection: y = W_out * h_motor + b_out

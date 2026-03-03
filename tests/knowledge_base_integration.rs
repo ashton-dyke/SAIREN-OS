@@ -25,7 +25,9 @@ fn test_migrate_and_assemble_volve() {
 
     // Verify directory structure exists
     assert!(kb_root.join("Volve/geology.toml").exists());
-    assert!(kb_root.join("Volve/wells/F-15B/pre-spud/prognosis.toml").exists());
+    assert!(kb_root
+        .join("Volve/wells/F-15B/pre-spud/prognosis.toml")
+        .exists());
 
     // Assemble
     let config = KnowledgeBaseConfig {
@@ -58,7 +60,11 @@ fn test_migrate_and_assemble_volve() {
     assert_eq!(nordland.lithology, "clay, silt");
 
     // Verify Hugin formation
-    let hugin = prognosis.formations.iter().find(|f| f.name == "Hugin Formation").unwrap();
+    let hugin = prognosis
+        .formations
+        .iter()
+        .find(|f| f.name == "Hugin Formation")
+        .unwrap();
     assert_eq!(hugin.depth_top_ft, 9200.0);
     assert_eq!(hugin.depth_base_ft, 10200.0);
 
@@ -95,9 +101,21 @@ fn test_offset_well_assembly() {
             wob_klbs: 30.0,
             rpm: 100.0,
         },
-        avg_wob_range: sairen_os::types::ParameterRange { min: 20.0, optimal: 30.0, max: 40.0 },
-        avg_rpm_range: sairen_os::types::ParameterRange { min: 60.0, optimal: 100.0, max: 120.0 },
-        avg_flow_range: sairen_os::types::ParameterRange { min: 450.0, optimal: 550.0, max: 650.0 },
+        avg_wob_range: sairen_os::types::ParameterRange {
+            min: 20.0,
+            optimal: 30.0,
+            max: 40.0,
+        },
+        avg_rpm_range: sairen_os::types::ParameterRange {
+            min: 60.0,
+            optimal: 100.0,
+            max: 120.0,
+        },
+        avg_flow_range: sairen_os::types::ParameterRange {
+            min: 450.0,
+            optimal: 550.0,
+            max: 650.0,
+        },
         total_snapshots: 50,
         avg_confidence: 0.85,
         avg_stability: 0.9,
@@ -122,14 +140,24 @@ fn test_offset_well_assembly() {
     let prognosis = assembler::assemble_prognosis(&config).unwrap();
 
     // Check that Hugin formation has offset performance
-    let hugin = prognosis.formations.iter().find(|f| f.name == "Hugin Formation").unwrap();
+    let hugin = prognosis
+        .formations
+        .iter()
+        .find(|f| f.name == "Hugin Formation")
+        .unwrap();
     let offset = &hugin.offset_performance;
     // F-14 should be among the offset wells (alongside any from migration)
-    assert!(offset.wells.contains(&"F-14".to_string()),
-        "F-14 should appear in offset wells, got: {:?}", offset.wells);
+    assert!(
+        offset.wells.contains(&"F-14".to_string()),
+        "F-14 should appear in offset wells, got: {:?}",
+        offset.wells
+    );
     // The aggregated values should include F-14's data
-    assert!(offset.best_rop_ft_hr >= 80.0,
-        "best_rop should be at least 80.0 from F-14, got: {}", offset.best_rop_ft_hr);
+    assert!(
+        offset.best_rop_ft_hr >= 80.0,
+        "best_rop should be at least 80.0 from F-14, got: {}",
+        offset.best_rop_ft_hr
+    );
 }
 
 /// Full lifecycle: migrate → write snapshots → generate post-well → re-assemble with offset
@@ -175,7 +203,8 @@ fn test_full_knowledge_base_lifecycle() {
             confidence: ConfidenceLevel::High,
             sustained_stats: None,
         };
-        let snapshot_path = config.mid_well_dir()
+        let snapshot_path = config
+            .mid_well_dir()
             .join(format!("snapshot_{}.toml", snapshot.timestamp));
         let toml_str = toml::to_string_pretty(&snapshot).unwrap();
         std::fs::write(&snapshot_path, toml_str).unwrap();
@@ -185,11 +214,19 @@ fn test_full_knowledge_base_lifecycle() {
     let summary = post_well::generate_post_well(&config).unwrap();
     assert_eq!(summary.well_id, "F-15B");
     assert_eq!(summary.field, "Volve");
-    assert!(!summary.formations.is_empty(), "Should have at least one formation performance");
+    assert!(
+        !summary.formations.is_empty(),
+        "Should have at least one formation performance"
+    );
 
     // Verify per-formation performance file was written
-    let hugin_perf_path = config.post_well_dir("F-15B").join("performance_Hugin_Formation.toml");
-    assert!(hugin_perf_path.exists(), "Per-formation performance file should exist");
+    let hugin_perf_path = config
+        .post_well_dir("F-15B")
+        .join("performance_Hugin_Formation.toml");
+    assert!(
+        hugin_perf_path.exists(),
+        "Per-formation performance file should exist"
+    );
 
     // Now create a new well config and verify offset data appears
     let config_new_well = KnowledgeBaseConfig {
@@ -206,9 +243,16 @@ fn test_full_knowledge_base_lifecycle() {
     let prognosis = assembler::assemble_prognosis(&config_new_well).unwrap();
 
     // F-16 should see F-15B's Hugin performance as offset data
-    let hugin = prognosis.formations.iter().find(|f| f.name == "Hugin Formation").unwrap();
+    let hugin = prognosis
+        .formations
+        .iter()
+        .find(|f| f.name == "Hugin Formation")
+        .unwrap();
     let offset = &hugin.offset_performance;
-    assert!(!offset.wells.is_empty(), "F-16 should see F-15B's Hugin data as offset");
+    assert!(
+        !offset.wells.is_empty(),
+        "F-16 should see F-15B's Hugin data as offset"
+    );
     assert!(offset.wells.contains(&"F-15B".to_string()));
     assert!(offset.avg_rop_ft_hr > 0.0);
     assert!(offset.best_rop_ft_hr > 0.0);

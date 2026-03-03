@@ -109,7 +109,9 @@ fn cfg_min_std_floor() -> f64 {
 
 fn cfg_max_outlier_pct() -> f64 {
     if crate::config::is_initialized() {
-        crate::config::get().baseline_learning.max_outlier_percentage
+        crate::config::get()
+            .baseline_learning
+            .max_outlier_percentage
     } else {
         MAX_OUTLIER_PERCENTAGE
     }
@@ -117,7 +119,9 @@ fn cfg_max_outlier_pct() -> f64 {
 
 fn cfg_outlier_sigma() -> f64 {
     if crate::config::is_initialized() {
-        crate::config::get().baseline_learning.outlier_sigma_threshold
+        crate::config::get()
+            .baseline_learning
+            .outlier_sigma_threshold
     } else {
         OUTLIER_SIGMA_THRESHOLD
     }
@@ -544,7 +548,7 @@ impl BaselineAccumulator {
         let outlier_pct = self.outlier_percentage() * 100.0;
         if self.is_contaminated() {
             return Err(BaselineError::Contaminated(
-                self.composite_id.clone(),
+                self.composite_id,
                 outlier_pct,
                 cfg_max_outlier_pct() * 100.0,
             ));
@@ -781,7 +785,8 @@ impl ThresholdManager {
             warn!(error = %e, "Failed to auto-persist baseline state after lock");
         }
 
-        self.thresholds.get(&composite_id)
+        self.thresholds
+            .get(&composite_id)
             .ok_or_else(|| BaselineError::MetricNotFound(format!("{composite_id} (insert failed)")))
     }
 
@@ -822,7 +827,8 @@ impl ThresholdManager {
             warn!(error = %e, "Failed to auto-persist baseline state after force-lock");
         }
 
-        self.thresholds.get(&composite_id)
+        self.thresholds
+            .get(&composite_id)
             .ok_or_else(|| BaselineError::MetricNotFound(format!("{composite_id} (insert failed)")))
     }
 
@@ -1031,7 +1037,9 @@ impl ThresholdManager {
 
         // Reconstruct cached composite_id for entries deserialized from old state
         // files that predate the composite_id field.
-        let thresholds: HashMap<String, DynamicThresholds> = state.thresholds.into_iter()
+        let thresholds: HashMap<String, DynamicThresholds> = state
+            .thresholds
+            .into_iter()
             .map(|(k, mut t)| {
                 if t.composite_id.is_empty() {
                     t.composite_id = make_composite_id(&t.equipment_id, &t.sensor_id);
@@ -1135,7 +1143,10 @@ impl ThresholdManager {
 
         let mut locked = Vec::new();
         for sensor_id in metrics {
-            if self.lock_baseline(equipment_id, sensor_id, timestamp).is_ok() {
+            if self
+                .lock_baseline(equipment_id, sensor_id, timestamp)
+                .is_ok()
+            {
                 locked.push(format!("{}:{}", equipment_id, sensor_id));
             }
         }
@@ -1185,7 +1196,10 @@ impl ThresholdManager {
 
         let mut locked = Vec::new();
         for sensor_id in metrics {
-            if self.lock_baseline(equipment_id, sensor_id, timestamp).is_ok() {
+            if self
+                .lock_baseline(equipment_id, sensor_id, timestamp)
+                .is_ok()
+            {
                 locked.push(format!("{}:{}", equipment_id, sensor_id));
             }
         }

@@ -17,10 +17,10 @@
 //!
 //! CRITICAL GUARANTEE: Phases 5-9 ONLY execute if Tactical Agent created a ticket.
 
-mod state;
 mod coordinator;
-pub mod source;
 pub mod processing_loop;
+pub mod source;
+mod state;
 
-pub use state::*;
 pub use coordinator::{PipelineCoordinator, PipelineStats};
+pub use state::*;

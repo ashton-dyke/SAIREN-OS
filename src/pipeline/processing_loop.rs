@@ -6,17 +6,13 @@
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
-use tokio::sync::watch;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use super::source::{PacketEvent, PacketSource};
 use super::{AppState, PipelineCoordinator, PipelineStats, SystemStatus};
 use crate::config::defaults::ML_HISTORY_BUFFER_SIZE;
 
-use crate::config::defaults::{ECD_REFERENCE_PPG, MSE_EFFICIENCY_DENOMINATOR};
-
-use crate::types::Campaign;
 use crate::types::{StrategicAdvisory, WitsPacket};
 
 // ============================================================================
@@ -51,45 +47,12 @@ impl PostProcessHooks for () {
 }
 
 // ============================================================================
-// Fleet Context
-// ============================================================================
-
-/// Fleet client context for enqueueing advisory events.
-
-pub struct FleetContext {
-    pub queue: Arc<crate::fleet::UploadQueue>,
-    pub rig_id: String,
-    pub well_id: String,
-}
-
-// ============================================================================
-// Federation Context
-// ============================================================================
-
-/// Watch channels for federated CfC weight sharing.
-pub struct FederationContext {
-    /// Processing loop publishes snapshots here for the upload task.
-    pub checkpoint_tx: watch::Sender<Option<crate::cfc::checkpoint::DualCfcCheckpoint>>,
-    /// Processing loop reads federated models published by the pull task.
-    pub federation_model_rx: watch::Receiver<Option<crate::cfc::checkpoint::DualCfcCheckpoint>>,
-    /// Processing loop publishes local packets_processed for the pull task.
-    pub local_packets_tx: watch::Sender<u64>,
-    /// Rig ID (for checkpoint metadata).
-    pub rig_id: String,
-    /// Well ID (for checkpoint metadata).
-    pub well_id: String,
-    /// How often (in packets) to publish a checkpoint snapshot.
-    pub checkpoint_interval_packets: u64,
-}
-
-// ============================================================================
 // Processing Loop
 // ============================================================================
 
 /// Owns all state needed for the unified packet processing loop.
 ///
-/// Built with [`new()`](ProcessingLoop::new), optionally enriched with
-/// [`with_fleet()`](ProcessingLoop::with_fleet), then consumed by
+/// Built with [`new()`](ProcessingLoop::new), then consumed by
 /// [`run()`](ProcessingLoop::run).
 pub struct ProcessingLoop<H: PostProcessHooks> {
     coordinator: PipelineCoordinator,
@@ -98,9 +61,6 @@ pub struct ProcessingLoop<H: PostProcessHooks> {
     cancel_token: CancellationToken,
     /// Tracks WOB/RPM changes to stamp `seconds_since_param_change` on every packet.
     param_tracker: crate::ml_engine::param_change_tracker::ParamChangeTracker,
-
-    fleet_ctx: Option<FleetContext>,
-    federation_ctx: Option<FederationContext>,
 }
 
 impl<H: PostProcessHooks> ProcessingLoop<H> {
@@ -116,21 +76,7 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
             hooks,
             cancel_token,
             param_tracker: crate::ml_engine::param_change_tracker::ParamChangeTracker::new(),
-            fleet_ctx: None,
-            federation_ctx: None,
         }
-    }
-
-    /// Attach fleet client context for advisory uploads.
-    pub fn with_fleet(mut self, ctx: FleetContext) -> Self {
-        self.fleet_ctx = Some(ctx);
-        self
-    }
-
-    /// Attach federation watch channels for CfC weight sharing.
-    pub fn with_federation(mut self, ctx: FederationContext) -> Self {
-        self.federation_ctx = Some(ctx);
-        self
     }
 
     /// Run the processing loop until the source is exhausted or cancellation.
@@ -190,10 +136,7 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
 
             // Process through the 10-phase pipeline
             let mut packet = packet;
-            let advisory = self
-                .coordinator
-                .process_packet(&mut packet, campaign)
-                .await;
+            let advisory = self.coordinator.process_packet(&mut packet, campaign).await;
 
             // Per-packet post-processing — runs for ALL input modes.
             {
@@ -219,17 +162,26 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
                 }
 
                 // Store damping monitor snapshot for API visibility
-                state.damping_monitor_snapshot =
-                    Some(self.coordinator.damping_monitor_snapshot());
+                state.damping_monitor_snapshot = Some(self.coordinator.damping_monitor_snapshot());
 
                 // Store CfC formation transition event (if any)
-                if let Some(event) = self.coordinator.tactical_agent().latest_formation_transition() {
+                if let Some(event) = self
+                    .coordinator
+                    .tactical_agent()
+                    .latest_formation_transition()
+                {
                     state.formation_transition_timestamps.push(event.timestamp);
+                    // Cap at 1000 entries to prevent unbounded growth
+                    if state.formation_transition_timestamps.len() > 1000 {
+                        let excess = state.formation_transition_timestamps.len() - 1000;
+                        state.formation_transition_timestamps.drain(..excess);
+                    }
                     state.latest_formation_transition = Some(event.clone());
                 }
 
                 // Any remaining mode-specific hooks (no-op for () — see PostProcessHooks)
-                self.hooks.on_packet(&mut packet, &self.coordinator, &mut state);
+                self.hooks
+                    .on_packet(&mut packet, &self.coordinator, &mut state);
             }
 
             if let Some(ref adv) = advisory {
@@ -246,53 +198,8 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
                     warn!("Failed to persist advisory to history: {}", e);
                 }
 
-                // Enqueue for fleet upload
-                
-                if let Some(ref ctx) = self.fleet_ctx {
-                    fleet_enqueue_advisory(
-                        &ctx.queue, adv, &packet, &ctx.rig_id, &ctx.well_id, "Volve", campaign,
-                    );
-                }
-
                 // Log advisory summary
                 log_advisory(advisories_generated, adv);
-            }
-
-            // Federation: publish checkpoint and check for inbound federated model
-            if let Some(ref mut fed) = self.federation_ctx {
-                // Publish local packets_processed for the pull task's policy check
-                let _ = fed.local_packets_tx.send(packets_processed);
-
-                // Publish CfC snapshot every N packets for the upload task
-                if fed.checkpoint_interval_packets > 0
-                    && packets_processed % fed.checkpoint_interval_packets == 0
-                {
-                    let cp = self.coordinator.snapshot_cfc(&fed.rig_id, &fed.well_id);
-                    let _ = fed.checkpoint_tx.send(Some(cp));
-                    debug!(
-                        "[Federation] Published CfC checkpoint at packet {}",
-                        packets_processed,
-                    );
-                }
-
-                // Check for inbound federated model
-                if fed.federation_model_rx.has_changed().unwrap_or(false) {
-                    let model = fed.federation_model_rx.borrow_and_update().clone();
-                    if let Some(ref cp) = model {
-                        match self.coordinator.restore_cfc_from_checkpoint(cp) {
-                            Ok(()) => {
-                                info!(
-                                    "[Federation] Restored federated model ({} packets, {} rigs)",
-                                    cp.metadata.packets_processed,
-                                    cp.metadata.rig_id,
-                                );
-                            }
-                            Err(e) => {
-                                warn!("[Federation] Failed to restore federated model: {}", e);
-                            }
-                        }
-                    }
-                }
             }
 
             // Progress indicator every 10 packets
@@ -316,10 +223,7 @@ impl<H: PostProcessHooks> ProcessingLoop<H> {
         info!("   Tickets Verified:     {}", stats.tickets_verified);
         info!("   Tickets Rejected:     {}", stats.tickets_rejected);
         info!("   Advisories Generated: {}", stats.strategic_analyses);
-        info!(
-            "   History Buffer Size:  {}/60",
-            stats.history_buffer_size
-        );
+        info!("   History Buffer Size:  {}/60", stats.history_buffer_size);
         info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 
         stats
@@ -352,73 +256,14 @@ fn log_advisory(count: u64, adv: &StrategicAdvisory) {
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
 }
 
-/// Truncate a string for display.
+/// Truncate a string for display (UTF-8 safe).
 fn truncate_str(s: &str, max_len: usize) -> String {
-    if s.len() <= max_len {
+    if max_len < 4 || s.len() <= max_len {
         s.to_string()
     } else {
-        format!("{}...", &s[..max_len.saturating_sub(3)])
-    }
-}
-
-/// Enqueue a qualifying advisory as a FleetEvent for upload to the hub.
-///
-/// Only AMBER/RED advisories are uploaded (see `fleet::types::should_upload`).
-/// The event is written to the disk-backed queue; the uploader task drains it.
-
-fn fleet_enqueue_advisory(
-    queue: &crate::fleet::UploadQueue,
-    advisory: &StrategicAdvisory,
-    packet: &WitsPacket,
-    rig_id: &str,
-    well_id: &str,
-    field: &str,
-    campaign: Campaign,
-) {
-    use crate::fleet::types::{should_upload, EventOutcome, FleetEvent, HistorySnapshot};
-
-    if !should_upload(advisory) {
-        return;
-    }
-
-    // Use current wall-clock time so the hub's 7-day window check passes
-    // (historical replay data has timestamps from the past).
-    let now = chrono::Utc::now().timestamp() as u64;
-
-    let snapshot = HistorySnapshot {
-        timestamp: now,
-        depth: packet.bit_depth,
-        rop: packet.rop,
-        wob: packet.wob,
-        rpm: packet.rpm,
-        torque: packet.torque,
-        spp: packet.spp,
-        flow_in: packet.flow_in,
-        flow_out: packet.flow_out,
-        mse: packet.mse,
-        mse_efficiency: 100.0 - (packet.mse / MSE_EFFICIENCY_DENOMINATOR * 100.0).min(100.0),
-        d_exponent: packet.d_exponent,
-        flow_balance: packet.flow_in - packet.flow_out,
-        pit_rate: packet.pit_volume_change,
-        ecd_margin: ECD_REFERENCE_PPG - packet.ecd,
-        gas_units: packet.gas_units,
-    };
-
-    let event = FleetEvent {
-        id: format!("{}-{}", rig_id, advisory.timestamp),
-        rig_id: rig_id.to_string(),
-        well_id: well_id.to_string(),
-        field: field.to_string(),
-        campaign,
-        advisory: advisory.clone(),
-        history_window: vec![snapshot],
-        outcome: EventOutcome::Pending,
-        notes: None,
-        depth: packet.bit_depth,
-        timestamp: now,
-    };
-
-    if let Err(e) = queue.enqueue(&event) {
-        warn!("Failed to enqueue fleet event: {}", e);
+        let end = max_len.saturating_sub(3);
+        // Find the nearest char boundary at or before `end`
+        let boundary = s.floor_char_boundary(end);
+        format!("{}...", &s[..boundary])
     }
 }

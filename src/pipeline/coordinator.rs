@@ -9,10 +9,9 @@
 //! PHASE 4: History Buffer (continuous, parallel)
 //! PHASE 5: Advanced Physics (ONLY if ticket created)
 //! PHASE 6: Context Lookup (ONLY if ticket created)
-//! PHASE 7: LLM Explainer (ONLY if ticket created)
-//! PHASE 8: Orchestrator Voting (ONLY if ticket created)
-//! PHASE 9: Storage (ONLY if ticket created)
-//! PHASE 10: Dashboard API (continuous)
+//! PHASE 7: Orchestrator Voting (ONLY if ticket created)
+//! PHASE 8: Storage (ONLY if ticket created)
+//! PHASE 9: Dashboard API (continuous)
 //! ```
 //!
 //! CRITICAL GUARANTEE: Phases 5-9 ONLY execute if Tactical Agent created a ticket.
@@ -23,9 +22,9 @@ use crate::context::KnowledgeStore;
 use crate::physics_engine;
 use crate::strategic::AdvisoryComposer;
 use crate::types::{
-    AdvisoryTicket, AnomalyCategory, Campaign, DrillingMetrics,
-    DrillingPhysicsReport, FormationPrognosis, HistoryEntry,
-    StrategicAdvisory, VerificationResult, VerificationStatus, WitsPacket,
+    AdvisoryTicket, AnomalyCategory, Campaign, DrillingMetrics, DrillingPhysicsReport,
+    FormationPrognosis, HistoryEntry, StrategicAdvisory, VerificationResult, VerificationStatus,
+    WitsPacket,
 };
 use std::collections::{HashSet, VecDeque};
 use std::sync::{Arc, RwLock};
@@ -33,9 +32,11 @@ use std::time::Instant;
 use tracing::{debug, info, warn};
 
 use crate::config::defaults::{
-    HISTORY_BUFFER_SIZE, PERIODIC_SUMMARY_INTERVAL_SECS,
-    MIN_PACKETS_FOR_PERIODIC_SUMMARY, CYCLE_TARGET_GPU_MS,
+    HISTORY_BUFFER_SIZE, MIN_PACKETS_FOR_PERIODIC_SUMMARY, PERIODIC_SUMMARY_INTERVAL_SECS,
 };
+
+/// Cycle-time warning threshold (ms). Template-based advisories are fast.
+const CYCLE_TARGET_MS: u128 = 100;
 
 /// Trend components computed from the history buffer with zero heap allocation.
 struct TrendComponents {
@@ -59,7 +60,13 @@ fn compute_trends(history: &[HistoryEntry], fallback_mse: f64) -> TrendComponent
 
     // MSE trend: compare last 5 vs first 5
     let mse_trend_pct = if len >= 5 {
-        let recent_avg = history.iter().rev().take(5).map(|e| e.metrics.mse).sum::<f64>() / 5.0;
+        let recent_avg = history
+            .iter()
+            .rev()
+            .take(5)
+            .map(|e| e.metrics.mse)
+            .sum::<f64>()
+            / 5.0;
         let earlier_avg = history.iter().take(5).map(|e| e.metrics.mse).sum::<f64>() / 5.0;
         (recent_avg - earlier_avg) / earlier_avg.max(1.0) * 100.0
     } else {
@@ -68,8 +75,19 @@ fn compute_trends(history: &[HistoryEntry], fallback_mse: f64) -> TrendComponent
 
     // D-exponent trend
     let dxc_trend_pct = if len >= 5 {
-        let recent_avg = history.iter().rev().take(5).map(|e| e.metrics.d_exponent).sum::<f64>() / 5.0;
-        let earlier_avg = history.iter().take(5).map(|e| e.metrics.d_exponent).sum::<f64>() / 5.0;
+        let recent_avg = history
+            .iter()
+            .rev()
+            .take(5)
+            .map(|e| e.metrics.d_exponent)
+            .sum::<f64>()
+            / 5.0;
+        let earlier_avg = history
+            .iter()
+            .take(5)
+            .map(|e| e.metrics.d_exponent)
+            .sum::<f64>()
+            / 5.0;
         (recent_avg - earlier_avg) / earlier_avg.max(0.1) * 100.0
     } else {
         0.0
@@ -77,8 +95,19 @@ fn compute_trends(history: &[HistoryEntry], fallback_mse: f64) -> TrendComponent
 
     // Flow balance trend (absolute difference, not percentage)
     let flow_balance_trend = if len >= 5 {
-        let recent_avg = history.iter().rev().take(5).map(|e| e.metrics.flow_balance).sum::<f64>() / 5.0;
-        let earlier_avg = history.iter().take(5).map(|e| e.metrics.flow_balance).sum::<f64>() / 5.0;
+        let recent_avg = history
+            .iter()
+            .rev()
+            .take(5)
+            .map(|e| e.metrics.flow_balance)
+            .sum::<f64>()
+            / 5.0;
+        let earlier_avg = history
+            .iter()
+            .take(5)
+            .map(|e| e.metrics.flow_balance)
+            .sum::<f64>()
+            / 5.0;
         recent_avg - earlier_avg
     } else {
         0.0
@@ -169,6 +198,8 @@ pub struct PipelineCoordinator {
     knowledge_base: Option<crate::knowledge_base::KnowledgeBase>,
     /// Previous pit volume for computing pit_volume_change delta
     prev_pit_volume: Option<f64>,
+    /// Phase 1.1: Depth continuity validation (stateful across packets)
+    depth_tracker: crate::acquisition::wits_parser::DepthContinuityTracker,
     /// Formation boundaries already alerted (prevents repeat lookahead advisories)
     alerted_boundaries: HashSet<String>,
     /// Active damping feedback monitor state
@@ -208,6 +239,7 @@ impl PipelineCoordinator {
             optimizer: crate::optimization::ParameterOptimizer::new(300),
             knowledge_base,
             prev_pit_volume: None,
+            depth_tracker: crate::acquisition::wits_parser::DepthContinuityTracker::new(),
             alerted_boundaries: HashSet::new(),
             damping_monitor: DampingMonitorState::Idle { last_outcome: None },
         }
@@ -237,10 +269,7 @@ impl PipelineCoordinator {
                 threshold_manager.clone(),
                 start_in_learning_mode,
             ),
-            strategic_agent: StrategicAgent::with_thresholds(
-                &equipment_id,
-                threshold_manager,
-            ),
+            strategic_agent: StrategicAgent::with_thresholds(&equipment_id, threshold_manager),
             orchestrator: Orchestrator::new(),
             advisory_composer: AdvisoryComposer::new(),
             knowledge_store: Box::new(crate::context::StaticKnowledgeBase),
@@ -259,6 +288,7 @@ impl PipelineCoordinator {
             optimizer: crate::optimization::ParameterOptimizer::new(300),
             knowledge_base,
             prev_pit_volume: None,
+            depth_tracker: crate::acquisition::wits_parser::DepthContinuityTracker::new(),
             alerted_boundaries: HashSet::new(),
             damping_monitor: DampingMonitorState::Idle { last_outcome: None },
         }
@@ -293,10 +323,16 @@ impl PipelineCoordinator {
             "Phase 1: WITS packet ingested"
         );
 
-        // Phase 1.1: Input Sanitization
+        // Phase 1.1a: Input Sanitization (stateless per-packet checks)
         let quality = crate::acquisition::wits_parser::sanitize_packet(packet);
         if !quality.usable {
             warn!(issues = ?quality.issues, "Packet rejected by sanitizer — skipping");
+            return None;
+        }
+
+        // Phase 1.1b: Depth continuity (stateful cross-packet check)
+        if let Some(reason) = self.depth_tracker.check(packet) {
+            debug!(reason = %reason, "Packet rejected by depth continuity tracker");
             return None;
         }
 
@@ -314,12 +350,15 @@ impl PipelineCoordinator {
         self.tactical_agent.set_campaign(campaign);
 
         // Compute formation context for depth-ahead CfC network
-        let formation_ctx = self.current_formation_context(packet.bit_depth)
+        let formation_ctx = self
+            .current_formation_context(packet.bit_depth)
             .map(|f| (packet.bit_depth - f.depth_top_ft, f.hardness));
 
         // PHASE 2-3: Tactical Agent (Basic Physics + Decision)
         let has_active_advisory = self.latest_advisory.is_some();
-        let (ticket_opt, mut metrics, history_entry) = self.tactical_agent.process(packet, has_active_advisory, formation_ctx);
+        let (ticket_opt, mut metrics, history_entry) =
+            self.tactical_agent
+                .process(packet, has_active_advisory, formation_ctx);
 
         // Phase 1.2: Enrich metrics with formation context
         if let Some(formation) = self.current_formation_context(packet.bit_depth) {
@@ -360,7 +399,9 @@ impl PipelineCoordinator {
         // Runs before make_contiguous() because it needs &mut self for cooldown tracking.
         let lookahead_advisory = if let Some(ref prognosis) = dynamic_prognosis {
             self.check_standalone_lookahead(packet, prognosis)
-        } else { None };
+        } else {
+            None
+        };
 
         // Make history buffer contiguous once — O(n) worst case on wrap, O(1) thereafter.
         // Collect into owned Vec so &mut self methods (check_damping_monitor,
@@ -376,12 +417,20 @@ impl PipelineCoordinator {
         let opt_advisory = if let Some(ref prognosis) = dynamic_prognosis {
             if let Some(formation) = prognosis.formation_at_depth(packet.bit_depth).cloned() {
                 let physics = self.compute_physics_for_optimizer(packet, &metrics, history_slice);
-                let cfc_score = self.tactical_agent.cfc_result()
+                let cfc_score = self
+                    .tactical_agent
+                    .cfc_result()
                     .filter(|r| r.is_calibrated)
                     .map(|r| r.anomaly_score);
 
                 match self.optimizer.evaluate(
-                    packet, &physics, &formation, prognosis, history_slice, cfc_score, 1.0,
+                    packet,
+                    &physics,
+                    &formation,
+                    prognosis,
+                    history_slice,
+                    cfc_score,
+                    1.0,
                 ) {
                     Ok(adv) => {
                         info!(
@@ -390,15 +439,23 @@ impl PipelineCoordinator {
                             look_ahead = adv.look_ahead.is_some(),
                             "Optimization advisory generated"
                         );
-                        Some(crate::optimization::templates::format_optimization_advisory(&adv, &physics))
+                        Some(
+                            crate::optimization::templates::format_optimization_advisory(
+                                &adv, &physics,
+                            ),
+                        )
                     }
                     Err(reason) => {
                         debug!(reason = %reason, "Optimization skipped");
                         None
                     }
                 }
-            } else { None }
-        } else { None };
+            } else {
+                None
+            }
+        } else {
+            None
+        };
 
         // Seed the periodic summary timer on first packet to avoid
         // an immediate spurious summary (timestamp - 0 ≈ 1.7 billion seconds).
@@ -407,12 +464,15 @@ impl PipelineCoordinator {
         }
 
         // Check if it's time for a periodic summary (every 10 minutes)
-        let time_since_last_summary = packet.timestamp.saturating_sub(self.last_periodic_summary_time);
+        let time_since_last_summary = packet
+            .timestamp
+            .saturating_sub(self.last_periodic_summary_time);
         let should_generate_periodic = time_since_last_summary >= PERIODIC_SUMMARY_INTERVAL_SECS
             && self.history_buffer.len() >= MIN_PACKETS_FOR_PERIODIC_SUMMARY;
 
         // Determine if we have a CRITICAL ticket (bypasses periodic timing)
-        let is_critical_ticket = ticket_opt.as_ref()
+        let is_critical_ticket = ticket_opt
+            .as_ref()
             .map(|t| matches!(t.severity, TicketSeverity::Critical))
             .unwrap_or(false);
 
@@ -431,7 +491,9 @@ impl PipelineCoordinator {
             None => {
                 // No ticket - check if we should generate a periodic summary
                 if should_generate_periodic {
-                    return self.generate_periodic_summary(packet, &metrics, campaign).await;
+                    return self
+                        .generate_periodic_summary(packet, &metrics, campaign)
+                        .await;
                 }
                 // Return damping monitor advisory if monitoring reached a terminal state
                 if let Some(text) = damping_monitor_text {
@@ -451,6 +513,14 @@ impl PipelineCoordinator {
         };
 
         // PHASES 5-9: ONLY EXECUTED WHEN TICKET EXISTS
+
+        // Enrich ticket with formation context (ticket was created by tactical
+        // agent before formation lookup, so current_formation is None).
+        if let Some(formation) = self.current_formation_context(packet.bit_depth) {
+            ticket.current_metrics.current_formation = Some(formation.name.clone());
+            ticket.current_metrics.formation_depth_in_ft =
+                Some(packet.bit_depth - formation.depth_top_ft);
+        }
 
         // PHASE DAMPING: Enrich stick-slip tickets with active damping recommendations
         self.enrich_with_damping(&mut ticket, history_slice);
@@ -483,10 +553,7 @@ impl PipelineCoordinator {
         let context = self.lookup_context(&ticket);
 
         // Run strategic verification
-        let verification_result = self.strategic_agent.verify_ticket(
-            &ticket,
-            history_slice,
-        );
+        let verification_result = self.strategic_agent.verify_ticket(&ticket, history_slice);
 
         self.latest_verification = Some(verification_result.clone());
 
@@ -553,8 +620,7 @@ impl PipelineCoordinator {
             "Strategic analysis complete - advisory sent to dashboard"
         );
 
-        // Cycle time target: 100 ms. LLM inference runs on the hub — not here.
-        let cycle_target_ms: u128 = CYCLE_TARGET_GPU_MS;
+        let cycle_target_ms: u128 = CYCLE_TARGET_MS;
 
         if cycle_time.as_millis() > cycle_target_ms {
             warn!(
@@ -619,7 +685,7 @@ impl PipelineCoordinator {
                     has_well_control_events = true;
                     worst_category = AnomalyCategory::WellControl;
                 } else if !has_well_control_events {
-                    worst_category = entry.metrics.anomaly_category.clone();
+                    worst_category = entry.metrics.anomaly_category;
                 }
             }
         }
@@ -631,40 +697,42 @@ impl PipelineCoordinator {
         let anomaly_rate = anomaly_count as f64 / history_len * 100.0;
 
         // Determine overall period assessment
-        let (ticket_type, severity, category, trigger_param, trigger_value) = if has_well_control_events {
-            (
-                TicketType::RiskWarning,
-                TicketSeverity::High,
-                AnomalyCategory::WellControl,
-                "well_control_events".to_string(),
-                anomaly_count as f64,
-            )
-        } else if anomaly_rate > 30.0 {
-            (
-                TicketType::Intervention,
-                TicketSeverity::Medium,
-                worst_category.clone(),
-                "anomaly_rate".to_string(),
-                anomaly_rate,
-            )
-        } else if avg_mse > crate::config::get().thresholds.mse.efficiency_poor_percent * 1000.0 {
-            (
-                TicketType::Optimization,
-                TicketSeverity::Low,
-                AnomalyCategory::DrillingEfficiency,
-                "avg_mse".to_string(),
-                avg_mse,
-            )
-        } else {
-            // Normal operations - still generate a summary
-            (
-                TicketType::Optimization,
-                TicketSeverity::Low,
-                AnomalyCategory::None,
-                "periodic_summary".to_string(),
-                0.0,
-            )
-        };
+        let (ticket_type, severity, category, trigger_param, trigger_value) =
+            if has_well_control_events {
+                (
+                    TicketType::RiskWarning,
+                    TicketSeverity::High,
+                    AnomalyCategory::WellControl,
+                    "well_control_events".to_string(),
+                    anomaly_count as f64,
+                )
+            } else if anomaly_rate > 30.0 {
+                (
+                    TicketType::Intervention,
+                    TicketSeverity::Medium,
+                    worst_category,
+                    "anomaly_rate".to_string(),
+                    anomaly_rate,
+                )
+            } else if avg_mse > crate::config::get().thresholds.mse.efficiency_poor_percent * 1000.0
+            {
+                (
+                    TicketType::Optimization,
+                    TicketSeverity::Low,
+                    AnomalyCategory::DrillingEfficiency,
+                    "avg_mse".to_string(),
+                    avg_mse,
+                )
+            } else {
+                // Normal operations - still generate a summary
+                (
+                    TicketType::Optimization,
+                    TicketSeverity::Low,
+                    AnomalyCategory::None,
+                    "periodic_summary".to_string(),
+                    0.0,
+                )
+            };
 
         // Calculate MSE efficiency
         let formation_hardness = (current_metrics.d_exponent * 3.0).clamp(1.0, 10.0);
@@ -673,7 +741,7 @@ impl PipelineCoordinator {
 
         // Create a synthetic summary ticket
         let summary_metrics = DrillingMetrics {
-            state: current_metrics.state.clone(),
+            state: current_metrics.state,
             operation: current_metrics.operation,
             mse: avg_mse,
             mse_efficiency,
@@ -687,7 +755,7 @@ impl PipelineCoordinator {
             spp_delta: current_metrics.spp_delta,
             flow_data_available: current_metrics.flow_data_available,
             is_anomaly: anomaly_rate > 10.0,
-            anomaly_category: category.clone(),
+            anomaly_category: category,
             anomaly_description: Some(format!(
                 "10-min summary: {:.1}% anomaly rate, avg ROP {:.1} ft/hr, avg MSE {:.0} psi",
                 anomaly_rate, avg_rop, avg_mse
@@ -699,7 +767,7 @@ impl PipelineCoordinator {
         let mut summary_ticket = AdvisoryTicket {
             timestamp: packet.timestamp,
             ticket_type,
-            category: category.clone(),
+            category,
             severity,
             current_metrics: summary_metrics.clone(),
             trigger_parameter: trigger_param,
@@ -730,7 +798,9 @@ impl PipelineCoordinator {
         let context = self.lookup_context(&summary_ticket);
 
         // Strategic verification (summary tickets typically pass)
-        let verification_result = self.strategic_agent.verify_ticket(&summary_ticket, history_slice);
+        let verification_result = self
+            .strategic_agent
+            .verify_ticket(&summary_ticket, history_slice);
         self.latest_verification = Some(verification_result.clone());
 
         // Generate explanation
@@ -739,7 +809,9 @@ impl PipelineCoordinator {
             .await;
 
         // Orchestrator voting (regime-aware specialist weighting)
-        let voting_result = self.orchestrator.vote(&summary_ticket, &physics, packet.regime_id);
+        let voting_result = self
+            .orchestrator
+            .vote(&summary_ticket, &physics, packet.regime_id);
 
         // Advisory composition (with CRITICAL cooldown)
         let advisory = match self.advisory_composer.compose(
@@ -927,9 +999,8 @@ impl PipelineCoordinator {
 
     /// Phase 7: Generate explanation (template-based).
     ///
-    /// LLM advisory generation runs exclusively on the fleet hub which has a
-    /// CUDA GPU and embeds mistralrs directly. The edge client always uses
-    /// deterministic templates so pipeline latency stays within the 100 ms target.
+    /// Deterministic templates produce actionable advisory text with actual metric
+    /// values embedded. Pipeline latency stays within the 100 ms target.
     async fn generate_explanation(
         &self,
         ticket: &AdvisoryTicket,
@@ -940,9 +1011,9 @@ impl PipelineCoordinator {
         Self::template_explanation(ticket, physics, campaign)
     }
 
-    /// Template-based explanation generator (fallback when LLM unavailable)
+    /// Template-based explanation generator
     ///
-    /// Uses the dedicated template module which provides richer, campaign-aware
+    /// Uses the dedicated template module which provides campaign-aware
     /// templates with actual metric values embedded in the text.
     fn template_explanation(
         ticket: &AdvisoryTicket,
@@ -950,8 +1021,16 @@ impl PipelineCoordinator {
         campaign: Campaign,
     ) -> (String, String, String) {
         let result = crate::strategic::templates::template_advisory(ticket, physics, campaign);
-        info!(source = result.source, confidence = result.confidence, "Template advisory generated");
-        (result.recommendation, result.expected_benefit, result.reasoning)
+        info!(
+            source = result.source,
+            confidence = result.confidence,
+            "Template advisory generated"
+        );
+        (
+            result.recommendation,
+            result.expected_benefit,
+            result.reasoning,
+        )
     }
 
     /// Standalone formation lookahead check (independent of optimizer).
@@ -983,7 +1062,9 @@ impl PipelineCoordinator {
         }
 
         // Annotate with depth-ahead CfC confidence if available
-        la.cfc_confidence = self.tactical_agent.depth_ahead_result()
+        la.cfc_confidence = self
+            .tactical_agent
+            .depth_ahead_result()
             .filter(|r| r.is_calibrated)
             .map(|r| r.confidence);
 
@@ -1008,11 +1089,7 @@ impl PipelineCoordinator {
     /// the history buffer and generates bounded parameter recommendations.
     /// When a formation-specific recipe exists, blends its proven parameters
     /// into the recommendation (70% recipe, 30% lookup table).
-    fn enrich_with_damping(
-        &mut self,
-        ticket: &mut AdvisoryTicket,
-        history: &[HistoryEntry],
-    ) {
+    fn enrich_with_damping(&mut self, ticket: &mut AdvisoryTicket, history: &[HistoryEntry]) {
         let damping = &crate::config::get().damping;
         if !damping.enabled {
             return;
@@ -1034,7 +1111,8 @@ impl PipelineCoordinator {
         let torques: Vec<f64> = history.iter().map(|e| e.packet.torque).collect();
 
         // Run oscillation characterization
-        let analysis = match physics_engine::characterize_oscillation(&torques, damping.min_samples) {
+        let analysis = match physics_engine::characterize_oscillation(&torques, damping.min_samples)
+        {
             Some(a) => a,
             None => return,
         };
@@ -1127,10 +1205,7 @@ impl PipelineCoordinator {
     /// be escalated, or should be retracted.
     ///
     /// Returns an optional advisory text if monitoring reaches a terminal state.
-    fn check_damping_monitor(
-        &mut self,
-        history: &[HistoryEntry],
-    ) -> Option<String> {
+    fn check_damping_monitor(&mut self, history: &[HistoryEntry]) -> Option<String> {
         use crate::types::DampingOutcome;
         use std::time::Duration;
 
@@ -1138,16 +1213,23 @@ impl PipelineCoordinator {
         let damping = &config.damping;
 
         // Only process when actively monitoring
-        let (baseline_cv, started_at, formation_name, recommendation, depth) = match &self.damping_monitor {
-            DampingMonitorState::Idle { .. } => return None,
-            DampingMonitorState::Active {
-                baseline_cv,
-                started_at,
-                formation_name,
-                recommendation,
-                depth,
-            } => (*baseline_cv, *started_at, formation_name.clone(), recommendation.clone(), *depth),
-        };
+        let (baseline_cv, started_at, formation_name, recommendation, depth) =
+            match &self.damping_monitor {
+                DampingMonitorState::Idle { .. } => return None,
+                DampingMonitorState::Active {
+                    baseline_cv,
+                    started_at,
+                    formation_name,
+                    recommendation,
+                    depth,
+                } => (
+                    *baseline_cv,
+                    *started_at,
+                    formation_name.clone(),
+                    recommendation.clone(),
+                    *depth,
+                ),
+            };
 
         // Compute current torque CV
         let torques: Vec<f64> = history.iter().map(|e| e.packet.torque).collect();
@@ -1215,9 +1297,7 @@ impl PipelineCoordinator {
         if cv_change_pct >= damping.retract_cv_increase_pct {
             warn!(
                 baseline_cv,
-                current_cv,
-                cv_change_pct,
-                "Damping retracted — CV worsened"
+                current_cv, cv_change_pct, "Damping retracted — CV worsened"
             );
 
             self.damping_monitor = DampingMonitorState::Idle {
@@ -1237,9 +1317,7 @@ impl PipelineCoordinator {
         if elapsed >= Duration::from_secs(damping.monitor_window_secs) {
             warn!(
                 elapsed_secs = elapsed.as_secs(),
-                baseline_cv,
-                current_cv,
-                "Damping escalated — no improvement within window"
+                baseline_cv, current_cv, "Damping escalated — no improvement within window"
             );
 
             self.damping_monitor = DampingMonitorState::Idle {
@@ -1261,11 +1339,7 @@ impl PipelineCoordinator {
     }
 
     /// Create a standalone advisory from damping monitor outcome text.
-    fn make_damping_monitor_advisory(
-        &self,
-        packet: &WitsPacket,
-        text: &str,
-    ) -> StrategicAdvisory {
+    fn make_damping_monitor_advisory(&self, packet: &WitsPacket, text: &str) -> StrategicAdvisory {
         use crate::types::{FinalSeverity, RiskLevel};
 
         let severity = if text.starts_with("DAMPING SUCCESS") {
@@ -1318,11 +1392,13 @@ impl PipelineCoordinator {
                 ..
             } => {
                 // Compute current CV from history for the snapshot
-                let torques: Vec<f64> =
-                    self.history_buffer.iter().map(|e| e.packet.torque).collect();
+                let torques: Vec<f64> = self
+                    .history_buffer
+                    .iter()
+                    .map(|e| e.packet.torque)
+                    .collect();
                 let current_cv = compute_torque_cv(&torques);
-                let cv_change_pct =
-                    current_cv.map(|cv| (cv - baseline_cv) / baseline_cv * 100.0);
+                let cv_change_pct = current_cv.map(|cv| (cv - baseline_cv) / baseline_cv * 100.0);
                 DampingMonitorSnapshot {
                     active: true,
                     baseline_cv: Some(*baseline_cv),
@@ -1345,7 +1421,10 @@ impl PipelineCoordinator {
         if let Some(ref kb) = self.knowledge_base {
             return kb.formation_at_depth(depth_ft);
         }
-        self.formation_prognosis.as_ref()?.formation_at_depth(depth_ft).cloned()
+        self.formation_prognosis
+            .as_ref()?
+            .formation_at_depth(depth_ft)
+            .cloned()
     }
 
     /// Get a reference to the tactical agent
@@ -1354,21 +1433,9 @@ impl PipelineCoordinator {
     }
 
     /// Mutable access to the tactical agent (for federation checkpoint operations).
+    #[allow(dead_code)]
     pub fn tactical_agent_mut(&mut self) -> &mut TacticalAgent {
         &mut self.tactical_agent
-    }
-
-    /// Snapshot the dual CfC network state for federation upload.
-    pub fn snapshot_cfc(&self, rig_id: &str, well_id: &str) -> crate::cfc::checkpoint::DualCfcCheckpoint {
-        self.tactical_agent.cfc_network().snapshot(rig_id, well_id)
-    }
-
-    /// Restore dual CfC network state from a federated checkpoint.
-    pub fn restore_cfc_from_checkpoint(
-        &mut self,
-        cp: &crate::cfc::checkpoint::DualCfcCheckpoint,
-    ) -> Result<(), String> {
-        self.tactical_agent.cfc_network_mut().restore_from(cp)
     }
 
     /// Get pipeline statistics
@@ -1479,7 +1546,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     #[tokio::test]
@@ -1489,7 +1557,9 @@ mod tests {
         // Process several normal packets to build baseline
         for _ in 0..20 {
             let mut packet = create_test_packet(50.0, 2.0);
-            let result = coordinator.process_packet(&mut packet, Campaign::Production).await;
+            let result = coordinator
+                .process_packet(&mut packet, Campaign::Production)
+                .await;
             // During baseline learning, should not generate advisories
             if !coordinator.tactical_agent().is_baseline_locked() {
                 assert!(result.is_none());
@@ -1507,14 +1577,18 @@ mod tests {
         // Build baseline first with more packets to ensure lock
         for _ in 0..50 {
             let mut packet = create_test_packet(50.0, 2.0);
-            coordinator.process_packet(&mut packet, Campaign::Production).await;
+            coordinator
+                .process_packet(&mut packet, Campaign::Production)
+                .await;
         }
 
         // Simulate kick with high flow imbalance
         let mut kick_packet = create_test_packet(30.0, 25.0); // 25 bbl/hr flow out excess
         kick_packet.pit_volume_change = 10.0; // 10 bbl pit gain
         kick_packet.gas_units = 200.0; // High gas
-        let _result = coordinator.process_packet(&mut kick_packet, Campaign::Production).await;
+        let _result = coordinator
+            .process_packet(&mut kick_packet, Campaign::Production)
+            .await;
 
         // Verify packets were processed
         let stats = coordinator.get_stats();
@@ -1530,13 +1604,20 @@ mod tests {
         // First packet: pit_volume = 800.0, no previous → delta should be 0.0
         let mut pkt1 = create_test_packet(50.0, 2.0);
         pkt1.pit_volume = 800.0;
-        coordinator.process_packet(&mut pkt1, Campaign::Production).await;
-        assert_eq!(pkt1.pit_volume_change, 0.0, "First packet should have delta 0.0");
+        coordinator
+            .process_packet(&mut pkt1, Campaign::Production)
+            .await;
+        assert_eq!(
+            pkt1.pit_volume_change, 0.0,
+            "First packet should have delta 0.0"
+        );
 
         // Second packet: pit_volume = 808.0 → delta should be 8.0
         let mut pkt2 = create_test_packet(50.0, 2.0);
         pkt2.pit_volume = 808.0;
-        coordinator.process_packet(&mut pkt2, Campaign::Production).await;
+        coordinator
+            .process_packet(&mut pkt2, Campaign::Production)
+            .await;
         assert!(
             (pkt2.pit_volume_change - 8.0).abs() < 1e-9,
             "Second packet should have delta 8.0, got {}",
@@ -1546,7 +1627,9 @@ mod tests {
         // Third packet: pit_volume = 805.0 → delta should be -3.0
         let mut pkt3 = create_test_packet(50.0, 2.0);
         pkt3.pit_volume = 805.0;
-        coordinator.process_packet(&mut pkt3, Campaign::Production).await;
+        coordinator
+            .process_packet(&mut pkt3, Campaign::Production)
+            .await;
         assert!(
             (pkt3.pit_volume_change - (-3.0)).abs() < 1e-9,
             "Third packet should have delta -3.0, got {}",
@@ -1580,7 +1663,11 @@ mod tests {
         // Known values: [10, 20, 30, 40, 50] → mean=30, std≈14.14, CV≈0.471
         let known = vec![10.0, 20.0, 30.0, 40.0, 50.0];
         let cv = compute_torque_cv(&known).unwrap();
-        assert!((cv - 0.4714).abs() < 0.01, "CV should be ~0.471, got {}", cv);
+        assert!(
+            (cv - 0.4714).abs() < 0.01,
+            "CV should be ~0.471, got {}",
+            cv
+        );
 
         // Non-positive mean → None
         let zeros = vec![0.0; 10];
@@ -1639,19 +1726,23 @@ mod tests {
         // Build history with torque that gives CV = ~0.047 (low = success)
         // With baseline 0.25, need CV ≤ 0.25 * (1 - 0.20) = 0.20
         // Use near-constant torque → CV ≈ 0
-        let history: Vec<HistoryEntry> = (0..20)
-            .map(|_| make_history_entry(15.0))
-            .collect();
+        let history: Vec<HistoryEntry> = (0..20).map(|_| make_history_entry(15.0)).collect();
 
         let result = coordinator.check_damping_monitor(&history);
         assert!(result.is_some(), "Should return success advisory text");
         let text = result.unwrap();
-        assert!(text.contains("DAMPING SUCCESS"), "Text should indicate success: {}", text);
+        assert!(
+            text.contains("DAMPING SUCCESS"),
+            "Text should indicate success: {}",
+            text
+        );
 
         // Monitor should transition to Idle
         assert!(matches!(
             coordinator.damping_monitor,
-            DampingMonitorState::Idle { last_outcome: Some((crate::types::DampingOutcome::Success, _)) }
+            DampingMonitorState::Idle {
+                last_outcome: Some((crate::types::DampingOutcome::Success, _))
+            }
         ));
     }
 
@@ -1674,19 +1765,28 @@ mod tests {
         // Use widely varying torque: [5, 25, 5, 25, ...] → mean=15, std=10, CV=0.667
         let history: Vec<HistoryEntry> = (0..20)
             .map(|i| {
-                if i % 2 == 0 { make_history_entry(5.0) }
-                else { make_history_entry(25.0) }
+                if i % 2 == 0 {
+                    make_history_entry(5.0)
+                } else {
+                    make_history_entry(25.0)
+                }
             })
             .collect();
 
         let result = coordinator.check_damping_monitor(&history);
         assert!(result.is_some(), "Should return retraction advisory text");
         let text = result.unwrap();
-        assert!(text.contains("DAMPING RETRACTED"), "Text should indicate retraction: {}", text);
+        assert!(
+            text.contains("DAMPING RETRACTED"),
+            "Text should indicate retraction: {}",
+            text
+        );
 
         assert!(matches!(
             coordinator.damping_monitor,
-            DampingMonitorState::Idle { last_outcome: Some((crate::types::DampingOutcome::Retracted, _)) }
+            DampingMonitorState::Idle {
+                last_outcome: Some((crate::types::DampingOutcome::Retracted, _))
+            }
         ));
     }
 
@@ -1730,11 +1830,17 @@ mod tests {
         let result = coordinator.check_damping_monitor(&history);
         assert!(result.is_some(), "Should return escalation advisory text");
         let text = result.unwrap();
-        assert!(text.contains("DAMPING ESCALATED"), "Text should indicate escalation: {}", text);
+        assert!(
+            text.contains("DAMPING ESCALATED"),
+            "Text should indicate escalation: {}",
+            text
+        );
 
         assert!(matches!(
             coordinator.damping_monitor,
-            DampingMonitorState::Idle { last_outcome: Some((crate::types::DampingOutcome::Escalated, _)) }
+            DampingMonitorState::Idle {
+                last_outcome: Some((crate::types::DampingOutcome::Escalated, _))
+            }
         ));
     }
 }

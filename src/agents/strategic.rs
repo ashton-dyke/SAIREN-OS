@@ -21,8 +21,7 @@ use crate::baseline::ThresholdManager;
 use crate::physics_engine;
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, CheckStatus, EnhancedPhysicsReport, FinalSeverity,
-    HistoryEntry, TicketEvent, TicketStage, VerificationResult,
-    VerificationStatus,
+    HistoryEntry, TicketEvent, TicketStage, VerificationResult, VerificationStatus,
 };
 use std::sync::{Arc, RwLock};
 
@@ -130,9 +129,14 @@ impl StrategicAgent {
 
         // Log CfC neural network info if available
         if let Some(score) = ticket.cfc_anomaly_score {
-            traced_ticket.log_info(TicketStage::StrategicPhysics,
-                format!("CfC: anomaly={:.3}, {} surprised features",
-                    score, ticket.cfc_feature_surprises.len()));
+            traced_ticket.log_info(
+                TicketStage::StrategicPhysics,
+                format!(
+                    "CfC: anomaly={:.3}, {} surprised features",
+                    score,
+                    ticket.cfc_feature_surprises.len()
+                ),
+            );
         }
 
         // Apply verification logic based on anomaly category
@@ -187,21 +191,13 @@ impl StrategicAgent {
         );
 
         match ticket.category {
-            AnomalyCategory::WellControl => {
-                self.verify_well_control(ticket, physics, history)
-            }
-            AnomalyCategory::Hydraulics => {
-                self.verify_hydraulics(ticket, physics, history)
-            }
-            AnomalyCategory::Mechanical => {
-                self.verify_mechanical(ticket, physics, history)
-            }
+            AnomalyCategory::WellControl => self.verify_well_control(ticket, physics, history),
+            AnomalyCategory::Hydraulics => self.verify_hydraulics(ticket, physics, history),
+            AnomalyCategory::Mechanical => self.verify_mechanical(ticket, physics, history),
             AnomalyCategory::DrillingEfficiency => {
                 self.verify_drilling_efficiency(ticket, physics, history)
             }
-            AnomalyCategory::Formation => {
-                self.verify_formation(ticket, physics, history)
-            }
+            AnomalyCategory::Formation => self.verify_formation(ticket, physics, history),
             AnomalyCategory::None => (
                 VerificationStatus::Rejected,
                 "No anomaly category specified".to_string(),
@@ -221,7 +217,10 @@ impl StrategicAgent {
         let cfg = crate::config::get();
 
         // Log well control check
-        ticket.log_info(TicketStage::WellControlCheck, "Analyzing well control indicators");
+        ticket.log_info(
+            TicketStage::WellControlCheck,
+            "Analyzing well control indicators",
+        );
 
         // Check if flow imbalance is sustained (filter non-finite to prevent NaN propagation)
         let recent_flow_balances: Vec<f64> = history
@@ -256,23 +255,46 @@ impl StrategicAgent {
         // Well control is CRITICAL - almost always confirm
         let is_sustained = physics.is_sustained || recent_flow_balances.len() >= 3;
 
-        if avg_flow_balance.abs() > cfg.thresholds.strategic_verification.flow_balance_confirmation_gpm
-            || avg_pit_rate.abs() > cfg.thresholds.strategic_verification.pit_rate_confirmation_bbl_hr
+        if avg_flow_balance.abs()
+            > cfg
+                .thresholds
+                .strategic_verification
+                .flow_balance_confirmation_gpm
+            || avg_pit_rate.abs()
+                > cfg
+                    .thresholds
+                    .strategic_verification
+                    .pit_rate_confirmation_bbl_hr
         {
             ticket.log_passed(
                 TicketStage::WellControlCheck,
-                format!("Sustained well control issue: flow={:.1}, pit_rate={:.1}", avg_flow_balance, avg_pit_rate),
+                format!(
+                    "Sustained well control issue: flow={:.1}, pit_rate={:.1}",
+                    avg_flow_balance, avg_pit_rate
+                ),
             );
 
-            let severity = if avg_flow_balance.abs() > cfg.thresholds.strategic_verification.flow_balance_critical_gpm
-                || avg_pit_rate.abs() > cfg.thresholds.strategic_verification.pit_rate_critical_bbl_hr
+            let severity = if avg_flow_balance.abs()
+                > cfg
+                    .thresholds
+                    .strategic_verification
+                    .flow_balance_critical_gpm
+                || avg_pit_rate.abs()
+                    > cfg
+                        .thresholds
+                        .strategic_verification
+                        .pit_rate_critical_bbl_hr
             {
                 FinalSeverity::Critical
             } else {
                 FinalSeverity::High
             };
 
-            let kick_or_loss = if avg_flow_balance > 0.0 { "kick" } else { "loss" };
+            let kick_or_loss = if avg_flow_balance > 0.0 {
+                "kick"
+            } else {
+                "loss"
+            };
 
             return (
                 VerificationStatus::Confirmed,
@@ -287,8 +309,16 @@ impl StrategicAgent {
         }
 
         if is_sustained
-            && (avg_flow_balance.abs() > cfg.thresholds.strategic_verification.flow_balance_transient_gpm
-                || avg_pit_rate.abs() > cfg.thresholds.strategic_verification.pit_rate_transient_bbl_hr)
+            && (avg_flow_balance.abs()
+                > cfg
+                    .thresholds
+                    .strategic_verification
+                    .flow_balance_transient_gpm
+                || avg_pit_rate.abs()
+                    > cfg
+                        .thresholds
+                        .strategic_verification
+                        .pit_rate_transient_bbl_hr)
         {
             return (
                 VerificationStatus::Confirmed,
@@ -303,7 +333,13 @@ impl StrategicAgent {
         }
 
         // Check if it was transient
-        if !is_sustained && avg_flow_balance.abs() < cfg.thresholds.strategic_verification.flow_balance_transient_gpm {
+        if !is_sustained
+            && avg_flow_balance.abs()
+                < cfg
+                    .thresholds
+                    .strategic_verification
+                    .flow_balance_transient_gpm
+        {
             ticket.log_failed(
                 TicketStage::WellControlCheck,
                 "Flow balance returned to normal - transient event",
@@ -338,7 +374,10 @@ impl StrategicAgent {
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
         let cfg = crate::config::get();
 
-        ticket.log_info(TicketStage::HydraulicsCheck, "Analyzing hydraulics indicators");
+        ticket.log_info(
+            TicketStage::HydraulicsCheck,
+            "Analyzing hydraulics indicators",
+        );
 
         // Check ECD margin trend
         let ecd_margins: Vec<f64> = history
@@ -393,7 +432,11 @@ impl StrategicAgent {
             ticket.current_metrics.spp_delta
         };
 
-        if avg_spp_delta.abs() > cfg.thresholds.strategic_verification.spp_deviation_sustained_psi
+        if avg_spp_delta.abs()
+            > cfg
+                .thresholds
+                .strategic_verification
+                .spp_deviation_sustained_psi
             && physics.is_sustained
         {
             ticket.log_passed(
@@ -426,10 +469,17 @@ impl StrategicAgent {
         }
 
         // Transient or normal
-        if avg_spp_delta.abs() < cfg.thresholds.strategic_verification.spp_deviation_normal_psi
+        if avg_spp_delta.abs()
+            < cfg
+                .thresholds
+                .strategic_verification
+                .spp_deviation_normal_psi
             && avg_ecd_margin > cfg.thresholds.hydraulics.ecd_margin_warning_ppg
         {
-            ticket.log_failed(TicketStage::HydraulicsCheck, "Hydraulics returned to normal");
+            ticket.log_failed(
+                TicketStage::HydraulicsCheck,
+                "Hydraulics returned to normal",
+            );
             return (
                 VerificationStatus::Rejected,
                 "Hydraulics parameters returned to normal. Transient event.".to_string(),
@@ -474,10 +524,16 @@ impl StrategicAgent {
         };
 
         // Check for stick-slip from physics report
-        let has_stick_slip = physics.base.detected_dysfunctions.iter()
+        let has_stick_slip = physics
+            .base
+            .detected_dysfunctions
+            .iter()
             .any(|d| d.contains("Stick-slip"));
 
-        let has_packoff = physics.base.detected_dysfunctions.iter()
+        let has_packoff = physics
+            .base
+            .detected_dysfunctions
+            .iter()
             .any(|d| d.contains("Pack-off"));
 
         // Check for founder condition from physics report (uses full history for reliable detection)
@@ -485,10 +541,29 @@ impl StrategicAgent {
         let founder_severity = physics.base.founder_severity;
         let optimal_wob = physics.base.optimal_wob_estimate;
 
+        // Formation boundary proximity: mechanical anomalies within 50 ft of a
+        // formation transition are more expected and less alarming.
+        let near_boundary = ticket
+            .current_metrics
+            .formation_depth_in_ft
+            .map(|d| d < 50.0)
+            .unwrap_or(false);
+        let formation_label = ticket
+            .current_metrics
+            .current_formation
+            .as_deref()
+            .map(|n| format!(" ({})", n))
+            .unwrap_or_default();
+
         // === FOUNDER DETECTION (priority over other mechanical issues) ===
         if has_founder {
             let severity_level = if founder_severity >= cfg.thresholds.founder.severity_high {
-                FinalSeverity::High
+                // Near formation boundary, downgrade High→Medium (expected parameter changes)
+                if near_boundary {
+                    FinalSeverity::Medium
+                } else {
+                    FinalSeverity::High
+                }
             } else if founder_severity >= cfg.thresholds.founder.severity_warning {
                 FinalSeverity::Medium
             } else {
@@ -505,9 +580,15 @@ impl StrategicAgent {
                 ),
             );
 
+            let boundary_note = if near_boundary {
+                format!(" (near formation boundary{formation_label} — parameter changes expected)")
+            } else {
+                String::new()
+            };
+
             let recommendation = if optimal_wob > 0.0 {
                 format!(
-                    "CONFIRMED: Founder condition - WOB increasing but ROP not responding (severity: {:.0}%). \
+                    "CONFIRMED: Founder condition - WOB increasing but ROP not responding (severity: {:.0}%){boundary_note}. \
                      Reduce WOB to ~{:.1} klbs where ROP was optimal. Current WOB: {:.1} klbs.",
                     founder_severity * 100.0,
                     optimal_wob,
@@ -515,7 +596,7 @@ impl StrategicAgent {
                 )
             } else {
                 format!(
-                    "CONFIRMED: Founder condition - WOB increasing but ROP not responding (severity: {:.0}%). \
+                    "CONFIRMED: Founder condition - WOB increasing but ROP not responding (severity: {:.0}%){boundary_note}. \
                      Reduce WOB to improve drilling efficiency. Current WOB: {:.1} klbs.",
                     founder_severity * 100.0,
                     physics.base.current_wob
@@ -531,31 +612,53 @@ impl StrategicAgent {
         }
 
         // === STICK-SLIP DETECTION ===
-        if has_stick_slip && physics.trend_consistency > cfg.thresholds.strategic_verification.trend_consistency_threshold {
-            ticket.log_passed(TicketStage::MseAnalysis, "Stick-slip detected with consistent pattern");
+        if has_stick_slip
+            && physics.trend_consistency
+                > cfg
+                    .thresholds
+                    .strategic_verification
+                    .trend_consistency_threshold
+        {
+            ticket.log_passed(
+                TicketStage::MseAnalysis,
+                "Stick-slip detected with consistent pattern",
+            );
             return (
                 VerificationStatus::Confirmed,
                 "CONFIRMED: Stick-slip vibration detected. Reduce WOB or increase RPM. \
-                 Consider adjusting drilling parameters.".to_string(),
+                 Consider adjusting drilling parameters."
+                    .to_string(),
                 FinalSeverity::Medium,
                 true,
             );
         }
 
         // === PACK-OFF DETECTION ===
-        if has_packoff || (avg_torque_delta > cfg.thresholds.mechanical.torque_increase_critical && physics.is_sustained) {
+        if has_packoff
+            || (avg_torque_delta > cfg.thresholds.mechanical.torque_increase_critical
+                && physics.is_sustained)
+        {
             ticket.log_passed(
                 TicketStage::MseAnalysis,
-                format!("Pack-off condition: torque_delta={:.1}%", avg_torque_delta * 100.0),
+                format!(
+                    "Pack-off condition: torque_delta={:.1}%",
+                    avg_torque_delta * 100.0
+                ),
             );
+            // Near formation boundary, downgrade High→Medium
+            let packoff_severity = if near_boundary {
+                FinalSeverity::Medium
+            } else {
+                FinalSeverity::High
+            };
             return (
                 VerificationStatus::Confirmed,
                 format!(
-                    "CONFIRMED: Pack-off condition indicated. Torque increase: {:.1}%. \
+                    "CONFIRMED: Pack-off condition indicated{formation_label}. Torque increase: {:.1}%. \
                      Pick up off bottom, increase flow, and work pipe.",
                     avg_torque_delta * 100.0
                 ),
-                FinalSeverity::High,
+                packoff_severity,
                 true,
             );
         }
@@ -573,7 +676,10 @@ impl StrategicAgent {
             return self.cfc_tiebreak(ticket, uncertain);
         }
 
-        ticket.log_failed(TicketStage::MseAnalysis, "Mechanical parameters within normal range");
+        ticket.log_failed(
+            TicketStage::MseAnalysis,
+            "Mechanical parameters within normal range",
+        );
         (
             VerificationStatus::Rejected,
             "Mechanical parameters returned to normal. Transient event.".to_string(),
@@ -600,7 +706,11 @@ impl StrategicAgent {
 
         // Sustained low efficiency
         if efficiency < cfg.thresholds.mse.efficiency_poor_percent
-            && physics.trend_consistency > cfg.thresholds.strategic_verification.trend_consistency_threshold
+            && physics.trend_consistency
+                > cfg
+                    .thresholds
+                    .strategic_verification
+                    .trend_consistency_threshold
         {
             ticket.log_passed(
                 TicketStage::MseAnalysis,
@@ -608,7 +718,11 @@ impl StrategicAgent {
             );
 
             // Calculate recommended adjustment (guard against zero optimal_mse)
-            let mse_excess = if optimal_mse > 0.0 { avg_mse / optimal_mse } else { 1.0 };
+            let mse_excess = if optimal_mse > 0.0 {
+                avg_mse / optimal_mse
+            } else {
+                1.0
+            };
             let recommendation = if mse_excess > 2.0 {
                 "Significantly reduce WOB or increase ROP target"
             } else {
@@ -645,7 +759,10 @@ impl StrategicAgent {
             ticket.log_failed(TicketStage::MseAnalysis, "Efficiency improved");
             return (
                 VerificationStatus::Rejected,
-                format!("Drilling efficiency improved to {:.0}%. No action needed.", efficiency),
+                format!(
+                    "Drilling efficiency improved to {:.0}%. No action needed.",
+                    efficiency
+                ),
                 FinalSeverity::Healthy,
                 false,
             );
@@ -669,15 +786,30 @@ impl StrategicAgent {
     ) -> (VerificationStatus, String, FinalSeverity, bool) {
         let cfg = crate::config::get();
 
-        ticket.log_info(TicketStage::FormationAnalysis, "Analyzing formation indicators");
+        ticket.log_info(
+            TicketStage::FormationAnalysis,
+            "Analyzing formation indicators",
+        );
 
         // D-exponent trend analysis
         let dxc_trend = physics.base.dxc_trend;
         let formation_hardness = physics.base.formation_hardness;
 
+        // Formation name context from ticket (enriched by coordinator)
+        let formation_label = ticket
+            .current_metrics
+            .current_formation
+            .as_deref()
+            .map(|n| format!(" ({})", n))
+            .unwrap_or_default();
+
         // Significant d-exponent change indicates formation change
         if dxc_trend.abs() > cfg.thresholds.strategic_verification.dxc_change_threshold
-            && physics.trend_consistency > cfg.thresholds.strategic_verification.formation_trend_consistency
+            && physics.trend_consistency
+                > cfg
+                    .thresholds
+                    .strategic_verification
+                    .formation_trend_consistency
         {
             let formation_type = if dxc_trend > 0.0 { "harder" } else { "softer" };
             let recommendation = if dxc_trend > 0.0 {
@@ -696,9 +828,9 @@ impl StrategicAgent {
             return (
                 VerificationStatus::Confirmed,
                 format!(
-                    "CONFIRMED: Formation change detected. Drilling into {} formation \
+                    "CONFIRMED: Formation change detected. Drilling into {} formation{} \
                      (hardness: {:.1}/10). {}.",
-                    formation_type, formation_hardness, recommendation
+                    formation_type, formation_label, formation_hardness, recommendation
                 ),
                 FinalSeverity::Low,
                 true,
@@ -710,7 +842,7 @@ impl StrategicAgent {
             return (
                 VerificationStatus::Confirmed,
                 format!(
-                    "CONFIRMED: D-exponent decreasing trend ({:.3}). \
+                    "CONFIRMED: D-exponent decreasing trend ({:.3}){formation_label}. \
                      Possible abnormal pore pressure. Verify mud weight adequacy.",
                     dxc_trend
                 ),
@@ -719,7 +851,10 @@ impl StrategicAgent {
             );
         }
 
-        ticket.log_failed(TicketStage::FormationAnalysis, "No significant formation change");
+        ticket.log_failed(
+            TicketStage::FormationAnalysis,
+            "No significant formation change",
+        );
         let uncertain = (
             VerificationStatus::Uncertain,
             "Formation change not confirmed. Continue monitoring d-exponent.".to_string(),
@@ -730,8 +865,8 @@ impl StrategicAgent {
     }
 
     /// Use CfC anomaly score as tiebreaker when verification result would be Uncertain.
-    /// - score >= 0.7 → Confirmed (CfC strongly agrees)
-    /// - score < 0.2  → Rejected (CfC sees nothing)
+    /// - score >= 0.65 → Confirmed (CfC corroborates)
+    /// - score < 0.35  → Rejected (CfC sees nothing)
     /// - Otherwise stays Uncertain
     /// Only breaks ties; never overrides strong physics signals.
     fn cfc_tiebreak(
@@ -744,25 +879,31 @@ impl StrategicAgent {
             None => return uncertain_result,
         };
 
-        if score >= 0.7 {
+        if score >= 0.65 {
             ticket.log_passed(
                 TicketStage::StrategicPhysics,
                 format!("CfC tiebreak → Confirmed (anomaly={:.3})", score),
             );
             (
                 VerificationStatus::Confirmed,
-                format!("{} [CfC corroborates: anomaly={:.2}]", uncertain_result.1, score),
+                format!(
+                    "{} [CfC corroborates: anomaly={:.2}]",
+                    uncertain_result.1, score
+                ),
                 uncertain_result.2, // keep severity as-is
                 true,               // send to dashboard
             )
-        } else if score < 0.2 {
+        } else if score < 0.35 {
             ticket.log_failed(
                 TicketStage::StrategicPhysics,
                 format!("CfC tiebreak → Rejected (anomaly={:.3})", score),
             );
             (
                 VerificationStatus::Rejected,
-                format!("{} [CfC disagrees: anomaly={:.2}]", uncertain_result.1, score),
+                format!(
+                    "{} [CfC disagrees: anomaly={:.2}]",
+                    uncertain_result.1, score
+                ),
                 FinalSeverity::Healthy,
                 false,
             )
@@ -771,12 +912,13 @@ impl StrategicAgent {
         }
     }
 
-    /// Truncate text for trace log
+    /// Truncate text for trace log (UTF-8 safe)
     fn truncate_text(&self, s: &str, max_len: usize) -> String {
         if max_len < 4 || s.len() <= max_len {
             s.to_string()
         } else {
-            format!("{}...", &s[..max_len - 3])
+            let boundary = s.floor_char_boundary(max_len.saturating_sub(3));
+            format!("{}...", &s[..boundary])
         }
     }
 
@@ -806,7 +948,10 @@ mod tests {
     /// Safe to call multiple times; only the first call initializes.
     fn ensure_config() {
         if !crate::config::is_initialized() {
-            crate::config::init(crate::config::WellConfig::default(), crate::config::ConfigProvenance::default());
+            crate::config::init(
+                crate::config::WellConfig::default(),
+                crate::config::ConfigProvenance::default(),
+            );
         }
     }
 
@@ -878,10 +1023,7 @@ mod tests {
                     pit_rate: 5.0,
                     ..DrillingMetrics::default()
                 };
-                HistoryEntry {
-                    packet,
-                    metrics,
-                }
+                HistoryEntry { packet, metrics }
             })
             .collect()
     }

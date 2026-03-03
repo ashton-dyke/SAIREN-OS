@@ -9,15 +9,13 @@
 //! 6. Builds MLInsightsReport with success or explicit failure reasons
 
 use crate::types::{
-    ml_quality_thresholds::MIN_ANALYSIS_SAMPLES, AnalysisFailure, AnalysisInsights,
-    AnalysisResult, ConfidenceLevel, HourlyDataset, MLInsightsReport, SignificantCorrelation,
+    ml_quality_thresholds::MIN_ANALYSIS_SAMPLES, AnalysisFailure, AnalysisInsights, AnalysisResult,
+    ConfidenceLevel, HourlyDataset, MLInsightsReport, SignificantCorrelation,
 };
 
 use super::{
-    correlations::CorrelationEngine,
-    dysfunction_filter::DysfunctionFilter,
-    formation_segmenter::FormationSegmenter,
-    optimal_finder::OptimalFinder,
+    correlations::CorrelationEngine, dysfunction_filter::DysfunctionFilter,
+    formation_segmenter::FormationSegmenter, optimal_finder::OptimalFinder,
     quality_filter::DataQualityFilter,
 };
 
@@ -83,10 +81,8 @@ impl HourlyAnalyzer {
 
         // Step 2: Dysfunction filtering (V2.2)
         // Reject samples where instability was detected (stick-slip, pack-off, founder, etc.)
-        let dysfunction_result = DysfunctionFilter::filter(
-            &filter_result.valid_packets,
-            &filter_result.valid_metrics,
-        );
+        let dysfunction_result =
+            DysfunctionFilter::filter(&filter_result.valid_packets, &filter_result.valid_metrics);
 
         let dysfunction_filtered = dysfunction_result.rejected_count > 0;
 
@@ -207,6 +203,7 @@ impl HourlyAnalyzer {
 
         // Merge partitions with < 50 samples into nearest by centroid distance
         let centroids = dataset.regime_centroids;
+        let max_idx = centroids.len().saturating_sub(1);
         let small_keys: Vec<u8> = partitions
             .iter()
             .filter(|(_, indices)| indices.len() < 50)
@@ -215,21 +212,21 @@ impl HourlyAnalyzer {
 
         for small_key in small_keys {
             if let Some(small_indices) = partitions.remove(&small_key) {
+                let sk = (small_key as usize).min(max_idx);
                 // Find the nearest non-empty partition by centroid distance
-                let target = partitions
-                    .keys()
-                    .copied()
-                    .min_by(|&a, &b| {
-                        euclidean_distance_8(&centroids[small_key as usize], &centroids[a as usize])
-                            .partial_cmp(&euclidean_distance_8(
-                                &centroids[small_key as usize],
-                                &centroids[b as usize],
-                            ))
-                            .unwrap_or(std::cmp::Ordering::Equal)
-                    });
+                let target = partitions.keys().copied().min_by(|&a, &b| {
+                    let ai = (a as usize).min(max_idx);
+                    let bi = (b as usize).min(max_idx);
+                    euclidean_distance_8(&centroids[sk], &centroids[ai])
+                        .partial_cmp(&euclidean_distance_8(&centroids[sk], &centroids[bi]))
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                });
 
                 if let Some(target_key) = target {
-                    partitions.get_mut(&target_key).expect("target_key came from partitions.keys()").extend(small_indices);
+                    partitions
+                        .get_mut(&target_key)
+                        .expect("target_key came from partitions.keys()")
+                        .extend(small_indices);
                 } else {
                     // All other partitions were also small and removed; re-insert
                     partitions.insert(small_key, small_indices);
@@ -238,16 +235,32 @@ impl HourlyAnalyzer {
         }
 
         // If no partition reaches MIN_ANALYSIS_SAMPLES, combine all into one (regime_id = None)
-        let any_viable = partitions.values().any(|idx| idx.len() >= MIN_ANALYSIS_SAMPLES);
+        let any_viable = partitions
+            .values()
+            .any(|idx| idx.len() >= MIN_ANALYSIS_SAMPLES);
         if !any_viable {
             // Combine everything
             let all_indices: Vec<usize> = (0..stable_packets.len()).collect();
             let mut combined = HashMap::new();
             combined.insert(255u8, all_indices); // sentinel for "no regime"
-            return Self::run_partitions(&combined, stable_packets, stable_metrics, dataset, dysfunction_filtered, true);
+            return Self::run_partitions(
+                &combined,
+                stable_packets,
+                stable_metrics,
+                dataset,
+                dysfunction_filtered,
+                true,
+            );
         }
 
-        Self::run_partitions(&partitions, stable_packets, stable_metrics, dataset, dysfunction_filtered, false)
+        Self::run_partitions(
+            &partitions,
+            stable_packets,
+            stable_metrics,
+            dataset,
+            dysfunction_filtered,
+            false,
+        )
     }
 
     /// Run Steps 3-5 on each viable partition.
@@ -271,12 +284,9 @@ impl HourlyAnalyzer {
             let part_metrics: Vec<&crate::types::DrillingMetrics> =
                 indices.iter().map(|&i| stable_metrics[i]).collect();
 
-            if let Some(mut result) = Self::run_partition(
-                &part_packets,
-                &part_metrics,
-                dataset,
-                dysfunction_filtered,
-            ) {
+            if let Some(mut result) =
+                Self::run_partition(&part_packets, &part_metrics, dataset, dysfunction_filtered)
+            {
                 // Tag with regime_id
                 if combined_mode {
                     result.optimal_params.regime_id = None;
@@ -309,9 +319,7 @@ impl HourlyAnalyzer {
         }
 
         // Use largest segment for analysis
-        let best_segment = segments
-            .iter()
-            .max_by_key(|s| s.valid_sample_count)?;
+        let best_segment = segments.iter().max_by_key(|s| s.valid_sample_count)?;
 
         let (start, end) = best_segment.packet_range;
         let segment_packets: Vec<_> = packets[start..end].to_vec();
@@ -467,7 +475,6 @@ mod tests {
     use super::*;
     use crate::types::{AnomalyCategory, Campaign, DrillingMetrics, RigState, WitsPacket};
     use std::collections::HashMap;
-    use std::sync::Arc;
 
     fn make_packet(wob: f64, rpm: f64, rop: f64, d_exp: f64) -> WitsPacket {
         WitsPacket {
@@ -508,7 +515,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     fn make_metric(mse: f64, mse_efficiency: f64) -> DrillingMetrics {
@@ -573,12 +581,12 @@ mod tests {
 
         match report.result {
             AnalysisResult::Success(insights) => {
-                assert!(!insights.correlations.is_empty(), "Should have correlations");
-                assert!(insights.sample_count >= 360, "Should have enough samples");
                 assert!(
-                    !insights.summary_text.is_empty(),
-                    "Should have summary"
+                    !insights.correlations.is_empty(),
+                    "Should have correlations"
                 );
+                assert!(insights.sample_count >= 360, "Should have enough samples");
+                assert!(!insights.summary_text.is_empty(), "Should have summary");
             }
             AnalysisResult::Failure(f) => {
                 panic!("Expected success, got failure: {}", f);
@@ -592,15 +600,16 @@ mod tests {
         let packets: Vec<_> = (0..100)
             .map(|i| make_packet(20.0, 100.0, 50.0 + i as f64, 1.5))
             .collect();
-        let metrics: Vec<_> = (0..100)
-            .map(|_| make_metric(20000.0, 75.0))
-            .collect();
+        let metrics: Vec<_> = (0..100).map(|_| make_metric(20000.0, 75.0)).collect();
 
         let dataset = make_dataset(packets, metrics);
         let report = HourlyAnalyzer::analyze(&dataset);
 
         match report.result {
-            AnalysisResult::Failure(AnalysisFailure::InsufficientData { valid_samples, required }) => {
+            AnalysisResult::Failure(AnalysisFailure::InsufficientData {
+                valid_samples,
+                required,
+            }) => {
                 assert!(valid_samples < required);
             }
             other => panic!("Expected InsufficientData failure, got {:?}", other),
@@ -613,9 +622,7 @@ mod tests {
         let packets: Vec<_> = (0..500)
             .map(|_| make_packet(2.0, 100.0, 50.0, 1.5)) // WOB < 5
             .collect();
-        let metrics: Vec<_> = (0..500)
-            .map(|_| make_metric(20000.0, 75.0))
-            .collect();
+        let metrics: Vec<_> = (0..500).map(|_| make_metric(20000.0, 75.0)).collect();
 
         let dataset = make_dataset(packets, metrics);
         let report = HourlyAnalyzer::analyze(&dataset);

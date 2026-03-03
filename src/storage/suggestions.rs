@@ -4,10 +4,10 @@
 //! records to compute per-category confirmation rates and recommend threshold
 //! adjustments when false positive rates are high.
 
+use super::feedback::{FeedbackOutcome, FeedbackRecord};
 use crate::config::WellConfig;
 use crate::types::AnomalyCategory;
 use serde::Serialize;
-use super::feedback::{FeedbackOutcome, FeedbackRecord};
 
 /// Per-category confirmation statistics.
 #[derive(Debug, Clone, Serialize)]
@@ -115,18 +115,12 @@ fn current_threshold_value(config: &WellConfig, cat: AnomalyCategory) -> Option<
         AnomalyCategory::DrillingEfficiency => {
             Some(config.thresholds.mse.efficiency_warning_percent)
         }
-        AnomalyCategory::Hydraulics => {
-            Some(config.thresholds.hydraulics.ecd_margin_warning_ppg)
-        }
+        AnomalyCategory::Hydraulics => Some(config.thresholds.hydraulics.ecd_margin_warning_ppg),
         AnomalyCategory::WellControl => {
             Some(config.thresholds.well_control.flow_imbalance_warning_gpm)
         }
-        AnomalyCategory::Mechanical => {
-            Some(config.thresholds.mechanical.stick_slip_cv_warning)
-        }
-        AnomalyCategory::Formation => {
-            Some(config.thresholds.formation.dexp_decrease_warning)
-        }
+        AnomalyCategory::Mechanical => Some(config.thresholds.mechanical.stick_slip_cv_warning),
+        AnomalyCategory::Formation => Some(config.thresholds.formation.dexp_decrease_warning),
         AnomalyCategory::None => None,
     }
 }
@@ -231,11 +225,7 @@ mod tests {
     use super::*;
     use crate::storage::feedback::FeedbackRecord;
 
-    fn make_feedback(
-        cat: AnomalyCategory,
-        outcome: FeedbackOutcome,
-        ts: u64,
-    ) -> FeedbackRecord {
+    fn make_feedback(cat: AnomalyCategory, outcome: FeedbackOutcome, ts: u64) -> FeedbackRecord {
         FeedbackRecord {
             advisory_timestamp: ts,
             outcome,
@@ -252,15 +242,34 @@ mod tests {
     #[test]
     fn test_compute_stats_mixed() {
         let records: Vec<FeedbackRecord> = vec![
-            make_feedback(AnomalyCategory::DrillingEfficiency, FeedbackOutcome::Confirmed, 1),
-            make_feedback(AnomalyCategory::DrillingEfficiency, FeedbackOutcome::Confirmed, 2),
-            make_feedback(AnomalyCategory::DrillingEfficiency, FeedbackOutcome::FalsePositive, 3),
-            make_feedback(AnomalyCategory::DrillingEfficiency, FeedbackOutcome::Unclear, 4),
+            make_feedback(
+                AnomalyCategory::DrillingEfficiency,
+                FeedbackOutcome::Confirmed,
+                1,
+            ),
+            make_feedback(
+                AnomalyCategory::DrillingEfficiency,
+                FeedbackOutcome::Confirmed,
+                2,
+            ),
+            make_feedback(
+                AnomalyCategory::DrillingEfficiency,
+                FeedbackOutcome::FalsePositive,
+                3,
+            ),
+            make_feedback(
+                AnomalyCategory::DrillingEfficiency,
+                FeedbackOutcome::Unclear,
+                4,
+            ),
             make_feedback(AnomalyCategory::WellControl, FeedbackOutcome::Confirmed, 5),
         ];
 
         let stats = compute_stats(&records);
-        let de_stat = stats.iter().find(|s| s.category == AnomalyCategory::DrillingEfficiency).unwrap();
+        let de_stat = stats
+            .iter()
+            .find(|s| s.category == AnomalyCategory::DrillingEfficiency)
+            .unwrap();
         assert_eq!(de_stat.total, 4);
         assert_eq!(de_stat.confirmed, 2);
         assert_eq!(de_stat.false_positives, 1);
@@ -274,10 +283,18 @@ mod tests {
         // 3 confirmed + 10 false positive = 13 rated, conf rate = 23%
         let mut records = Vec::new();
         for i in 0..3 {
-            records.push(make_feedback(AnomalyCategory::DrillingEfficiency, FeedbackOutcome::Confirmed, i));
+            records.push(make_feedback(
+                AnomalyCategory::DrillingEfficiency,
+                FeedbackOutcome::Confirmed,
+                i,
+            ));
         }
         for i in 3..13 {
-            records.push(make_feedback(AnomalyCategory::DrillingEfficiency, FeedbackOutcome::FalsePositive, i));
+            records.push(make_feedback(
+                AnomalyCategory::DrillingEfficiency,
+                FeedbackOutcome::FalsePositive,
+                i,
+            ));
         }
 
         let config = WellConfig::default();
@@ -296,9 +313,17 @@ mod tests {
         // 19 confirmed + 1 false positive = 20 rated, conf rate = 95%
         let mut records = Vec::new();
         for i in 0..19 {
-            records.push(make_feedback(AnomalyCategory::WellControl, FeedbackOutcome::Confirmed, i));
+            records.push(make_feedback(
+                AnomalyCategory::WellControl,
+                FeedbackOutcome::Confirmed,
+                i,
+            ));
         }
-        records.push(make_feedback(AnomalyCategory::WellControl, FeedbackOutcome::FalsePositive, 19));
+        records.push(make_feedback(
+            AnomalyCategory::WellControl,
+            FeedbackOutcome::FalsePositive,
+            19,
+        ));
 
         let config = WellConfig::default();
         let suggestions = compute_suggestions(&records, &config);
@@ -314,7 +339,13 @@ mod tests {
     #[test]
     fn test_no_suggestion_with_insufficient_data() {
         let records: Vec<FeedbackRecord> = (0..5)
-            .map(|i| make_feedback(AnomalyCategory::Mechanical, FeedbackOutcome::FalsePositive, i))
+            .map(|i| {
+                make_feedback(
+                    AnomalyCategory::Mechanical,
+                    FeedbackOutcome::FalsePositive,
+                    i,
+                )
+            })
             .collect();
 
         let config = WellConfig::default();
@@ -328,10 +359,18 @@ mod tests {
         // Between 50% and 90% — no suggestion
         let mut records = Vec::new();
         for i in 0..7 {
-            records.push(make_feedback(AnomalyCategory::Hydraulics, FeedbackOutcome::Confirmed, i));
+            records.push(make_feedback(
+                AnomalyCategory::Hydraulics,
+                FeedbackOutcome::Confirmed,
+                i,
+            ));
         }
         for i in 7..12 {
-            records.push(make_feedback(AnomalyCategory::Hydraulics, FeedbackOutcome::FalsePositive, i));
+            records.push(make_feedback(
+                AnomalyCategory::Hydraulics,
+                FeedbackOutcome::FalsePositive,
+                i,
+            ));
         }
 
         let config = WellConfig::default();

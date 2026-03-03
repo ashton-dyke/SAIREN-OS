@@ -9,7 +9,9 @@
 //! - Automatic filtering of non-significant correlations
 //! - Analysis of all relevant drilling parameter pairs
 
-use crate::types::{ml_quality_thresholds::SIGNIFICANCE_THRESHOLD, SignificantCorrelation, WitsPacket};
+use crate::types::{
+    ml_quality_thresholds::SIGNIFICANCE_THRESHOLD, SignificantCorrelation, WitsPacket,
+};
 use statrs::distribution::{ContinuousCDF, StudentsT};
 
 /// Correlation analysis engine with statistical significance testing
@@ -72,7 +74,7 @@ impl CorrelationEngine {
         let numerator = n * sum_xy - sum_x * sum_y;
         let denominator = ((n * sum_x2 - sum_x.powi(2)) * (n * sum_y2 - sum_y.powi(2))).sqrt();
 
-        if denominator == 0.0 {
+        if !denominator.is_finite() || denominator == 0.0 {
             0.0
         } else {
             numerator / denominator
@@ -170,7 +172,6 @@ impl CorrelationEngine {
 mod tests {
     use super::*;
     use crate::types::RigState;
-    use std::sync::Arc;
 
     fn make_packet(wob: f64, rpm: f64, flow: f64, rop: f64, mse: f64) -> WitsPacket {
         WitsPacket {
@@ -211,7 +212,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     #[test]
@@ -268,7 +270,11 @@ mod tests {
         let y: Vec<f64> = (0..100)
             .map(|i| {
                 // Add large noise to create weak correlation
-                if i % 2 == 0 { 50.0 } else { 51.0 }
+                if i % 2 == 0 {
+                    50.0
+                } else {
+                    51.0
+                }
             })
             .collect();
 
@@ -290,10 +296,7 @@ mod tests {
 
         // Should not pass the significance filter
         let result = CorrelationEngine::calculate(&x, &y, "X", "Y");
-        assert!(
-            result.is_none(),
-            "Weak correlation should be rejected"
-        );
+        assert!(result.is_none(), "Weak correlation should be rejected");
     }
 
     #[test]
@@ -340,24 +343,12 @@ mod tests {
     fn test_p_value_calculation_accuracy() {
         // Known test case: r=0.5, n=30 should give p ≈ 0.005
         let p = CorrelationEngine::p_value_for_r(0.5, 30);
-        assert!(
-            p < 0.01,
-            "r=0.5, n=30 should have p < 0.01, got {}",
-            p
-        );
-        assert!(
-            p > 0.001,
-            "r=0.5, n=30 should have p > 0.001, got {}",
-            p
-        );
+        assert!(p < 0.01, "r=0.5, n=30 should have p < 0.01, got {}", p);
+        assert!(p > 0.001, "r=0.5, n=30 should have p > 0.001, got {}", p);
 
         // Known test case: r=0.2, n=30 should give p ≈ 0.29
         let p = CorrelationEngine::p_value_for_r(0.2, 30);
-        assert!(
-            p > 0.2,
-            "r=0.2, n=30 should have p > 0.2, got {}",
-            p
-        );
+        assert!(p > 0.2, "r=0.2, n=30 should have p > 0.2, got {}", p);
     }
 
     #[test]

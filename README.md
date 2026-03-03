@@ -1,6 +1,6 @@
 # SAIREN-OS - Drilling Operational Intelligence System
 
-Real-time drilling advisory system using WITS Level 0 data and an 11-phase multi-agent AI pipeline for drilling optimization and risk prevention.
+Real-time drilling advisory system using WITS Level 0 data and a 9-phase multi-agent AI pipeline for drilling optimization and risk prevention. Designed for Raspberry Pi 5 deployment — pure Rust, no GPU required.
 
 ---
 
@@ -16,7 +16,7 @@ Real-time drilling advisory system using WITS Level 0 data and an 11-phase multi
 8. [Dashboard & Monitoring](#dashboard--monitoring)
 9. [Understanding Advisories](#understanding-advisories)
 10. [API Reference](#api-reference)
-11. [Fleet Hub](#fleet-hub)
+11. [P2P Mesh Network](#p2p-mesh-network)
 12. [Deployment](#deployment)
 13. [Troubleshooting](#troubleshooting)
 14. [Architecture Overview](#architecture-overview)
@@ -28,7 +28,7 @@ Real-time drilling advisory system using WITS Level 0 data and an 11-phase multi
 ## Quick Start
 
 ```bash
-# 1. Build the system (LLM enabled by default; use 'cuda' for GPU acceleration)
+# 1. Build the system (pure Rust, no GPU or external dependencies needed)
 cargo build --release
 
 # 2. Run with the built-in simulator (pipes simulated WITS data via stdin)
@@ -68,40 +68,17 @@ Or connect to a real WITS source:
 ## Building
 
 ```bash
-# Default build (LLM enabled, CPU inference — works on any machine)
+# Build (pure Rust, no GPU or external dependencies needed)
 cargo build --release
-
-# With GPU acceleration (requires CUDA toolkit)
-cargo build --release --features cuda
-
-# Without LLM (template-based advisories only)
-cargo build --release --no-default-features
-
-# Fleet Hub server (requires PostgreSQL)
-cargo build --release --bin fleet-hub --features fleet-hub
 ```
 
-**Hardware auto-detection**: When built with `llm` or `cuda`, SAIREN-OS checks for CUDA at startup and automatically selects the right model:
+No feature flags, no GPU, no external model downloads. The system uses:
 
-| Hardware | Tactical Routing | Strategic Model | Build Flag |
-|----------|-----------------|----------------|------------|
-| **GPU** (CUDA) | Deterministic pattern matching | Qwen 2.5 7B (~800ms) | `--features cuda` |
-| **CPU** | Deterministic pattern matching | Qwen 2.5 4B (~10-30s) | *(default)* |
-| **No LLM** | Deterministic pattern matching | Template-based | `--no-default-features` |
+- **Deterministic pattern matching** for tactical anomaly detection (~10ms)
+- **Template-based advisories** for strategic recommendations
+- **Dual CfC neural networks** (pure Rust) for learned anomaly scoring
 
-**Feature flags:**
-
-| Feature | Flag | Description |
-|---------|------|-------------|
-| **LLM (CPU)** | `--features llm` | Qwen 2.5 strategic advisory generation (default, enabled by default) |
-| **LLM (GPU)** | `--features cuda` | CUDA-accelerated LLM inference |
-| **Fleet Hub** | `--features fleet-hub` | Central hub server binary (PostgreSQL, API, curator) |
-| **Tactical LLM** | `--features tactical_llm` | Legacy LLM-based tactical routing (not recommended) |
-
-Fleet client, knowledge base, and fleet intelligence are always compiled — no feature flag needed.
-
-> **Note**: The tactical agent uses deterministic physics-based pattern matching (no LLM required).
-> Feature flags are additive and can be combined (e.g., `--features "cuda,fleet-hub"`).
+> **Target hardware**: Raspberry Pi 5 (ARM Cortex-A76, 16GB RAM). Runs on any Linux/macOS/Windows system.
 
 ---
 
@@ -109,7 +86,7 @@ Fleet client, knowledge base, and fleet intelligence are always compiled — no 
 
 ### Option A: Setup Wizard (recommended)
 
-The interactive web-based setup wizard scans for WITS sources, configures well identity, and pairs with a Fleet Hub — all from a browser.
+The interactive web-based setup wizard scans for WITS sources and configures well identity from a browser.
 
 ```bash
 # Launch the setup wizard (opens web UI on :8080)
@@ -119,8 +96,7 @@ sairen-os setup
 The wizard walks through:
 1. **WITS Scanner** — probes your subnet for WITS TCP servers
 2. **Well Identity** — configure well name, rig ID, field name
-3. **Fleet Pairing** — pair with a Fleet Hub via 6-digit code (no passphrase needed)
-4. **Config Generation** — writes `well_config.toml` with discovered settings
+3. **Config Generation** — writes `well_config.toml` with discovered settings
 
 ### Option B: Manual Configuration
 
@@ -194,8 +170,6 @@ curl -X POST http://localhost:8080/api/v2/config/validate \
 |----------|---------|-------------|
 | `SAIREN_CONFIG` | *(none)* | Path to `well_config.toml` (overrides search) |
 | `CAMPAIGN` | `production` | Campaign mode: `production` or `pa` |
-| `STRATEGIC_MODEL_PATH` | *(auto-selected)* | Strategic LLM model path (GPU: 7B, CPU: 4B) |
-| `TACTICAL_MODEL_PATH` | `models/qwen2.5-1.5b-instruct-q4_k_m.gguf` | Only with `tactical_llm` feature |
 | `SAIREN_KB` | *(none)* | Root directory of the structured knowledge base |
 | `SAIREN_KB_FIELD` | *(none)* | Field name for knowledge base assembly |
 | `SAIREN_KB_WELL` | `unknown` | Well name override for knowledge base |
@@ -208,9 +182,6 @@ curl -X POST http://localhost:8080/api/v2/config/validate \
 | `ML_INTERVAL_SECS` | `3600` | ML analysis interval (seconds) |
 | `WELL_ID` | `WELL-001` | Well identifier for ML storage |
 | `FIELD_NAME` | `DEFAULT` | Field/asset name |
-| `FLEET_HUB_URL` | *(none)* | Fleet Hub URL — enables fleet sync when set |
-| `FLEET_RIG_ID` | *(none)* | Rig identifier for fleet communication |
-| `FLEET_PASSPHRASE` | *(none)* | Shared passphrase for fleet hub enrollment |
 
 ### CLI Arguments
 
@@ -228,7 +199,6 @@ curl -X POST http://localhost:8080/api/v2/config/validate \
 | Subcommand | Description |
 |------------|-------------|
 | `setup` | Launch the setup wizard (web UI on :8080) |
-| `pair --hub <url> --rig <id> --well <id> --field <name>` | Headless CLI pairing with a Fleet Hub via 6-digit code |
 | `generate-config` | Generate a `well_config.toml` from current defaults |
 | `migrate-kb --from <path> --to <path>` | Migrate a flat `well_prognosis.toml` into the KB directory structure |
 
@@ -471,8 +441,10 @@ The v2 API uses a consistent JSON envelope (`ApiResponse<T>`) for all responses.
 | `/api/v2/damping/recipes` | GET | Per-formation damping recipe library |
 | `/api/v2/debug/baseline` | GET | Baseline learning status |
 | `/api/v2/debug/ml/history` | GET | ML analysis history |
-| `/api/v2/debug/fleet/intelligence` | GET | Fleet intelligence cache |
 | `/api/v2/metrics` | GET | Prometheus metrics |
+| `/api/mesh/gossip` | POST | P2P gossip exchange (peer-to-peer) |
+| `/api/mesh/status` | GET | Node mesh status |
+| `/api/mesh/fleet` | GET | Aggregated fleet view (queries all peers) |
 
 ### v1 API (Deprecated)
 
@@ -501,143 +473,86 @@ The v2 API uses a consistent JSON envelope (`ApiResponse<T>`) for all responses.
 | `/api/v1/strategic/hourly` | GET | Hourly strategic reports |
 | `/api/v1/strategic/daily` | GET | Daily strategic reports |
 | `/api/v1/metrics` | GET | Prometheus metrics |
-| `/api/v1/fleet/intelligence` | GET | Fleet intelligence cache |
 
 ---
 
-## Fleet Hub
+## P2P Mesh Network
 
-The Fleet Hub is an optional central server that enables fleet-wide learning across multiple rigs. Each rig operates autonomously and uploads significant events to the hub. The hub curates events into a scored episode library that is synced back to all rigs.
+SAIREN-OS uses a fully decentralized P2P mesh for fleet-wide event sharing. Every Pi node is identical — no central server, no special roles, no single point of failure. Operational reports (anomaly events, outcomes, formation context) are gossipped directly between peers. CfC neural network weights are **not shared** — each rig's models are trained on its specific equipment.
 
-### Running the Fleet Hub
+### Configuration
 
-```bash
-# 1. Ensure PostgreSQL is running
-# 2. Set environment variables
-export DATABASE_URL=postgres://sairen:password@localhost/sairen_fleet
-export FLEET_PASSPHRASE=your-shared-passphrase
+```toml
+[mesh]
+enabled = true
+peers = [
+    { id = "rig-002", address = "10.0.0.2:8080" },
+    { id = "rig-003", address = "10.0.0.3:8080" },
+]
 
-# 3. Start the hub (migrations run automatically)
-./target/release/fleet-hub --port 8080
+[gossip]
+interval_secs = 60
+max_events_per_exchange = 50
+timeout_secs = 10
 
-# 4. View the fleet dashboard
-open http://localhost:8080
+# Formation tops table (from geologist, used for event tagging)
+[[formation_tops]]
+depth_ft = 2000.0
+formation = "shale"
+
+[[formation_tops]]
+depth_ft = 5000.0
+formation = "limestone"
 ```
 
-### Registering a Rig
+Adding a new rig: add its entry to the `peers` list on every node. No registration, no pairing, no API keys — authentication is handled at the VPN layer (WireGuard or Tailscale).
 
-```bash
-# Enroll a new rig (passphrase auth, X-Rig-ID header required)
-curl -X POST http://hub:8080/api/fleet/enroll \
-  -H "Authorization: Bearer $FLEET_PASSPHRASE" \
-  -H "X-Rig-ID: RIG-001" \
-  -H "Content-Type: application/json" \
-  -d '{"rig_id": "RIG-001", "well_id": "WELL-A1", "field": "North Sea"}'
-```
+### How Gossip Works
 
-Headless pairing alternative (6-digit code flow):
-```bash
-sairen-os pair --hub http://hub:8080 --rig RIG-001 --well WELL-A1 --field "North Sea"
-```
+Every `interval_secs`, each node broadcasts its recent events to all peers concurrently:
 
-### Hub Environment Variables
+1. Build envelope with events where `last_modified > peer's last_sync_cursor`
+2. POST zstd-compressed `GossipEnvelope` to each peer's `/api/mesh/gossip`
+3. Receive response envelope, upsert events into local SQLite store
+4. Update per-peer sync cursor
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `DATABASE_URL` | *(required)* | PostgreSQL connection URL |
-| `FLEET_PASSPHRASE` | *(required)* | Shared passphrase for all hub auth (admin + rig) |
-| `FLEET_MAX_PAYLOAD_SIZE` | `1048576` | Max event upload size in bytes (1 MB) |
-| `FLEET_CURATION_INTERVAL` | `3600` | Curation cycle interval in seconds |
-| `FLEET_LIBRARY_MAX_EPISODES` | `50000` | Maximum episodes before pruning |
-| `SAIREN_LLM_MODEL_PATH` | *(none)* | Path to GGUF model for intelligence workers |
-| `INTELLIGENCE_INTERVAL_SECS` | `60` | Intelligence job poll interval in seconds |
+With broadcast-all, every event reaches every reachable node in **one round** (60 seconds). If a peer is unreachable, the exchange is skipped with exponential backoff — no data is lost, the peer catches up on the next successful exchange.
 
-### Hub CLI Arguments
-
-| Argument | Description |
-|----------|-------------|
-| `--database-url <url>` | PostgreSQL connection URL (overrides env) |
-| `--port <N>` | Port to listen on (default: 8080) |
-| `--bind-address <addr>` | Full bind address (overrides --port) |
-
-### Hub API Endpoints
-
-**Event Ingestion** (passphrase + `X-Rig-ID` auth):
+### Mesh API Endpoints
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/fleet/events` | POST | Upload a fleet event (supports zstd compression) |
-| `/api/fleet/events/{id}` | GET | Retrieve an event by ID |
-| `/api/fleet/events/{id}/outcome` | PATCH | Update event outcome |
+| `/api/mesh/gossip` | POST | P2P event exchange (zstd-compressed JSON) |
+| `/api/mesh/status` | GET | This node's health, CfC state, and mesh connectivity |
+| `/api/mesh/fleet` | GET | Aggregated fleet view (server-side fan-out to all peers) |
 
-**Library Sync** (passphrase + `X-Rig-ID` auth):
+The fleet endpoint queries all peers' `/api/mesh/status` server-side and returns an aggregated response. The browser only talks to one node — no CORS issues, no direct access to every Pi needed.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/fleet/library` | GET | Sync library (delta via `If-Modified-Since`, supports zstd) |
-| `/api/fleet/library/stats` | GET | Library statistics |
+### Event Storage
 
-**Rig Registry** (passphrase auth):
+Events are stored in an embedded SQLite database (WAL mode) with indexed columns for fast structured queries by formation, depth, category, and time. Full event data is zstd-compressed in a `data` blob. Retention: 50,000 events max, 12-month age limit, 3-month false positive cleanup.
 
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/fleet/enroll` | POST | Enroll a new rig (passphrase + `X-Rig-ID` header) |
-| `/api/fleet/rigs` | GET | List all registered rigs |
-| `/api/fleet/rigs/{id}` | GET | Get rig details |
-| `/api/fleet/rigs/{id}/revoke` | POST | Revoke a rig |
+### Network Topology
 
-**Performance Data** (passphrase + `X-Rig-ID` auth):
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/fleet/performance` | POST | Upload post-well performance data (zstd) |
-| `/api/fleet/performance` | GET | Query by field (`?field=&since=&exclude_rig=`) |
-
-**Pairing** (code-based rig onboarding):
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/fleet/pair/request` | POST | Rig submits 6-digit pairing code (unauthenticated) |
-| `/api/fleet/pair/approve` | POST | Admin approves a pairing code (passphrase auth) |
-| `/api/fleet/pair/status` | GET | Rig polls pairing status (`?code=123456`, unauthenticated) |
-| `/api/fleet/pair/pending` | GET | List pending pairing requests (passphrase auth) |
-
-**Intelligence & Graph** (passphrase auth):
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/fleet/intelligence` | GET | Pull intelligence outputs (`?since=&formation=`) |
-| `/api/fleet/graph/stats` | GET | Knowledge graph statistics |
-| `/api/fleet/graph/formation` | GET | Formation context lookup |
-| `/api/fleet/graph/rebuild` | POST | Rebuild knowledge graph |
-| `/api/fleet/metrics` | GET | Prometheus metrics (no auth) |
-
-**Dashboard** (passphrase auth):
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/api/fleet/dashboard/summary` | GET | Fleet overview (active rigs, events, episodes) |
-| `/api/fleet/dashboard/trends` | GET | Event trends over time (`?days=30`) |
-| `/api/fleet/dashboard/outcomes` | GET | Outcome analytics (resolution rates by category) |
-| `/api/fleet/health` | GET | Hub health check |
-| `/` | GET | Fleet dashboard HTML page |
-
-### Network Architecture
-
-The hub communicates with rigs over a WireGuard VPN tunnel. Configuration templates are provided in `deploy/wireguard/`.
+Nodes communicate over WireGuard or Tailscale encrypted tunnels. Configuration templates are in `deploy/wireguard/`.
 
 ```
-Rig (10.0.1.X) ---- WireGuard Tunnel ---- Hub (10.0.0.1:8080)
-                     (port 51820)
+       ┌──────────┐
+       │  Pi A    │
+       │ (Rig 1)  │
+       └────┬─┬───┘
+            │ │
+   ┌────────┘ └────────┐
+   │    WireGuard /     │
+   │    Tailscale       │
+   ▼                    ▼
+┌──────────┐      ┌──────────┐
+│  Pi B    │◄────►│  Pi C    │
+│ (Rig 2)  │      │ (Rig 3)  │
+└──────────┘      └──────────┘
 ```
 
-**Key design principles:**
-- Only AMBER/RED events qualify for upload
-- Upload queue survives process restarts
-- Rigs operate independently when hub is unreachable (local autonomy)
-- Bandwidth-conscious: zstd compression, delta sync, configurable cadence
-
-For curator rules, episode scoring, and component details, see [ARCHITECTURE.md](ARCHITECTURE.md#fleet-hub-internals).
+For full protocol details, see [docs/p2p-mesh-architecture.md](docs/p2p-mesh-architecture.md).
 
 ---
 
@@ -684,36 +599,6 @@ sudo journalctl -u sairen-os -f
 - Read-write access only to `/opt/sairen-os/data` and `/var/log/sairen-os`
 - Automatic restart on failure (5s delay, max 5 retries per 5 minutes)
 
-### Fleet Hub Deployment
-
-The Fleet Hub runs as a separate binary on a central server with PostgreSQL.
-
-```bash
-# 1. Build the release binary
-cargo build --release --bin fleet-hub --features fleet-hub
-
-# 2. Run the installer (as root, on the hub server)
-sudo deploy/install_hub.sh
-```
-
-This creates:
-
-| Path | Purpose |
-|------|---------|
-| `/usr/local/bin/fleet-hub` | Hub binary |
-| `/etc/systemd/system/fleet-hub.service` | systemd service unit |
-| PostgreSQL `sairen_fleet` database | Event store and episode library |
-
-```bash
-# Monitor the hub
-sudo journalctl -u fleet-hub -f
-
-# View dashboard
-open http://hub-ip:8080/
-```
-
-WireGuard configuration templates for hub and rig VPN tunnels are in `deploy/wireguard/`.
-
 ### Baseline Persistence
 
 Baseline learning state (locked thresholds) is automatically saved to `data/baseline_state.json` after each metric locks. On restart, the system reloads locked thresholds so it doesn't need to re-learn from scratch. In-progress learning accumulators are intentionally not persisted — learning restarts cleanly.
@@ -728,22 +613,6 @@ Baseline learning state (locked thresholds) is automatically saved to `data/base
 2. **Drilling conditions are good** - No advisories = optimal operations
 3. **Not in drilling state** - Advisories only during Drilling/Reaming
 4. **Test with fault injection** - Press `K`, `S`, or `P` in simulator
-
-### Model not found error
-
-Download the strategic model and place in `models/` directory, or set the environment variable:
-```bash
-export STRATEGIC_MODEL_PATH=/path/to/strategic-model.gguf
-```
-
-### LLM inference too slow
-
-1. Check what mode SAIREN-OS detected at startup (look for "Hardware:" in logs)
-2. If on CPU, this is expected — CPU inference targets ~10-30s for the strategic model
-3. For faster inference, build with `--features cuda` and ensure CUDA is available: `nvidia-smi`
-4. Use quantized models (Q4_K_M recommended)
-5. System works without LLM - falls back to templates
-6. Tactical routing is always fast (~0ms) — it uses deterministic pattern matching, not LLM
 
 ### Another instance already running
 
@@ -810,7 +679,7 @@ The **Orchestrator** uses 4 trait-based specialists for domain-specific evaluati
     ===============================================================================
 ```
 
-### 11-Phase Processing Pipeline
+### 9-Phase Processing Pipeline
 
 | Phase | Component | Function |
 |-------|-----------|----------|
@@ -822,7 +691,7 @@ The **Orchestrator** uses 4 trait-based specialists for domain-specific evaluati
 | 4.5 | Causal Inference | Cross-correlate parameters against MSE at lags 1-20s |
 | 5 | Advanced Physics | Strategic verification of tickets |
 | 6 | Context Lookup | Query knowledge store for precedents |
-| 7 | LLM Advisory | Generate recommendations or template fallback |
+| 7 | Template Advisory | Campaign-aware template recommendations with causal leads |
 | 8 | Orchestrator Voting | 4 specialists vote with regime-adjusted weights |
 | 9 | Advisory Composition | Assemble final advisory (CRITICAL cooldown) |
 
@@ -848,7 +717,7 @@ Switch campaigns via dashboard dropdown, API (`POST /api/v2/campaign`), or `CAMP
 
 ### CfC Neural Network
 
-Dual 64-neuron Closed-form Continuous-time (CfC) network with NCP sparse wiring. Two networks run in parallel via `rayon::join()`: a **fast network** (LR 0.001, BPTT=4) catches acute events and a **slow network** (LR 0.0001, BPTT=8) catches gradual trends. Combined scoring via `max(fast, slow)`. Self-supervised — predicts next-timestep sensor values and uses prediction error as anomaly signal. No labeled training data needed. Calibrates after 500 packets. Participates in severity modulation, LLM context enrichment, and strategic tiebreaking.
+Dual 64-neuron Closed-form Continuous-time (CfC) network with NCP sparse wiring. Two networks run in parallel via `rayon::join()`: a **fast network** (LR 0.001, BPTT=4) catches acute events and a **slow network** (LR 0.0001, BPTT=8) catches gradual trends. Combined scoring via `max(fast, slow)`. Self-supervised — predicts next-timestep sensor values and uses prediction error as anomaly signal. No labeled training data needed. Calibrates after 500 packets. Participates in severity modulation, template advisory enrichment, and strategic tiebreaking.
 
 For full CfC architecture, training details, and validation results, see [ARCHITECTURE.md](ARCHITECTURE.md#cfc-neural-network).
 
@@ -857,7 +726,7 @@ For full CfC architecture, training details, and validation results, see [ARCHIT
 - **ML Engine (V2.2)** — hourly analysis finds optimal drilling conditions using dysfunction-aware optimization
 - **Structured Knowledge Base** — per-well directory-based KB with geology, engineering, and offset well performance data
 - **Causal Inference** — detects which parameters causally precede MSE spikes using cross-correlation at lags 1-20s
-- **Fleet Intelligence** — fleet-wide learning via hub-and-spoke episode library
+- **P2P Mesh Gossip** — decentralized event sharing between Pi nodes via gossip protocol with SQLite event store
 
 For implementation details on all systems, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
@@ -885,8 +754,8 @@ For implementation details on all systems, see [ARCHITECTURE.md](ARCHITECTURE.md
 | **Rig State** | Operational mode: Drilling, Reaming, Circulating, Connection, Tripping |
 | **Operation** | Activity classification: Production Drilling, Milling, Cement Drill-Out, Circulating, Static |
 | **Campaign** | Operating mode that adjusts thresholds and specialist weights (Production or P&A) |
-| **Fleet Hub** | Central server that collects events from all rigs and curates a shared episode library |
-| **Spoke** | Individual rig running SAIREN-OS, uploading events to and syncing from the hub |
+| **P2P Mesh** | Decentralized gossip network where every Pi node shares events directly with all peers |
+| **Gossip** | Periodic broadcast of recent events to all peers; convergence in one round (60s) |
 
 For developer/ML terms (CfC, NCP, BPTT, ACI, RegimeProfile, etc.), see [ARCHITECTURE.md](ARCHITECTURE.md#developer-glossary).
 
@@ -896,7 +765,7 @@ For developer/ML terms (CfC, NCP, BPTT, ACI, RegimeProfile, etc.), see [ARCHITEC
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-Current version: v4.0-dev
+Current version: v5.0
 
 ---
 

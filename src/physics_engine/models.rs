@@ -43,20 +43,14 @@ pub fn wear_acceleration(history: &[f64]) -> f64 {
     }
 
     // Calculate first derivatives (rate of change)
-    let first_derivatives: Vec<f64> = history
-        .windows(2)
-        .map(|w| w[1] - w[0])
-        .collect();
+    let first_derivatives: Vec<f64> = history.windows(2).map(|w| w[1] - w[0]).collect();
 
     if first_derivatives.len() < 2 {
         return 0.0;
     }
 
     // Calculate second derivatives (acceleration)
-    let second_derivatives: Vec<f64> = first_derivatives
-        .windows(2)
-        .map(|w| w[1] - w[0])
-        .collect();
+    let second_derivatives: Vec<f64> = first_derivatives.windows(2).map(|w| w[1] - w[0]).collect();
 
     // Return average acceleration
     if second_derivatives.is_empty() {
@@ -89,7 +83,10 @@ mod tests {
         // At 250 RPM, with load = rating, L10 should be ~66.67 hours
         // L10 = (1,000,000 / (60 * 250)) * (1)^3 = 66.67
         let life = l10_life(250.0, 100.0, 100.0);
-        assert!((life - 66.67).abs() < 0.1, "L10 at load=rating should be ~66.67 hours");
+        assert!(
+            (life - 66.67).abs() < 0.1,
+            "L10 at load=rating should be ~66.67 hours"
+        );
     }
 
     #[test]
@@ -97,7 +94,10 @@ mod tests {
         // Light load (rating = 2x load) should give 8x life (cubic relationship)
         let life = l10_life(250.0, 50.0, 100.0);
         let expected = 66.67 * 8.0; // ~533 hours
-        assert!((life - expected).abs() < 1.0, "Light load should extend life cubically");
+        assert!(
+            (life - expected).abs() < 1.0,
+            "Light load should extend life cubically"
+        );
     }
 
     #[test]
@@ -105,7 +105,10 @@ mod tests {
         // Constant wear rate should have zero acceleration
         let history = vec![0.0, 1.0, 2.0, 3.0, 4.0];
         let accel = wear_acceleration(&history);
-        assert!(accel.abs() < 1e-10, "Constant rate should have zero acceleration");
+        assert!(
+            accel.abs() < 1e-10,
+            "Constant rate should have zero acceleration"
+        );
     }
 
     #[test]

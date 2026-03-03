@@ -86,9 +86,7 @@ pub struct AppState {
     #[serde(skip)]
     pub wits_history: std::collections::VecDeque<crate::types::WitsPacket>,
 
-
     // === Advisory Acknowledgment & Shift Tracking ===
-
     /// Acknowledged advisory audit trail (bounded ring buffer).
     #[serde(skip)]
     pub acknowledgments: std::collections::VecDeque<crate::api::handlers::AcknowledgmentRecord>,
@@ -194,18 +192,16 @@ impl AppState {
         };
 
         // WELL_ID env > well.name TOML
-        let well_id = std::env::var("WELL_ID")
-            .unwrap_or_else(|_| cfg.well.name.clone());
+        let well_id = std::env::var("WELL_ID").unwrap_or_else(|_| cfg.well.name.clone());
 
         // FIELD_NAME env > well.field TOML
-        let field_name = std::env::var("FIELD_NAME")
-            .unwrap_or_else(|_| {
-                if cfg.well.field.is_empty() {
-                    "DEFAULT".to_string()
-                } else {
-                    cfg.well.field.clone()
-                }
-            });
+        let field_name = std::env::var("FIELD_NAME").unwrap_or_else(|_| {
+            if cfg.well.field.is_empty() {
+                "DEFAULT".to_string()
+            } else {
+                cfg.well.field.clone()
+            }
+        });
 
         Self {
             campaign,

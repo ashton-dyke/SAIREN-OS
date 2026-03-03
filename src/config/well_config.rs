@@ -85,9 +85,17 @@ pub struct WellConfig {
     #[serde(default)]
     pub damping: DampingConfig,
 
-    /// Federated CfC weight sharing settings
+    /// P2P mesh configuration
     #[serde(default)]
-    pub federation: FederationConfig,
+    pub mesh: MeshConfig,
+
+    /// Gossip protocol tuning
+    #[serde(default)]
+    pub gossip: GossipConfig,
+
+    /// Formation tops table (depth -> formation name)
+    #[serde(default)]
+    pub formation_tops: Vec<FormationTop>,
 }
 
 impl Default for WellConfig {
@@ -103,7 +111,9 @@ impl Default for WellConfig {
             ml: MlConfig::default(),
             lookahead: LookaheadConfig::default(),
             damping: DampingConfig::default(),
-            federation: FederationConfig::default(),
+            mesh: MeshConfig::default(),
+            gossip: GossipConfig::default(),
+            formation_tops: Vec::new(),
         }
     }
 }
@@ -162,8 +172,8 @@ impl WellConfig {
     pub fn load_from_file_with_provenance(
         path: &Path,
     ) -> Result<(Self, ConfigProvenance), ConfigError> {
-        let contents = std::fs::read_to_string(path)
-            .map_err(|e| ConfigError::Io(path.to_path_buf(), e))?;
+        let contents =
+            std::fs::read_to_string(path).map_err(|e| ConfigError::Io(path.to_path_buf(), e))?;
 
         // Two-pass: check for unknown keys first (warnings only)
         let typo_warnings = super::validation::validate_unknown_keys(&contents);
@@ -183,8 +193,8 @@ impl WellConfig {
             .collect(),
         };
 
-        let config: Self = toml::from_str(&contents)
-            .map_err(|e| ConfigError::Parse(path.to_path_buf(), e))?;
+        let config: Self =
+            toml::from_str(&contents).map_err(|e| ConfigError::Parse(path.to_path_buf(), e))?;
         config.validate()?;
         Ok((config, provenance))
     }
@@ -239,8 +249,7 @@ impl WellConfig {
     /// Save config to a file (for runtime updates via API).
     pub fn save_to_file(&self, path: &Path) -> Result<(), ConfigError> {
         let contents = self.to_toml()?;
-        std::fs::write(path, contents)
-            .map_err(|e| ConfigError::Io(path.to_path_buf(), e))?;
+        std::fs::write(path, contents).map_err(|e| ConfigError::Io(path.to_path_buf(), e))?;
         info!(path = %path.display(), "Well config saved");
         Ok(())
     }
@@ -387,11 +396,15 @@ impl WellConfig {
             warn!("{}", w);
         }
 
-        // Reject NaN/Inf in any config value (sweep all f64 fields via serialization)
-        let serialized = toml::to_string(self);
-        if let Ok(ref s) = serialized {
-            if s.contains("nan") || s.contains("inf") {
-                errors.push("Config contains NaN or Inf values — all thresholds must be finite numbers".to_string());
+        // Reject NaN/Inf in any config value (sweep all f64 fields via TOML value tree)
+        if let Ok(s) = toml::to_string(self) {
+            if let Ok(toml_val) = s.parse::<toml::Value>() {
+                if Self::has_non_finite_float(&toml_val) {
+                    errors.push(
+                        "Config contains NaN or Inf values — all thresholds must be finite numbers"
+                            .to_string(),
+                    );
+                }
             }
         }
 
@@ -399,6 +412,15 @@ impl WellConfig {
             Ok(())
         } else {
             Err(ConfigError::Validation(errors))
+        }
+    }
+
+    fn has_non_finite_float(val: &toml::Value) -> bool {
+        match val {
+            toml::Value::Float(f) => f.is_nan() || f.is_infinite(),
+            toml::Value::Table(t) => t.values().any(Self::has_non_finite_float),
+            toml::Value::Array(a) => a.iter().any(Self::has_non_finite_float),
+            _ => false,
         }
     }
 
@@ -602,18 +624,47 @@ pub struct WellControlThresholds {
     /// H2S critical threshold (ppm).
     #[serde(default = "default_h2s_critical")]
     pub h2s_critical_ppm: f64,
+
+    /// Pit rate debounce: require N consecutive packets above threshold before
+    /// generating a WellControl ticket from pit rate alone. Filters single-packet
+    /// CSV noise while still catching real kicks/losses (which persist).
+    #[serde(default = "default_pit_rate_debounce")]
+    pub pit_rate_debounce_packets: u32,
 }
 
-fn default_flow_imbalance_warning() -> f64 { 5.0 }
-fn default_flow_imbalance_critical() -> f64 { 10.0 }
-fn default_pit_gain_warning() -> f64 { 5.0 }
-fn default_pit_gain_critical() -> f64 { 10.0 }
-fn default_pit_rate_warning() -> f64 { 5.0 }
-fn default_pit_rate_critical() -> f64 { 15.0 }
-fn default_gas_units_warning() -> f64 { 100.0 }
-fn default_gas_units_critical() -> f64 { 250.0 }
-fn default_h2s_warning() -> f64 { 10.0 }
-fn default_h2s_critical() -> f64 { 20.0 }
+fn default_flow_imbalance_warning() -> f64 {
+    5.0
+}
+fn default_flow_imbalance_critical() -> f64 {
+    10.0
+}
+fn default_pit_gain_warning() -> f64 {
+    5.0
+}
+fn default_pit_gain_critical() -> f64 {
+    10.0
+}
+fn default_pit_rate_warning() -> f64 {
+    5.0
+}
+fn default_pit_rate_critical() -> f64 {
+    15.0
+}
+fn default_gas_units_warning() -> f64 {
+    100.0
+}
+fn default_gas_units_critical() -> f64 {
+    250.0
+}
+fn default_h2s_warning() -> f64 {
+    10.0
+}
+fn default_h2s_critical() -> f64 {
+    20.0
+}
+fn default_pit_rate_debounce() -> u32 {
+    3
+}
 
 impl Default for WellControlThresholds {
     fn default() -> Self {
@@ -628,6 +679,7 @@ impl Default for WellControlThresholds {
             gas_units_critical: default_gas_units_critical(),
             h2s_warning_ppm: default_h2s_warning(),
             h2s_critical_ppm: default_h2s_critical(),
+            pit_rate_debounce_packets: default_pit_rate_debounce(),
         }
     }
 }
@@ -648,8 +700,12 @@ pub struct MseThresholds {
     pub efficiency_poor_percent: f64,
 }
 
-fn default_mse_warning() -> f64 { 70.0 }
-fn default_mse_poor() -> f64 { 50.0 }
+fn default_mse_warning() -> f64 {
+    70.0
+}
+fn default_mse_poor() -> f64 {
+    50.0
+}
 
 impl Default for MseThresholds {
     fn default() -> Self {
@@ -701,13 +757,27 @@ pub struct HydraulicsThresholds {
     pub annular_pressure_loss_coefficient: f64,
 }
 
-fn default_normal_mud_weight() -> f64 { 8.6 }
-fn default_fracture_gradient() -> f64 { 14.0 }
-fn default_ecd_margin_warning() -> f64 { 0.3 }
-fn default_ecd_margin_critical() -> f64 { 0.1 }
-fn default_spp_deviation_warning() -> f64 { 100.0 }
-fn default_spp_deviation_critical() -> f64 { 200.0 }
-fn default_apl_coefficient() -> f64 { 0.1 }
+fn default_normal_mud_weight() -> f64 {
+    8.6
+}
+fn default_fracture_gradient() -> f64 {
+    14.0
+}
+fn default_ecd_margin_warning() -> f64 {
+    0.3
+}
+fn default_ecd_margin_critical() -> f64 {
+    0.1
+}
+fn default_spp_deviation_warning() -> f64 {
+    100.0
+}
+fn default_spp_deviation_critical() -> f64 {
+    200.0
+}
+fn default_apl_coefficient() -> f64 {
+    0.1
+}
 
 impl Default for HydraulicsThresholds {
     fn default() -> Self {
@@ -759,13 +829,27 @@ pub struct MechanicalThresholds {
     pub stick_slip_min_samples: usize,
 }
 
-fn default_torque_warning() -> f64 { 0.15 }
-fn default_torque_critical() -> f64 { 0.25 }
-fn default_stick_slip_warning() -> f64 { 0.15 }
-fn default_stick_slip_critical() -> f64 { 0.25 }
-fn default_packoff_spp() -> f64 { 0.10 }
-fn default_packoff_rop() -> f64 { 0.20 }
-fn default_stick_slip_min_samples() -> usize { 5 }
+fn default_torque_warning() -> f64 {
+    0.15
+}
+fn default_torque_critical() -> f64 {
+    0.25
+}
+fn default_stick_slip_warning() -> f64 {
+    0.15
+}
+fn default_stick_slip_critical() -> f64 {
+    0.25
+}
+fn default_packoff_spp() -> f64 {
+    0.10
+}
+fn default_packoff_rop() -> f64 {
+    0.20
+}
+fn default_stick_slip_min_samples() -> usize {
+    5
+}
 
 impl Default for MechanicalThresholds {
     fn default() -> Self {
@@ -824,14 +908,30 @@ pub struct FounderThresholds {
     pub debounce_packets: u32,
 }
 
-fn default_founder_wob_min() -> f64 { 0.02 }
-fn default_founder_rop_min() -> f64 { 0.01 }
-fn default_founder_severity_warning() -> f64 { 0.3 }
-fn default_founder_severity_high() -> f64 { 0.7 }
-fn default_founder_min_samples() -> usize { 5 }
-fn default_founder_quick_wob_delta() -> f64 { 0.05 }
-fn default_founder_min_wob() -> f64 { 3.0 }
-fn default_founder_debounce_packets() -> u32 { 3 }
+fn default_founder_wob_min() -> f64 {
+    0.02
+}
+fn default_founder_rop_min() -> f64 {
+    0.01
+}
+fn default_founder_severity_warning() -> f64 {
+    0.3
+}
+fn default_founder_severity_high() -> f64 {
+    0.7
+}
+fn default_founder_min_samples() -> usize {
+    5
+}
+fn default_founder_quick_wob_delta() -> f64 {
+    0.05
+}
+fn default_founder_min_wob() -> f64 {
+    3.0
+}
+fn default_founder_debounce_packets() -> u32 {
+    3
+}
 
 impl Default for FounderThresholds {
     fn default() -> Self {
@@ -876,11 +976,21 @@ pub struct FormationThresholds {
     pub mse_pressure_tolerance: f64,
 }
 
-fn default_dexp_decrease() -> f64 { -0.15 }
-fn default_mse_change_significant() -> f64 { 0.20 }
-fn default_dxc_trend_threshold() -> f64 { 0.05 }
-fn default_dxc_pressure_threshold() -> f64 { -0.05 }
-fn default_mse_pressure_tolerance() -> f64 { 0.10 }
+fn default_dexp_decrease() -> f64 {
+    -0.15
+}
+fn default_mse_change_significant() -> f64 {
+    0.20
+}
+fn default_dxc_trend_threshold() -> f64 {
+    0.05
+}
+fn default_dxc_pressure_threshold() -> f64 {
+    -0.05
+}
+fn default_mse_pressure_tolerance() -> f64 {
+    0.10
+}
 
 impl Default for FormationThresholds {
     fn default() -> Self {
@@ -934,14 +1044,30 @@ pub struct RigStateThresholds {
     pub drilling_rop_min: f64,
 }
 
-fn default_idle_rpm_max() -> f64 { 5.0 }
-fn default_circulation_flow_min() -> f64 { 50.0 }
-fn default_drilling_wob_min() -> f64 { 1.0 }
-fn default_reaming_depth_offset() -> f64 { 5.0 }
-fn default_trip_out_hookload() -> f64 { 200.0 }
-fn default_trip_in_hookload() -> f64 { 50.0 }
-fn default_tripping_flow_max() -> f64 { 100.0 }
-fn default_drilling_rop_min() -> f64 { 2.0 }
+fn default_idle_rpm_max() -> f64 {
+    5.0
+}
+fn default_circulation_flow_min() -> f64 {
+    50.0
+}
+fn default_drilling_wob_min() -> f64 {
+    1.0
+}
+fn default_reaming_depth_offset() -> f64 {
+    5.0
+}
+fn default_trip_out_hookload() -> f64 {
+    200.0
+}
+fn default_trip_in_hookload() -> f64 {
+    50.0
+}
+fn default_tripping_flow_max() -> f64 {
+    100.0
+}
+fn default_drilling_rop_min() -> f64 {
+    2.0
+}
 
 impl Default for RigStateThresholds {
     fn default() -> Self {
@@ -994,13 +1120,27 @@ pub struct OperationDetectionThresholds {
     pub off_bottom_wob_max: f64,
 }
 
-fn default_milling_torque() -> f64 { 15.0 }
-fn default_milling_rop() -> f64 { 5.0 }
-fn default_cement_wob() -> f64 { 15.0 }
-fn default_cement_torque() -> f64 { 12.0 }
-fn default_cement_rop() -> f64 { 20.0 }
-fn default_no_rotation_rpm() -> f64 { 10.0 }
-fn default_off_bottom_wob() -> f64 { 5.0 }
+fn default_milling_torque() -> f64 {
+    15.0
+}
+fn default_milling_rop() -> f64 {
+    5.0
+}
+fn default_cement_wob() -> f64 {
+    15.0
+}
+fn default_cement_torque() -> f64 {
+    12.0
+}
+fn default_cement_rop() -> f64 {
+    20.0
+}
+fn default_no_rotation_rpm() -> f64 {
+    10.0
+}
+fn default_off_bottom_wob() -> f64 {
+    5.0
+}
 
 impl Default for OperationDetectionThresholds {
     fn default() -> Self {
@@ -1068,17 +1208,39 @@ pub struct StrategicVerificationThresholds {
     pub dxc_change_threshold: f64,
 }
 
-fn default_sv_flow_confirm() -> f64 { 15.0 }
-fn default_sv_flow_critical() -> f64 { 20.0 }
-fn default_sv_pit_confirm() -> f64 { 10.0 }
-fn default_sv_pit_critical() -> f64 { 15.0 }
-fn default_sv_flow_transient() -> f64 { 5.0 }
-fn default_sv_pit_transient() -> f64 { 3.0 }
-fn default_sv_spp_sustained() -> f64 { 150.0 }
-fn default_sv_spp_normal() -> f64 { 50.0 }
-fn default_sv_trend_consistency() -> f64 { 0.5 }
-fn default_sv_formation_consistency() -> f64 { 0.6 }
-fn default_sv_dxc_change() -> f64 { 0.1 }
+fn default_sv_flow_confirm() -> f64 {
+    15.0
+}
+fn default_sv_flow_critical() -> f64 {
+    20.0
+}
+fn default_sv_pit_confirm() -> f64 {
+    10.0
+}
+fn default_sv_pit_critical() -> f64 {
+    15.0
+}
+fn default_sv_flow_transient() -> f64 {
+    5.0
+}
+fn default_sv_pit_transient() -> f64 {
+    3.0
+}
+fn default_sv_spp_sustained() -> f64 {
+    150.0
+}
+fn default_sv_spp_normal() -> f64 {
+    50.0
+}
+fn default_sv_trend_consistency() -> f64 {
+    0.5
+}
+fn default_sv_formation_consistency() -> f64 {
+    0.6
+}
+fn default_sv_dxc_change() -> f64 {
+    0.1
+}
 
 impl Default for StrategicVerificationThresholds {
     fn default() -> Self {
@@ -1130,12 +1292,24 @@ pub struct BaselineLearningConfig {
     pub outlier_sigma_threshold: f64,
 }
 
-fn default_bl_warning_sigma() -> f64 { 3.0 }
-fn default_bl_critical_sigma() -> f64 { 5.0 }
-fn default_bl_min_samples() -> usize { 100 }
-fn default_bl_std_floor() -> f64 { 0.001 }
-fn default_bl_max_outlier() -> f64 { 0.05 }
-fn default_bl_outlier_sigma() -> f64 { 3.0 }
+fn default_bl_warning_sigma() -> f64 {
+    3.0
+}
+fn default_bl_critical_sigma() -> f64 {
+    5.0
+}
+fn default_bl_min_samples() -> usize {
+    100
+}
+fn default_bl_std_floor() -> f64 {
+    0.001
+}
+fn default_bl_max_outlier() -> f64 {
+    0.05
+}
+fn default_bl_outlier_sigma() -> f64 {
+    3.0
+}
 
 impl Default for BaselineLearningConfig {
     fn default() -> Self {
@@ -1198,16 +1372,36 @@ pub struct AdvisoryConfig {
     pub sustained_reset_normal_count: u32,
 }
 
-fn default_cooldown_seconds() -> u64 { 60 }
-fn default_critical_bypass() -> bool { true }
-fn default_packet_cooldown() -> u64 { 50 }
-fn default_critical_packet_cooldown() -> u64 { 20 }
-fn default_depth_cooldown() -> f64 { 50.0 }
-fn default_critical_depth_cooldown() -> f64 { 10.0 }
-fn default_sustained_throttle_onset() -> u32 { 3 }
-fn default_sustained_depth_multiplier() -> f64 { 2.0 }
-fn default_sustained_max_depth_cooldown() -> f64 { 500.0 }
-fn default_sustained_reset_normal_count() -> u32 { 500 }
+fn default_cooldown_seconds() -> u64 {
+    60
+}
+fn default_critical_bypass() -> bool {
+    true
+}
+fn default_packet_cooldown() -> u64 {
+    50
+}
+fn default_critical_packet_cooldown() -> u64 {
+    20
+}
+fn default_depth_cooldown() -> f64 {
+    50.0
+}
+fn default_critical_depth_cooldown() -> f64 {
+    10.0
+}
+fn default_sustained_throttle_onset() -> u32 {
+    3
+}
+fn default_sustained_depth_multiplier() -> f64 {
+    2.0
+}
+fn default_sustained_max_depth_cooldown() -> f64 {
+    500.0
+}
+fn default_sustained_reset_normal_count() -> u32 {
+    500
+}
 
 impl Default for AdvisoryConfig {
     fn default() -> Self {
@@ -1252,10 +1446,18 @@ pub struct EnsembleWeightsConfig {
     pub formation: f64,
 }
 
-fn default_weight_mse() -> f64 { 0.25 }
-fn default_weight_hydraulic() -> f64 { 0.25 }
-fn default_weight_well_control() -> f64 { 0.30 }
-fn default_weight_formation() -> f64 { 0.20 }
+fn default_weight_mse() -> f64 {
+    0.25
+}
+fn default_weight_hydraulic() -> f64 {
+    0.25
+}
+fn default_weight_well_control() -> f64 {
+    0.30
+}
+fn default_weight_formation() -> f64 {
+    0.20
+}
 
 impl Default for EnsembleWeightsConfig {
     fn default() -> Self {
@@ -1322,16 +1524,36 @@ pub struct PhysicsConfig {
     pub min_rop_for_mse: f64,
 }
 
-fn default_hardness_base() -> f64 { 5000.0 }
-fn default_hardness_multiplier() -> f64 { 8000.0 }
-fn default_kick_min_indicators() -> usize { 2 }
-fn default_loss_min_indicators() -> usize { 2 }
-fn default_kick_gas_threshold() -> f64 { 50.0 }
-fn default_kick_flow_divisor() -> f64 { 50.0 }
-fn default_kick_pit_divisor() -> f64 { 20.0 }
-fn default_kick_gas_divisor() -> f64 { 500.0 }
-fn default_confidence_window() -> usize { 60 }
-fn default_min_rop_for_mse() -> f64 { 0.1 }
+fn default_hardness_base() -> f64 {
+    5000.0
+}
+fn default_hardness_multiplier() -> f64 {
+    8000.0
+}
+fn default_kick_min_indicators() -> usize {
+    2
+}
+fn default_loss_min_indicators() -> usize {
+    2
+}
+fn default_kick_gas_threshold() -> f64 {
+    50.0
+}
+fn default_kick_flow_divisor() -> f64 {
+    50.0
+}
+fn default_kick_pit_divisor() -> f64 {
+    20.0
+}
+fn default_kick_gas_divisor() -> f64 {
+    500.0
+}
+fn default_confidence_window() -> usize {
+    60
+}
+fn default_min_rop_for_mse() -> f64 {
+    0.1
+}
 
 impl Default for PhysicsConfig {
     fn default() -> Self {
@@ -1377,8 +1599,12 @@ pub struct MlConfig {
     pub interval_secs: u64,
 }
 
-fn default_rop_lag_seconds() -> u64 { 60 }
-fn default_ml_interval_secs() -> u64 { 3600 }
+fn default_rop_lag_seconds() -> u64 {
+    60
+}
+fn default_ml_interval_secs() -> u64 {
+    3600
+}
 
 impl Default for MlConfig {
     fn default() -> Self {
@@ -1433,8 +1659,12 @@ pub struct LookaheadConfig {
     pub window_minutes: f64,
 }
 
-fn default_lookahead_enabled() -> bool { true }
-fn default_lookahead_window_minutes() -> f64 { 30.0 }
+fn default_lookahead_enabled() -> bool {
+    true
+}
+fn default_lookahead_window_minutes() -> f64 {
+    30.0
+}
 
 impl Default for LookaheadConfig {
     fn default() -> Self {
@@ -1485,15 +1715,33 @@ pub struct DampingConfig {
     pub max_recipes_per_formation: usize,
 }
 
-fn default_damping_enabled() -> bool { true }
-fn default_max_wob_reduction_pct() -> f64 { 20.0 }
-fn default_max_rpm_change_pct() -> f64 { 20.0 }
-fn default_damping_cv_threshold() -> f64 { 0.15 }
-fn default_damping_min_samples() -> usize { 10 }
-fn default_damping_monitor_window_secs() -> u64 { 120 }
-fn default_damping_success_cv_reduction_pct() -> f64 { 20.0 }
-fn default_damping_retract_cv_increase_pct() -> f64 { 15.0 }
-fn default_damping_max_recipes_per_formation() -> usize { 20 }
+fn default_damping_enabled() -> bool {
+    true
+}
+fn default_max_wob_reduction_pct() -> f64 {
+    20.0
+}
+fn default_max_rpm_change_pct() -> f64 {
+    20.0
+}
+fn default_damping_cv_threshold() -> f64 {
+    0.15
+}
+fn default_damping_min_samples() -> usize {
+    10
+}
+fn default_damping_monitor_window_secs() -> u64 {
+    120
+}
+fn default_damping_success_cv_reduction_pct() -> f64 {
+    20.0
+}
+fn default_damping_retract_cv_increase_pct() -> f64 {
+    15.0
+}
+fn default_damping_max_recipes_per_formation() -> usize {
+    20
+}
 
 impl Default for DampingConfig {
     fn default() -> Self {
@@ -1512,69 +1760,87 @@ impl Default for DampingConfig {
 }
 
 // ============================================================================
-// Federation Config
+// P2P Mesh Config
 // ============================================================================
 
-/// Policy for when to accept a federated model from the hub.
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "snake_case")]
-pub enum FederationInitPolicy {
-    /// Only seed untrained networks (packets_processed == 0).
-    FreshOnly,
-    /// Use federated model if it has more experience than the local one.
-    BetterModel,
-    /// Upload checkpoints only, never pull from the hub.
-    UploadOnly,
-}
-
-impl Default for FederationInitPolicy {
-    fn default() -> Self {
-        Self::FreshOnly
-    }
-}
-
-/// Configuration for federated CfC weight sharing.
+/// Configuration for the P2P gossip mesh.
 ///
-/// When enabled, the rig periodically uploads CfC network checkpoints to the
-/// fleet hub and pulls federated-averaged models. Disabled by default.
+/// When enabled, this node participates in decentralized event sharing
+/// with peer nodes. Each node is identical — no central server.
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FederationConfig {
-    /// Enable federated weight sharing (default: false).
+pub struct MeshConfig {
+    /// Enable P2P mesh gossip (default: false).
     #[serde(default)]
-    pub enable: bool,
-    /// Seconds between checkpoint uploads (default: 3600 = 1 hour).
-    #[serde(default = "default_federation_checkpoint_interval")]
-    pub checkpoint_interval_secs: u64,
-    /// Seconds between federated model pulls (default: 7200 = 2 hours).
-    #[serde(default = "default_federation_pull_interval")]
-    pub pull_interval_secs: u64,
-    /// Policy for accepting federated models (default: FreshOnly).
+    pub enabled: bool,
+    /// Known peer nodes in the mesh.
     #[serde(default)]
-    pub init_policy: FederationInitPolicy,
-    /// Minimum packets processed before uploading a checkpoint (default: 1000).
-    #[serde(default = "default_federation_min_packets")]
-    pub min_packets_for_upload: u64,
-    /// Disk path for persisting checkpoints (default: "./data/cfc_checkpoint.json").
-    #[serde(default = "default_federation_checkpoint_path")]
-    pub checkpoint_path: String,
+    pub peers: Vec<PeerInfo>,
 }
 
-fn default_federation_checkpoint_interval() -> u64 { 3600 }
-fn default_federation_pull_interval() -> u64 { 7200 }
-fn default_federation_min_packets() -> u64 { 1000 }
-fn default_federation_checkpoint_path() -> String { "./data/cfc_checkpoint.json".to_string() }
-
-impl Default for FederationConfig {
+impl Default for MeshConfig {
     fn default() -> Self {
         Self {
-            enable: false,
-            checkpoint_interval_secs: default_federation_checkpoint_interval(),
-            pull_interval_secs: default_federation_pull_interval(),
-            init_policy: FederationInitPolicy::default(),
-            min_packets_for_upload: default_federation_min_packets(),
-            checkpoint_path: default_federation_checkpoint_path(),
+            enabled: false,
+            peers: Vec::new(),
         }
     }
+}
+
+/// A peer node in the P2P mesh.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerInfo {
+    /// Unique peer identifier (e.g. "rig-002").
+    pub id: String,
+    /// Network address including port (e.g. "10.0.0.2:8080").
+    pub address: String,
+}
+
+/// Gossip protocol tuning parameters.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GossipConfig {
+    /// Seconds between gossip broadcast rounds.
+    #[serde(default = "default_gossip_interval")]
+    pub interval_secs: u64,
+    /// Maximum events to send per gossip exchange.
+    #[serde(default = "default_gossip_max_events")]
+    pub max_events_per_exchange: usize,
+    /// Per-peer HTTP timeout for gossip exchanges (seconds).
+    #[serde(default = "default_gossip_timeout")]
+    pub timeout_secs: u64,
+}
+
+fn default_gossip_interval() -> u64 {
+    60
+}
+fn default_gossip_max_events() -> usize {
+    50
+}
+fn default_gossip_timeout() -> u64 {
+    10
+}
+
+impl Default for GossipConfig {
+    fn default() -> Self {
+        Self {
+            interval_secs: default_gossip_interval(),
+            max_events_per_exchange: default_gossip_max_events(),
+            timeout_secs: default_gossip_timeout(),
+        }
+    }
+}
+
+/// A formation top entry — maps a depth to a formation name.
+///
+/// The formation tops table is provided by the geologist before spud.
+/// Entries should be ordered by depth (shallowest first). The current
+/// formation is determined by finding the deepest entry whose depth
+/// is <= the current bit depth.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FormationTop {
+    /// Top of formation (measured depth in feet).
+    pub depth_ft: f64,
+    /// Formation name (e.g. "shale", "limestone", "sandstone").
+    pub formation: String,
 }
 
 // ============================================================================
@@ -1588,13 +1854,19 @@ mod tests {
     #[test]
     fn test_default_config_validates() {
         let config = WellConfig::default();
-        assert!(config.validate().is_ok(), "Default config must always validate");
+        assert!(
+            config.validate().is_ok(),
+            "Default config must always validate"
+        );
     }
 
     #[test]
     fn test_empty_toml_produces_defaults() {
         let config: WellConfig = toml::from_str("").expect("empty TOML should parse");
-        assert_eq!(config.thresholds.well_control.flow_imbalance_warning_gpm, 5.0);
+        assert_eq!(
+            config.thresholds.well_control.flow_imbalance_warning_gpm,
+            5.0
+        );
         assert_eq!(config.thresholds.mse.efficiency_warning_percent, 70.0);
         assert_eq!(config.thresholds.hydraulics.normal_mud_weight_ppg, 8.6);
         assert_eq!(config.baseline_learning.warning_sigma, 3.0);
@@ -1614,8 +1886,14 @@ flow_imbalance_critical_gpm = 50.0
         let config: WellConfig = toml::from_str(toml_str).expect("partial TOML should parse");
         // Overridden values
         assert_eq!(config.well.name, "Test-Well-1");
-        assert_eq!(config.thresholds.well_control.flow_imbalance_warning_gpm, 25.0);
-        assert_eq!(config.thresholds.well_control.flow_imbalance_critical_gpm, 50.0);
+        assert_eq!(
+            config.thresholds.well_control.flow_imbalance_warning_gpm,
+            25.0
+        );
+        assert_eq!(
+            config.thresholds.well_control.flow_imbalance_critical_gpm,
+            50.0
+        );
         // Non-overridden values retain defaults
         assert_eq!(config.thresholds.well_control.pit_gain_warning_bbl, 5.0);
         assert_eq!(config.thresholds.mse.efficiency_warning_percent, 70.0);
@@ -1627,7 +1905,10 @@ flow_imbalance_critical_gpm = 50.0
         config.thresholds.well_control.flow_imbalance_warning_gpm = 20.0;
         config.thresholds.well_control.flow_imbalance_critical_gpm = 10.0;
         let result = config.validate();
-        assert!(result.is_err(), "Inverted thresholds should fail validation");
+        assert!(
+            result.is_err(),
+            "Inverted thresholds should fail validation"
+        );
         if let Err(ConfigError::Validation(errors)) = result {
             assert!(errors.iter().any(|e| e.contains("flow_imbalance")));
         }
@@ -1650,17 +1931,24 @@ flow_imbalance_critical_gpm = 50.0
         config.baseline_learning.critical_sigma = 1.0;
         config.baseline_learning.warning_sigma = 3.0;
         let result = config.validate();
-        assert!(result.is_err(), "Critical sigma < warning sigma should fail");
+        assert!(
+            result.is_err(),
+            "Critical sigma < warning sigma should fail"
+        );
     }
 
     #[test]
     fn test_roundtrip_toml() {
         let original = WellConfig::default();
         let toml_str = original.to_toml().expect("serialization should work");
-        let roundtripped: WellConfig = toml::from_str(&toml_str).expect("deserialization should work");
+        let roundtripped: WellConfig =
+            toml::from_str(&toml_str).expect("deserialization should work");
         assert_eq!(
             original.thresholds.well_control.flow_imbalance_warning_gpm,
-            roundtripped.thresholds.well_control.flow_imbalance_warning_gpm
+            roundtripped
+                .thresholds
+                .well_control
+                .flow_imbalance_warning_gpm
         );
         assert_eq!(
             original.thresholds.hydraulics.normal_mud_weight_ppg,
@@ -1685,12 +1973,27 @@ flow_imbalance_critical_gpm = 50.0
         let toml_str = config.to_toml().expect("serialization should work");
         // Spot check that key sections exist in output
         assert!(toml_str.contains("[well]"), "Missing [well] section");
-        assert!(toml_str.contains("[thresholds.well_control]"), "Missing well_control section");
-        assert!(toml_str.contains("[thresholds.hydraulics]"), "Missing hydraulics section");
-        assert!(toml_str.contains("[baseline_learning]"), "Missing baseline_learning section");
-        assert!(toml_str.contains("[ensemble_weights]"), "Missing ensemble_weights section");
+        assert!(
+            toml_str.contains("[thresholds.well_control]"),
+            "Missing well_control section"
+        );
+        assert!(
+            toml_str.contains("[thresholds.hydraulics]"),
+            "Missing hydraulics section"
+        );
+        assert!(
+            toml_str.contains("[baseline_learning]"),
+            "Missing baseline_learning section"
+        );
+        assert!(
+            toml_str.contains("[ensemble_weights]"),
+            "Missing ensemble_weights section"
+        );
         assert!(toml_str.contains("[physics]"), "Missing physics section");
-        assert!(toml_str.contains("normal_mud_weight_ppg"), "Missing normal_mud_weight_ppg field");
+        assert!(
+            toml_str.contains("normal_mud_weight_ppg"),
+            "Missing normal_mud_weight_ppg field"
+        );
     }
 
     // ========================================================================
@@ -1705,8 +2008,12 @@ normal_mud_weight_ppg = 9.2
 "#;
         let value: toml::Value = toml_str.parse().unwrap();
         let keys: std::collections::HashSet<String> =
-            super::super::validation::walk_toml_keys(&value, "").into_iter().collect();
-        let provenance = ConfigProvenance { explicit_keys: keys };
+            super::super::validation::walk_toml_keys(&value, "")
+                .into_iter()
+                .collect();
+        let provenance = ConfigProvenance {
+            explicit_keys: keys,
+        };
 
         assert!(provenance.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg"));
         assert!(provenance.is_user_set("thresholds.hydraulics"));
@@ -1731,8 +2038,12 @@ flow_imbalance_warning_gpm = 25.0
 "#;
         let value: toml::Value = toml_str.parse().unwrap();
         let keys: std::collections::HashSet<String> =
-            super::super::validation::walk_toml_keys(&value, "").into_iter().collect();
-        let provenance = ConfigProvenance { explicit_keys: keys };
+            super::super::validation::walk_toml_keys(&value, "")
+                .into_iter()
+                .collect();
+        let provenance = ConfigProvenance {
+            explicit_keys: keys,
+        };
 
         // Explicitly set keys
         assert!(provenance.is_user_set("well.name"));

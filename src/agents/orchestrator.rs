@@ -55,13 +55,37 @@ struct RegimeProfile {
 /// Four regime profiles indexed by regime_id (0–3).
 const REGIME_PROFILES: [RegimeProfile; 4] = [
     // 0: Baseline — no adjustment (clusterer not yet calibrated, or normal state)
-    RegimeProfile { mse_mult: 1.0, hydraulic_mult: 1.0, well_control_mult: 1.0, formation_mult: 1.0, label: "baseline" },
+    RegimeProfile {
+        mse_mult: 1.0,
+        hydraulic_mult: 1.0,
+        well_control_mult: 1.0,
+        formation_mult: 1.0,
+        label: "baseline",
+    },
     // 1: Hydraulic-stress — elevated SPP/ECD motor patterns
-    RegimeProfile { mse_mult: 0.8, hydraulic_mult: 1.4, well_control_mult: 1.0, formation_mult: 0.8, label: "hydraulic-stress" },
+    RegimeProfile {
+        mse_mult: 0.8,
+        hydraulic_mult: 1.4,
+        well_control_mult: 1.0,
+        formation_mult: 0.8,
+        label: "hydraulic-stress",
+    },
     // 2: High-WOB/MSE — heavy-WOB efficiency-focused drilling
-    RegimeProfile { mse_mult: 1.4, hydraulic_mult: 0.8, well_control_mult: 0.9, formation_mult: 1.1, label: "high-wob" },
+    RegimeProfile {
+        mse_mult: 1.4,
+        hydraulic_mult: 0.8,
+        well_control_mult: 0.9,
+        formation_mult: 1.1,
+        label: "high-wob",
+    },
     // 3: Unstable/kick — erratic motor outputs, potential well-control event
-    RegimeProfile { mse_mult: 0.7, hydraulic_mult: 1.0, well_control_mult: 1.5, formation_mult: 0.8, label: "unstable" },
+    RegimeProfile {
+        mse_mult: 0.7,
+        hydraulic_mult: 1.0,
+        well_control_mult: 1.5,
+        formation_mult: 0.8,
+        label: "unstable",
+    },
 ];
 
 /// Apply regime-specific weight multipliers and re-normalise to sum to 1.0.
@@ -72,11 +96,11 @@ fn apply_regime_weights(votes: &mut [SpecialistVote], regime_id: u8) -> &'static
 
     for vote in votes.iter_mut() {
         let mult = match vote.specialist.as_str() {
-            "MSE"         => profile.mse_mult,
-            "Hydraulic"   => profile.hydraulic_mult,
+            "MSE" => profile.mse_mult,
+            "Hydraulic" => profile.hydraulic_mult,
             "WellControl" => profile.well_control_mult,
-            "Formation"   => profile.formation_mult,
-            _             => 1.0,
+            "Formation" => profile.formation_mult,
+            _ => 1.0,
         };
         vote.weight *= mult;
     }
@@ -149,15 +173,12 @@ impl Orchestrator {
         // Check for WellControl CRITICAL override (safety critical).
         // Only WellControl CRITICAL overrides voting — other specialists'
         // Critical votes are folded into the weighted average normally.
-        let well_control_critical = votes.iter().any(|v| {
-            v.specialist == "WellControl" && v.vote == TicketSeverity::Critical
-        });
+        let well_control_critical = votes
+            .iter()
+            .any(|v| v.specialist == "WellControl" && v.vote == TicketSeverity::Critical);
 
         // Calculate weighted average
-        let weighted_sum: f64 = votes
-            .iter()
-            .map(|v| (v.vote as u8) as f64 * v.weight)
-            .sum();
+        let weighted_sum: f64 = votes.iter().map(|v| (v.vote as u8) as f64 * v.weight).sum();
 
         // Final severity: only WellControl CRITICAL overrides the weighted vote
         let final_severity = if well_control_critical {
@@ -169,8 +190,7 @@ impl Orchestrator {
         // Calculate efficiency score and risk level
         let efficiency_score =
             advisory::calculate_efficiency_score(&ticket.current_metrics, physics);
-        let risk_level =
-            advisory::calculate_risk_level(&votes, &ticket.current_metrics);
+        let risk_level = advisory::calculate_risk_level(&votes, &ticket.current_metrics);
 
         // Build voting reasoning string
         let voting_reasoning =
@@ -235,11 +255,17 @@ fn build_voting_reasoning(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{AnomalyCategory, DrillingMetrics, DrillingPhysicsReport, RigState, RiskLevel, TicketType, TicketSeverity};
+    use crate::types::{
+        AnomalyCategory, DrillingMetrics, DrillingPhysicsReport, RigState, RiskLevel,
+        TicketSeverity, TicketType,
+    };
 
     fn ensure_config() {
         if !crate::config::is_initialized() {
-            crate::config::init(crate::config::WellConfig::default(), crate::config::ConfigProvenance::default());
+            crate::config::init(
+                crate::config::WellConfig::default(),
+                crate::config::ConfigProvenance::default(),
+            );
         }
     }
 
@@ -442,11 +468,15 @@ mod tests {
         let result0 = orch0.vote(&ticket, &physics, 0);
         let result3 = orch3.vote(&ticket, &physics, 3);
 
-        let wc_weight_0 = result0.votes.iter()
+        let wc_weight_0 = result0
+            .votes
+            .iter()
             .find(|v| v.specialist == "WellControl")
             .map(|v| v.weight)
             .unwrap_or(0.0);
-        let wc_weight_3 = result3.votes.iter()
+        let wc_weight_3 = result3
+            .votes
+            .iter()
             .find(|v| v.specialist == "WellControl")
             .map(|v| v.weight)
             .unwrap_or(0.0);
@@ -469,11 +499,15 @@ mod tests {
         let result0 = orch0.vote(&ticket, &physics, 0);
         let result2 = orch2.vote(&ticket, &physics, 2);
 
-        let mse_weight_0 = result0.votes.iter()
+        let mse_weight_0 = result0
+            .votes
+            .iter()
             .find(|v| v.specialist == "MSE")
             .map(|v| v.weight)
             .unwrap_or(0.0);
-        let mse_weight_2 = result2.votes.iter()
+        let mse_weight_2 = result2
+            .votes
+            .iter()
             .find(|v| v.specialist == "MSE")
             .map(|v| v.weight)
             .unwrap_or(0.0);
@@ -496,11 +530,15 @@ mod tests {
         let result0 = orch0.vote(&ticket, &physics, 0);
         let result1 = orch1.vote(&ticket, &physics, 1);
 
-        let hyd_weight_0 = result0.votes.iter()
+        let hyd_weight_0 = result0
+            .votes
+            .iter()
             .find(|v| v.specialist == "Hydraulic")
             .map(|v| v.weight)
             .unwrap_or(0.0);
-        let hyd_weight_1 = result1.votes.iter()
+        let hyd_weight_1 = result1
+            .votes
+            .iter()
             .find(|v| v.specialist == "Hydraulic")
             .map(|v| v.weight)
             .unwrap_or(0.0);
@@ -546,11 +584,15 @@ mod tests {
         // Regime 3: unstable/kick — WellControl × 1.5
         let result3 = orch3.vote(&ticket, &physics, 3);
 
-        let wc_weight_0 = result0.votes.iter()
+        let wc_weight_0 = result0
+            .votes
+            .iter()
             .find(|v| v.specialist == "WellControl")
             .map(|v| v.weight)
             .unwrap_or(0.0);
-        let wc_weight_3 = result3.votes.iter()
+        let wc_weight_3 = result3
+            .votes
+            .iter()
             .find(|v| v.specialist == "WellControl")
             .map(|v| v.weight)
             .unwrap_or(0.0);

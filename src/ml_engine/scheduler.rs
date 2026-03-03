@@ -117,7 +117,8 @@ impl MLScheduler {
         } else {
             packets.iter().map(|p| p.d_exponent).sum::<f64>() / packets.len() as f64
         };
-        let formation_estimate = crate::ml_engine::FormationSegmenter::estimate_formation(avg_d_exp);
+        let formation_estimate =
+            crate::ml_engine::FormationSegmenter::estimate_formation(avg_d_exp);
 
         HourlyDataset {
             packets,
@@ -149,7 +150,6 @@ impl Default for MLScheduler {
 mod tests {
     use super::*;
     use crate::types::{AnomalyCategory, DrillingMetrics, RigState, WitsPacket};
-    use std::sync::Arc;
 
     fn make_packet(wob: f64, rpm: f64, rop: f64) -> WitsPacket {
         WitsPacket {
@@ -190,7 +190,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     fn make_metric(mse: f64, mse_efficiency: f64) -> DrillingMetrics {
@@ -234,9 +235,7 @@ mod tests {
         let packets: Vec<_> = (0..100)
             .map(|i| make_packet(20.0, 100.0, 50.0 + i as f64))
             .collect();
-        let metrics: Vec<_> = (0..100)
-            .map(|_| make_metric(20000.0, 75.0))
-            .collect();
+        let metrics: Vec<_> = (0..100).map(|_| make_metric(20000.0, 75.0)).collect();
 
         let dataset = MLScheduler::build_dataset(
             packets,
@@ -290,12 +289,8 @@ mod tests {
 
     #[test]
     fn test_run_analysis_with_insufficient_data() {
-        let packets: Vec<_> = (0..50)
-            .map(|_| make_packet(20.0, 100.0, 50.0))
-            .collect();
-        let metrics: Vec<_> = (0..50)
-            .map(|_| make_metric(20000.0, 75.0))
-            .collect();
+        let packets: Vec<_> = (0..50).map(|_| make_packet(20.0, 100.0, 50.0)).collect();
+        let metrics: Vec<_> = (0..50).map(|_| make_metric(20000.0, 75.0)).collect();
 
         let dataset = MLScheduler::build_dataset(
             packets,

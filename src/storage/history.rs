@@ -10,7 +10,6 @@ use std::sync::{Arc, OnceLock};
 /// Global database instance for the history storage
 static HISTORY_DB: OnceLock<Arc<sled::Db>> = OnceLock::new();
 
-
 /// Error type for storage operations
 #[derive(Debug)]
 pub enum StorageError {
@@ -178,17 +177,15 @@ impl HistoryStorage {
 
         let (oldest_ts, newest_ts) = if count > 0 {
             let oldest = self.db.iter().next().and_then(|r| {
-                r.ok().map(|(k, _)| {
-                    let mut bytes = [0u8; 8];
-                    bytes.copy_from_slice(&k);
-                    u64::from_be_bytes(bytes)
+                r.ok().and_then(|(k, _)| {
+                    let bytes: [u8; 8] = k.as_ref().try_into().ok()?;
+                    Some(u64::from_be_bytes(bytes))
                 })
             });
             let newest = self.db.iter().rev().next().and_then(|r| {
-                r.ok().map(|(k, _)| {
-                    let mut bytes = [0u8; 8];
-                    bytes.copy_from_slice(&k);
-                    u64::from_be_bytes(bytes)
+                r.ok().and_then(|(k, _)| {
+                    let bytes: [u8; 8] = k.as_ref().try_into().ok()?;
+                    Some(u64::from_be_bytes(bytes))
                 })
             });
             (oldest, newest)
@@ -384,9 +381,15 @@ mod tests {
         let storage = HistoryStorage::open(&path).unwrap();
 
         // Store reports out of order
-        storage.store_report(&create_test_report(3000, 30.0)).unwrap();
-        storage.store_report(&create_test_report(1000, 10.0)).unwrap();
-        storage.store_report(&create_test_report(2000, 20.0)).unwrap();
+        storage
+            .store_report(&create_test_report(3000, 30.0))
+            .unwrap();
+        storage
+            .store_report(&create_test_report(1000, 10.0))
+            .unwrap();
+        storage
+            .store_report(&create_test_report(2000, 20.0))
+            .unwrap();
 
         // Should come back newest first
         let history = storage.get_recent_history(10);
@@ -421,9 +424,15 @@ mod tests {
         let path = temp_dir.path().join("test.db");
         let storage = HistoryStorage::open(&path).unwrap();
 
-        storage.store_report(&create_test_report(100, 10.0)).unwrap();
-        storage.store_report(&create_test_report(200, 20.0)).unwrap();
-        storage.store_report(&create_test_report(300, 30.0)).unwrap();
+        storage
+            .store_report(&create_test_report(100, 10.0))
+            .unwrap();
+        storage
+            .store_report(&create_test_report(200, 20.0))
+            .unwrap();
+        storage
+            .store_report(&create_test_report(300, 30.0))
+            .unwrap();
 
         assert_eq!(storage.count(), 3);
 
@@ -458,8 +467,12 @@ mod tests {
         let path = temp_dir.path().join("test.db");
         let storage = HistoryStorage::open(&path).unwrap();
 
-        storage.store_report(&create_test_report(100, 10.0)).unwrap();
-        storage.store_report(&create_test_report(500, 50.0)).unwrap();
+        storage
+            .store_report(&create_test_report(100, 10.0))
+            .unwrap();
+        storage
+            .store_report(&create_test_report(500, 50.0))
+            .unwrap();
 
         // Flush to ensure size_on_disk reflects written data
         storage.flush().unwrap();

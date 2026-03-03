@@ -13,12 +13,12 @@
 //! 3. WellControl Specialist (30% weight) - kick/loss, gas, pit volume (safety-critical)
 //! 4. Formation Specialist (20% weight) - d-exponent, torque trends
 
-pub mod tactical;
 pub mod orchestrator;
-pub mod strategic;
 pub mod specialists;
+pub mod strategic;
+pub mod tactical;
 
-pub use tactical::{TacticalAgent, TacticalMode, AgentStats, DrillingBaseline};
 pub use orchestrator::Orchestrator;
-pub use strategic::StrategicAgent;
 pub use specialists::Specialist;
+pub use strategic::StrategicAgent;
+pub use tactical::{AgentStats, DrillingBaseline, TacticalAgent, TacticalMode};

@@ -14,9 +14,8 @@
 
 use clap::Parser;
 use rand::prelude::*;
-use rand_distr::{Normal, Distribution};
+use rand_distr::{Distribution, Normal};
 use std::io::{self, Write};
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use sairen_os::types::{RigState, WitsPacket};
@@ -317,7 +316,8 @@ impl SimulationState {
                 self.pit_volume = 500.0 + 20.0 + 40.0 * kick_severity;
 
                 // Severe gas increase
-                self.gas_units = BASE_GAS + 300.0 * kick_severity + 500.0 * kick_severity * kick_severity;
+                self.gas_units =
+                    BASE_GAS + 300.0 * kick_severity + 500.0 * kick_severity * kick_severity;
 
                 // Major SPP drop (formation fluid influx)
                 self.spp = (BASE_SPP - 400.0 * kick_severity) * (1.0 + noise_small);
@@ -444,7 +444,8 @@ impl SimulationState {
             spp_delta,
             rig_state: self.current_phase.rig_state(),
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 }
 
@@ -478,40 +479,100 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // Timing calculations
     let total_samples = (state.total_duration_seconds * state.output_sample_rate) as u64;
-    let sample_interval_real = Duration::from_secs_f64(1.0 / (state.output_sample_rate * args.speed as f64));
+    let sample_interval_real =
+        Duration::from_secs_f64(1.0 / (state.output_sample_rate * args.speed as f64));
     let sample_interval_sim = 1.0 / state.output_sample_rate;
 
     // Mission briefing
     log_mission(0.0, &"=".repeat(70), args.quiet);
     log_mission(0.0, "WITS DRILLING SIMULATION v1.0", args.quiet);
-    log_mission(0.0, "SAIREN-OS Operational Intelligence Test Data Generator", args.quiet);
+    log_mission(
+        0.0,
+        "SAIREN-OS Operational Intelligence Test Data Generator",
+        args.quiet,
+    );
     log_mission(0.0, &"=".repeat(70), args.quiet);
     log_mission(0.0, "", args.quiet);
     log_mission(0.0, "WELL PARAMETERS:", args.quiet);
-    log_mission(0.0, &format!("  Starting Depth: {:.0} ft", state.current_depth), args.quiet);
-    log_mission(0.0, &format!("  Bit Diameter: {:.1} in", BIT_DIAMETER), args.quiet);
-    log_mission(0.0, &format!("  Mud Weight: {:.1} ppg", BASE_MUD_WEIGHT), args.quiet);
+    log_mission(
+        0.0,
+        &format!("  Starting Depth: {:.0} ft", state.current_depth),
+        args.quiet,
+    );
+    log_mission(
+        0.0,
+        &format!("  Bit Diameter: {:.1} in", BIT_DIAMETER),
+        args.quiet,
+    );
+    log_mission(
+        0.0,
+        &format!("  Mud Weight: {:.1} ppg", BASE_MUD_WEIGHT),
+        args.quiet,
+    );
     log_mission(0.0, "", args.quiet);
     log_mission(0.0, "DRILLING PARAMETERS:", args.quiet);
-    log_mission(0.0, &format!("  Target ROP: {:.0} ft/hr", BASE_ROP), args.quiet);
+    log_mission(
+        0.0,
+        &format!("  Target ROP: {:.0} ft/hr", BASE_ROP),
+        args.quiet,
+    );
     log_mission(0.0, &format!("  WOB: {:.0} klbs", BASE_WOB), args.quiet);
     log_mission(0.0, &format!("  RPM: {:.0}", BASE_RPM), args.quiet);
-    log_mission(0.0, &format!("  Flow Rate: {:.0} gpm", BASE_FLOW), args.quiet);
+    log_mission(
+        0.0,
+        &format!("  Flow Rate: {:.0} gpm", BASE_FLOW),
+        args.quiet,
+    );
     log_mission(0.0, "", args.quiet);
     log_mission(0.0, "SIMULATION PARAMETERS:", args.quiet);
-    log_mission(0.0, &format!("  Duration: {} hours ({} samples)", args.hours, total_samples), args.quiet);
-    log_mission(0.0, &format!("  Speed: {}x compression", args.speed), args.quiet);
-    log_mission(0.0, &format!("  Output sample rate: {} Hz", args.sample_rate), args.quiet);
+    log_mission(
+        0.0,
+        &format!(
+            "  Duration: {} hours ({} samples)",
+            args.hours, total_samples
+        ),
+        args.quiet,
+    );
+    log_mission(
+        0.0,
+        &format!("  Speed: {}x compression", args.speed),
+        args.quiet,
+    );
+    log_mission(
+        0.0,
+        &format!("  Output sample rate: {} Hz", args.sample_rate),
+        args.quiet,
+    );
     if let Some(seed) = args.seed {
         log_mission(0.0, &format!("  Random seed: {}", seed), args.quiet);
     }
     log_mission(0.0, "", args.quiet);
     log_mission(0.0, "SCENARIO PHASES:", args.quiet);
-    log_mission(0.0, "  0-40%:  Baseline Learning (normal drilling)", args.quiet);
-    log_mission(0.0, "  40-55%: Normal Drilling (optimal parameters)", args.quiet);
-    log_mission(0.0, "  55-70%: MSE Inefficiency (bit wear simulation)", args.quiet);
-    log_mission(0.0, "  70-80%: Well Control Event (kick simulation)", args.quiet);
-    log_mission(0.0, "  80-90%: Mechanical Issue (pack-off simulation)", args.quiet);
+    log_mission(
+        0.0,
+        "  0-40%:  Baseline Learning (normal drilling)",
+        args.quiet,
+    );
+    log_mission(
+        0.0,
+        "  40-55%: Normal Drilling (optimal parameters)",
+        args.quiet,
+    );
+    log_mission(
+        0.0,
+        "  55-70%: MSE Inefficiency (bit wear simulation)",
+        args.quiet,
+    );
+    log_mission(
+        0.0,
+        "  70-80%: Well Control Event (kick simulation)",
+        args.quiet,
+    );
+    log_mission(
+        0.0,
+        "  80-90%: Mechanical Issue (pack-off simulation)",
+        args.quiet,
+    );
     log_mission(0.0, "  90-100%: Recovery (return to normal)", args.quiet);
     log_mission(0.0, &"=".repeat(70), args.quiet);
     log_mission(0.0, "SIMULATION START", args.quiet);
@@ -519,7 +580,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // CSV header if needed
     if args.format == "csv" {
-        println!("timestamp,bit_depth,rop,wob,rpm,torque,spp,flow_in,flow_out,gas_units,mse,rig_state");
+        println!(
+            "timestamp,bit_depth,rop,wob,rpm,torque,spp,flow_in,flow_out,gas_units,mse,rig_state"
+        );
     }
 
     let start_time = Instant::now();
@@ -535,32 +598,84 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Phase transition logging
         if state.update_phase() {
             log_mission(state.sim_time_seconds, "", args.quiet);
-            log_mission(state.sim_time_seconds, &format!(">>> PHASE: {}", state.current_phase.name()), args.quiet);
+            log_mission(
+                state.sim_time_seconds,
+                &format!(">>> PHASE: {}", state.current_phase.name()),
+                args.quiet,
+            );
 
             match state.current_phase {
                 Phase::BaselineLearning => {
-                    log_mission(state.sim_time_seconds, "    Normal drilling - system learning baseline", args.quiet);
-                    log_mission(state.sim_time_seconds, "    Expected: No advisories", args.quiet);
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Normal drilling - system learning baseline",
+                        args.quiet,
+                    );
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Expected: No advisories",
+                        args.quiet,
+                    );
                 }
                 Phase::NormalDrilling => {
-                    log_mission(state.sim_time_seconds, "    Optimal drilling parameters", args.quiet);
-                    log_mission(state.sim_time_seconds, "    Expected: No advisories", args.quiet);
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Optimal drilling parameters",
+                        args.quiet,
+                    );
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Expected: No advisories",
+                        args.quiet,
+                    );
                 }
                 Phase::MseInefficiency => {
-                    log_mission(state.sim_time_seconds, "    Simulating bit wear / formation change", args.quiet);
-                    log_mission(state.sim_time_seconds, "    Expected: MSE inefficiency advisory", args.quiet);
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Simulating bit wear / formation change",
+                        args.quiet,
+                    );
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Expected: MSE inefficiency advisory",
+                        args.quiet,
+                    );
                 }
                 Phase::KickEvent => {
-                    log_mission(state.sim_time_seconds, "    SIMULATING KICK - Flow imbalance, pit gain, gas", args.quiet);
-                    log_mission(state.sim_time_seconds, "    Expected: CRITICAL well control advisory", args.quiet);
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    SIMULATING KICK - Flow imbalance, pit gain, gas",
+                        args.quiet,
+                    );
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Expected: CRITICAL well control advisory",
+                        args.quiet,
+                    );
                 }
                 Phase::PackOff => {
-                    log_mission(state.sim_time_seconds, "    Simulating pack-off condition", args.quiet);
-                    log_mission(state.sim_time_seconds, "    Expected: Mechanical issue advisory", args.quiet);
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Simulating pack-off condition",
+                        args.quiet,
+                    );
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Expected: Mechanical issue advisory",
+                        args.quiet,
+                    );
                 }
                 Phase::Recovery => {
-                    log_mission(state.sim_time_seconds, "    Returning to normal operations", args.quiet);
-                    log_mission(state.sim_time_seconds, "    Expected: Advisories clearing", args.quiet);
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Returning to normal operations",
+                        args.quiet,
+                    );
+                    log_mission(
+                        state.sim_time_seconds,
+                        "    Expected: Advisories clearing",
+                        args.quiet,
+                    );
                 }
             }
             log_mission(state.sim_time_seconds, "", args.quiet);
@@ -569,10 +684,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Progress logging (every 10%)
         let current_percent = (state.progress() * 100.0) as u32 / 10 * 10;
         if current_percent > last_log_percent && current_percent <= 100 {
-            log_mission(state.sim_time_seconds, &format!(
-                "Progress: {}% | Depth: {:.0}ft | ROP: {:.1}ft/hr | MSE: {:.0}psi",
-                current_percent, state.current_depth, state.rop, state.mse
-            ), args.quiet);
+            log_mission(
+                state.sim_time_seconds,
+                &format!(
+                    "Progress: {}% | Depth: {:.0}ft | ROP: {:.1}ft/hr | MSE: {:.0}psi",
+                    current_percent, state.current_depth, state.rop, state.mse
+                ),
+                args.quiet,
+            );
             last_log_percent = current_percent;
         }
 
@@ -631,10 +750,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     log_mission(state.sim_time_seconds, &"=".repeat(70), args.quiet);
     log_mission(state.sim_time_seconds, "SIMULATION COMPLETE", args.quiet);
     log_mission(state.sim_time_seconds, &"=".repeat(70), args.quiet);
-    log_mission(state.sim_time_seconds, &format!("Total packets: {}", state.packets_generated), args.quiet);
-    log_mission(state.sim_time_seconds, &format!("Anomaly packets: {}", state.anomaly_packets), args.quiet);
-    log_mission(state.sim_time_seconds, &format!("Final depth: {:.0} ft", state.current_depth), args.quiet);
-    log_mission(state.sim_time_seconds, &format!("Real time: {:.1}s", total_elapsed.as_secs_f64()), args.quiet);
+    log_mission(
+        state.sim_time_seconds,
+        &format!("Total packets: {}", state.packets_generated),
+        args.quiet,
+    );
+    log_mission(
+        state.sim_time_seconds,
+        &format!("Anomaly packets: {}", state.anomaly_packets),
+        args.quiet,
+    );
+    log_mission(
+        state.sim_time_seconds,
+        &format!("Final depth: {:.0} ft", state.current_depth),
+        args.quiet,
+    );
+    log_mission(
+        state.sim_time_seconds,
+        &format!("Real time: {:.1}s", total_elapsed.as_secs_f64()),
+        args.quiet,
+    );
     log_mission(state.sim_time_seconds, &"=".repeat(70), args.quiet);
 
     Ok(())

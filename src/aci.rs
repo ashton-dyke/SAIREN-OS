@@ -31,6 +31,8 @@
 //! tracker.update("mse", current_mse);
 //! ```
 
+use std::collections::VecDeque;
+
 /// Configuration for ACI tracker
 #[derive(Debug, Clone)]
 pub struct AciConfig {
@@ -75,10 +77,10 @@ pub struct ConformalInterval {
 /// Tracks ACI state for a single metric
 #[derive(Debug, Clone)]
 struct MetricTracker {
-    /// Sorted residuals (absolute deviations from running median)
-    residuals: Vec<f64>,
+    /// Residuals (absolute deviations from running median)
+    residuals: VecDeque<f64>,
     /// Recent values for running median
-    values: Vec<f64>,
+    values: VecDeque<f64>,
     /// Adaptive miscoverage rate
     alpha: f64,
     /// Target miscoverage rate (1 - target_coverage)
@@ -97,8 +99,8 @@ impl MetricTracker {
     fn new(target_coverage: f64) -> Self {
         let alpha_target = 1.0 - target_coverage;
         Self {
-            residuals: Vec::new(),
-            values: Vec::new(),
+            residuals: VecDeque::new(),
+            values: VecDeque::new(),
             alpha: alpha_target,
             alpha_target,
             hits: 0,
@@ -113,7 +115,7 @@ impl MetricTracker {
         if self.values.is_empty() {
             return 0.0;
         }
-        let mut sorted = self.values.clone();
+        let mut sorted: Vec<f64> = self.values.iter().copied().collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
         let mid = sorted.len() / 2;
         if sorted.len() % 2 == 0 {
@@ -128,7 +130,7 @@ impl MetricTracker {
         if self.residuals.is_empty() {
             return 0.0;
         }
-        let mut sorted = self.residuals.clone();
+        let mut sorted: Vec<f64> = self.residuals.iter().copied().collect();
         sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
 
         // Quantile level: 1 - alpha (clamped to valid range)
@@ -158,14 +160,14 @@ impl MetricTracker {
         }
 
         // Add to windows (bounded)
-        self.values.push(value);
+        self.values.push_back(value);
         if self.values.len() > window_size {
-            self.values.remove(0);
+            self.values.pop_front();
         }
 
-        self.residuals.push(residual);
+        self.residuals.push_back(residual);
         if self.residuals.len() > window_size {
-            self.residuals.remove(0);
+            self.residuals.pop_front();
         }
     }
 
@@ -241,14 +243,18 @@ impl AciTracker {
     pub fn new(config: AciConfig) -> Self {
         // Metrics with physical floor = 0.0 (can't be negative)
         let non_negative: &[&str] = &[
-            metrics::MSE, metrics::D_EXPONENT, metrics::DXC,
-            metrics::SPP, metrics::TORQUE, metrics::ROP,
-            metrics::WOB, metrics::RPM, metrics::ECD,
+            metrics::MSE,
+            metrics::D_EXPONENT,
+            metrics::DXC,
+            metrics::SPP,
+            metrics::TORQUE,
+            metrics::ROP,
+            metrics::WOB,
+            metrics::RPM,
+            metrics::ECD,
         ];
         // Metrics that can be negative (flow balance = loss, pit rate = loss)
-        let allow_negative: &[&str] = &[
-            metrics::FLOW_BALANCE, metrics::PIT_RATE,
-        ];
+        let allow_negative: &[&str] = &[metrics::FLOW_BALANCE, metrics::PIT_RATE];
 
         let mut trackers = Vec::new();
         for id in non_negative {
@@ -263,17 +269,17 @@ impl AciTracker {
         // Set per-metric minimum half-widths (~1-2% of typical operating range)
         // to prevent zero-width intervals when a metric is held constant.
         let min_half_widths: &[(&str, f64)] = &[
-            (metrics::MSE,          5.0),   // ksi² (typical 10-500)
-            (metrics::SPP,          10.0),  // psi (typical 500-5000)
-            (metrics::TORQUE,       0.5),   // kft·lb (typical 5-50)
-            (metrics::ROP,          1.0),   // ft/hr (typical 0-300)
-            (metrics::RPM,          2.0),   // rpm (typical 60-200)
-            (metrics::WOB,          0.5),   // klbs (typical 5-50)
-            (metrics::ECD,          0.02),  // ppg (typical 8-18)
-            (metrics::D_EXPONENT,   0.05),  // dimensionless (typical 0-3)
-            (metrics::DXC,          0.05),  // dimensionless (typical 0-3)
-            (metrics::FLOW_BALANCE, 5.0),   // gpm (typically ±30)
-            (metrics::PIT_RATE,     1.0),   // bbl/hr (typically ±10)
+            (metrics::MSE, 5.0),          // ksi² (typical 10-500)
+            (metrics::SPP, 10.0),         // psi (typical 500-5000)
+            (metrics::TORQUE, 0.5),       // kft·lb (typical 5-50)
+            (metrics::ROP, 1.0),          // ft/hr (typical 0-300)
+            (metrics::RPM, 2.0),          // rpm (typical 60-200)
+            (metrics::WOB, 0.5),          // klbs (typical 5-50)
+            (metrics::ECD, 0.02),         // ppg (typical 8-18)
+            (metrics::D_EXPONENT, 0.05),  // dimensionless (typical 0-3)
+            (metrics::DXC, 0.05),         // dimensionless (typical 0-3)
+            (metrics::FLOW_BALANCE, 5.0), // gpm (typically ±30)
+            (metrics::PIT_RATE, 1.0),     // bbl/hr (typically ±10)
         ];
         for &(id, mhw) in min_half_widths {
             if let Some(pos) = trackers.iter().position(|(name, _)| name == id) {
@@ -332,7 +338,7 @@ impl AciTracker {
         self.trackers
             .iter()
             .filter_map(|(id, t)| {
-                let interval = t.interval(*t.values.last().unwrap_or(&0.0));
+                let interval = t.interval(*t.values.back().unwrap_or(&0.0));
                 if interval.is_outlier {
                     Some((id.as_str(), interval))
                 } else {
@@ -340,6 +346,21 @@ impl AciTracker {
                 }
             })
             .collect()
+    }
+
+    /// Reset all metric windows, preserving configuration.
+    ///
+    /// Called when baseline locks — discards the noisy learning-phase samples
+    /// so ACI intervals converge quickly on the now-stable drilling parameters.
+    /// Alpha is reset to the target rate so intervals start at the right width.
+    pub fn reset_windows(&mut self) {
+        for (_, tracker) in &mut self.trackers {
+            tracker.residuals.clear();
+            tracker.values.clear();
+            tracker.alpha = tracker.alpha_target;
+            tracker.hits = 0;
+            tracker.total = 0;
+        }
     }
 
     /// Get or create a tracker for a metric
@@ -378,10 +399,12 @@ pub fn update_from_drilling(
     let ecd = aci.update(metrics::ECD, packet.ecd);
     let pit_rate = aci.update(metrics::PIT_RATE, drill_metrics.pit_rate);
 
-    let outlier_count = [&mse, &d_exp, &dxc, &flow, &spp, &torque, &rop, &wob, &rpm, &ecd, &pit_rate]
-        .iter()
-        .filter(|i| i.is_outlier)
-        .count();
+    let outlier_count = [
+        &mse, &d_exp, &dxc, &flow, &spp, &torque, &rop, &wob, &rpm, &ecd, &pit_rate,
+    ]
+    .iter()
+    .filter(|i| i.is_outlier)
+    .count();
 
     AciDrillingResult {
         mse,
@@ -463,18 +486,26 @@ mod tests {
 
         // Value within range should not be outlier
         let interval = tracker.update("test", 102.0);
-        assert!(!interval.is_outlier, "102.0 should be within interval: [{:.1}, {:.1}]",
-            interval.lower, interval.upper);
+        assert!(
+            !interval.is_outlier,
+            "102.0 should be within interval: [{:.1}, {:.1}]",
+            interval.lower, interval.upper
+        );
 
         // Check outlier detection: query interval before updating
         // 500 is far outside the [~95, ~105] range built from 50 samples around 100
-        assert!(tracker.is_outlier("test", 500.0),
-            "500.0 should be outside interval built from values ~100");
+        assert!(
+            tracker.is_outlier("test", 500.0),
+            "500.0 should be outside interval built from values ~100"
+        );
 
         // After updating with the extreme value, deviation score should be high
         let interval = tracker.update("test", 500.0);
-        assert!(interval.deviation_score > 1.0,
-            "deviation_score should be > 1.0 for extreme value, got {}", interval.deviation_score);
+        assert!(
+            interval.deviation_score > 1.0,
+            "deviation_score should be > 1.0 for extreme value, got {}",
+            interval.deviation_score
+        );
     }
 
     #[test]
@@ -503,12 +534,17 @@ mod tests {
 
         // Should have adapted — later values at 200 should NOT be outliers
         let final_interval = tracker.update("test", 200.0);
-        assert!(!final_interval.is_outlier,
+        assert!(
+            !final_interval.is_outlier,
             "After adaptation, 200.0 should be within interval: [{:.1}, {:.1}]",
-            final_interval.lower, final_interval.upper);
+            final_interval.lower, final_interval.upper
+        );
 
         // But the first few at 200 should have been outliers
-        assert!(outlier_count > 0, "Should have detected initial shift as outliers");
+        assert!(
+            outlier_count > 0,
+            "Should have detected initial shift as outliers"
+        );
     }
 
     #[test]
@@ -534,8 +570,11 @@ mod tests {
 
         let empirical_coverage = hits as f64 / total as f64;
         // Coverage should be roughly near target (±10% tolerance for finite sample)
-        assert!(empirical_coverage > 0.75,
-            "Coverage {:.1}% too low (target 90%)", empirical_coverage * 100.0);
+        assert!(
+            empirical_coverage > 0.75,
+            "Coverage {:.1}% too low (target 90%)",
+            empirical_coverage * 100.0
+        );
     }
 
     #[test]
@@ -565,5 +604,57 @@ mod tests {
         assert!(interval.lower < interval.value);
         assert!(interval.upper > interval.value);
         assert!(interval.coverage > 0.0);
+    }
+
+    #[test]
+    fn test_reset_windows_clears_state() {
+        let mut tracker = AciTracker::new(AciConfig::default());
+
+        // Build up history
+        for i in 0..50 {
+            tracker.update("mse", 500.0 + i as f64);
+        }
+        assert!(tracker.is_calibrated("mse"));
+        assert_eq!(tracker.sample_count("mse"), 50);
+
+        // Reset
+        tracker.reset_windows();
+
+        // Should be uncalibrated with zero samples
+        assert!(!tracker.is_calibrated("mse"));
+        assert_eq!(tracker.sample_count("mse"), 0);
+    }
+
+    #[test]
+    fn test_reset_windows_tightens_intervals() {
+        let config = AciConfig {
+            target_coverage: 0.90,
+            gamma: 0.005,
+            window_size: 200,
+            min_samples: 10,
+        };
+        let mut tracker = AciTracker::new(config);
+
+        // Phase 1: noisy learning data (wide range 50-150)
+        for i in 0..100 {
+            tracker.update("test", 50.0 + (i as f64 / 100.0) * 100.0);
+        }
+        let wide_interval = tracker.interval("test").unwrap();
+        let wide_width = wide_interval.upper - wide_interval.lower;
+
+        // Reset, then feed stable data (tight range 98-102)
+        tracker.reset_windows();
+        for i in 0..100 {
+            tracker.update("test", 100.0 + (i as f64 * 0.1).sin() * 2.0);
+        }
+        let tight_interval = tracker.interval("test").unwrap();
+        let tight_width = tight_interval.upper - tight_interval.lower;
+
+        assert!(
+            tight_width < wide_width,
+            "After reset + stable data, interval should be tighter: {:.1} vs {:.1}",
+            tight_width,
+            wide_width
+        );
     }
 }

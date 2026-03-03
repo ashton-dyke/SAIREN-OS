@@ -46,11 +46,11 @@ pub fn detect_leads(history: &[HistoryEntry]) -> Vec<CausalLead> {
 
     // Candidate input series — each is a (name, values) pair
     let candidates: [(&str, Vec<f64>); 5] = [
-        ("WOB",    history.iter().map(|e| e.packet.wob).collect()),
-        ("RPM",    history.iter().map(|e| e.packet.rpm).collect()),
+        ("WOB", history.iter().map(|e| e.packet.wob).collect()),
+        ("RPM", history.iter().map(|e| e.packet.rpm).collect()),
         ("Torque", history.iter().map(|e| e.packet.torque).collect()),
-        ("SPP",    history.iter().map(|e| e.packet.spp).collect()),
-        ("ROP",    history.iter().map(|e| e.packet.rop).collect()),
+        ("SPP", history.iter().map(|e| e.packet.spp).collect()),
+        ("ROP", history.iter().map(|e| e.packet.rop).collect()),
     ];
 
     let mut leads: Vec<CausalLead> = Vec::new();
@@ -197,7 +197,10 @@ mod tests {
         let wob_lead = leads.iter().find(|l| l.parameter == "WOB");
         assert!(wob_lead.is_some(), "WOB should be a causal lead");
         if let Some(lead) = wob_lead {
-            assert!(lead.pearson_r > 0.0, "WOB→MSE correlation should be positive");
+            assert!(
+                lead.pearson_r > 0.0,
+                "WOB→MSE correlation should be positive"
+            );
             assert!(lead.lag_seconds > 0, "Lag should be > 0");
         }
     }
@@ -212,14 +215,16 @@ mod tests {
             })
             .collect();
         let leads = detect_leads(&entries);
-        assert!(leads.len() <= MAX_LEADS, "Should return at most {MAX_LEADS} leads");
+        assert!(
+            leads.len() <= MAX_LEADS,
+            "Should return at most {MAX_LEADS} leads"
+        );
     }
 
     // ── helpers ──────────────────────────────────────────────────────────────
 
     fn make_entry(wob: f64, rpm: f64, torque: f64, spp: f64, rop: f64, mse: f64) -> HistoryEntry {
         use crate::types::{DrillingMetrics, Operation, RigState, WitsPacket};
-        use std::sync::Arc;
 
         let packet = WitsPacket {
             timestamp: 0,
@@ -259,7 +264,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        };
+            seconds_since_param_change: 0,
+        };
 
         let metrics = DrillingMetrics {
             mse,

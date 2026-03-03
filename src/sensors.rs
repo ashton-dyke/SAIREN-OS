@@ -94,11 +94,31 @@ fn parse_csv_line(line: &str, line_num: usize) -> Result<WitsPacket, String> {
     let gas_units = parse_f64(fields[16], "gas_units")?;
 
     // Optional fields with defaults
-    let mud_temp_in = if fields.len() > 17 { parse_f64(fields[17], "mud_temp_in").unwrap_or(100.0) } else { 100.0 };
-    let mud_temp_out = if fields.len() > 18 { parse_f64(fields[18], "mud_temp_out").unwrap_or(120.0) } else { 120.0 };
-    let casing_pressure = if fields.len() > 19 { parse_f64(fields[19], "casing_pressure").unwrap_or(0.0) } else { 0.0 };
-    let h2s = if fields.len() > 20 { parse_f64(fields[20], "h2s").unwrap_or(0.0) } else { 0.0 };
-    let co2 = if fields.len() > 21 { parse_f64(fields[21], "co2").unwrap_or(0.0) } else { 0.0 };
+    let mud_temp_in = if fields.len() > 17 {
+        parse_f64(fields[17], "mud_temp_in").unwrap_or(100.0)
+    } else {
+        100.0
+    };
+    let mud_temp_out = if fields.len() > 18 {
+        parse_f64(fields[18], "mud_temp_out").unwrap_or(120.0)
+    } else {
+        120.0
+    };
+    let casing_pressure = if fields.len() > 19 {
+        parse_f64(fields[19], "casing_pressure").unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let h2s = if fields.len() > 20 {
+        parse_f64(fields[20], "h2s").unwrap_or(0.0)
+    } else {
+        0.0
+    };
+    let co2 = if fields.len() > 21 {
+        parse_f64(fields[21], "co2").unwrap_or(0.0)
+    } else {
+        0.0
+    };
 
     // Classify rig state based on parameters
     let rig_state = classify_rig_state(rpm, wob, hook_load, rop);
@@ -133,7 +153,7 @@ fn parse_csv_line(line: &str, line_num: usize) -> Result<WitsPacket, String> {
         annular_pressure: 0.0,
         pore_pressure: 0.0,
         fracture_gradient: 0.0,
-        mse: 0.0, // Calculated later
+        mse: 0.0,        // Calculated later
         d_exponent: 0.0, // Calculated later
         dxc: 0.0,
         rop_delta: 0.0,
@@ -141,7 +161,8 @@ fn parse_csv_line(line: &str, line_num: usize) -> Result<WitsPacket, String> {
         spp_delta: 0.0,
         rig_state,
         regime_id: 0,
-        seconds_since_param_change: 0,    })
+        seconds_since_param_change: 0,
+    })
 }
 
 /// Classify rig state from drilling parameters
@@ -234,7 +255,8 @@ pub fn generate_fault_test_data() -> Vec<WitsPacket> {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        });
+            seconds_since_param_change: 0,
+        });
     }
 
     // Phase 2: MSE inefficiency - poor drilling (20 samples)
@@ -277,7 +299,8 @@ pub fn generate_fault_test_data() -> Vec<WitsPacket> {
             spp_delta: 100.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        });
+            seconds_since_param_change: 0,
+        });
     }
 
     // Phase 3: Well control event - kick (15 samples)
@@ -321,7 +344,8 @@ pub fn generate_fault_test_data() -> Vec<WitsPacket> {
             spp_delta: -100.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        });
+            seconds_since_param_change: 0,
+        });
     }
 
     // Phase 4: Return to normal (10 samples)
@@ -364,10 +388,14 @@ pub fn generate_fault_test_data() -> Vec<WitsPacket> {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        });
+            seconds_since_param_change: 0,
+        });
     }
 
-    tracing::debug!(count = packets.len(), "Generated synthetic drilling test packets");
+    tracing::debug!(
+        count = packets.len(),
+        "Generated synthetic drilling test packets"
+    );
     packets
 }
 
@@ -412,8 +440,17 @@ mod tests {
 
     #[test]
     fn test_rig_state_classification() {
-        assert_eq!(classify_rig_state(120.0, 25.0, 200.0, 50.0), RigState::Drilling);
-        assert_eq!(classify_rig_state(80.0, 10.0, 180.0, 0.0), RigState::Reaming);
-        assert_eq!(classify_rig_state(0.0, 0.0, 100.0, 0.0), RigState::Connection);
+        assert_eq!(
+            classify_rig_state(120.0, 25.0, 200.0, 50.0),
+            RigState::Drilling
+        );
+        assert_eq!(
+            classify_rig_state(80.0, 10.0, 180.0, 0.0),
+            RigState::Reaming
+        );
+        assert_eq!(
+            classify_rig_state(0.0, 0.0, 100.0, 0.0),
+            RigState::Connection
+        );
     }
 }

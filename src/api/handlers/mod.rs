@@ -5,19 +5,19 @@
 //! - System status with WITS drilling parameters
 //! - Baseline learning status and dynamic thresholds
 
-mod status;
-mod drilling;
-mod reports;
-mod ml;
 mod config;
+mod drilling;
 mod metrics;
+mod ml;
+mod reports;
+mod status;
 
-pub use status::*;
-pub use drilling::*;
-pub use reports::*;
-pub use ml::*;
 pub use config::*;
+pub use drilling::*;
 pub use metrics::*;
+pub use ml::*;
+pub use reports::*;
+pub use status::*;
 
 use std::sync::Arc;
 use tokio::sync::RwLock;
@@ -61,7 +61,6 @@ impl DashboardState {
             ml_storage: None,
         }
     }
-
 }
 
 #[cfg(test)]

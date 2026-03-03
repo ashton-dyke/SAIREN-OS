@@ -119,7 +119,6 @@ pub struct WitsPacket {
     /// Seconds since last significant WOB/RPM change (for sustained-sample filtering)
     #[serde(default)]
     pub seconds_since_param_change: u64,
-
 }
 
 impl Default for WitsPacket {

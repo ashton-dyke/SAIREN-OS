@@ -172,7 +172,10 @@ impl FormationSegmenter {
         // Remove boundaries that are too close together (within 30 samples)
         let mut deduped = Vec::new();
         for &idx in &boundary_indices {
-            if deduped.last().map_or(true, |&last: &usize| idx.saturating_sub(last) >= 30) {
+            if deduped
+                .last()
+                .map_or(true, |&last: &usize| idx.saturating_sub(last) >= 30)
+            {
                 deduped.push(idx);
             }
         }
@@ -189,7 +192,12 @@ impl FormationSegmenter {
         }
         // Final segment
         if prev < packets.len() {
-            segments.push(Self::create_segment(packets, &d_exp_values, prev, packets.len()));
+            segments.push(Self::create_segment(
+                packets,
+                &d_exp_values,
+                prev,
+                packets.len(),
+            ));
         }
 
         if segments.is_empty() {
@@ -223,7 +231,6 @@ impl FormationSegmenter {
 mod tests {
     use super::*;
     use crate::types::RigState;
-    use std::sync::Arc;
 
     fn make_packet_with_d_exp(d_exp: f64) -> WitsPacket {
         WitsPacket {
@@ -264,7 +271,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     #[test]
@@ -331,10 +339,7 @@ mod tests {
 
     #[test]
     fn test_formation_type_estimation() {
-        assert_eq!(
-            FormationSegmenter::estimate_formation(1.0),
-            "Soft Shale"
-        );
+        assert_eq!(FormationSegmenter::estimate_formation(1.0), "Soft Shale");
         assert_eq!(
             FormationSegmenter::estimate_formation(1.4),
             "Medium Shale/Siltstone"

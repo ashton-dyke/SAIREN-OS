@@ -5,4 +5,4 @@
 
 pub mod self_healer;
 
-pub use self_healer::{HealthCheck, HealthStatus, HealAction, SelfHealer, ComponentHealth};
+pub use self_healer::{ComponentHealth, HealAction, HealthCheck, HealthStatus, SelfHealer};

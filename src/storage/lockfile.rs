@@ -53,8 +53,7 @@ impl ProcessLock {
                 Ok(None) => {
                     // Stale lock file, remove it
                     tracing::info!("Removing stale lock file from previous instance");
-                    fs::remove_file(&lock_path)
-                        .context("Failed to remove stale lock file")?;
+                    fs::remove_file(&lock_path).context("Failed to remove stale lock file")?;
                 }
                 Err(e) => {
                     tracing::warn!("Error checking existing lock: {}", e);
@@ -69,8 +68,7 @@ impl ProcessLock {
         let mut file = File::create(&lock_path)
             .with_context(|| format!("Failed to create lock file: {:?}", lock_path))?;
 
-        writeln!(file, "{}", pid)
-            .context("Failed to write PID to lock file")?;
+        writeln!(file, "{}", pid).context("Failed to write PID to lock file")?;
 
         tracing::debug!("Acquired process lock (PID: {}) at {:?}", pid, lock_path);
 
@@ -87,8 +85,7 @@ impl ProcessLock {
     /// - `Ok(None)` if the lock file exists but the process is not running (stale)
     /// - `Err(_)` if there was an error reading/parsing the lock file
     fn check_existing_lock(lock_path: &Path) -> Result<Option<u32>> {
-        let mut file = File::open(lock_path)
-            .context("Failed to open existing lock file")?;
+        let mut file = File::open(lock_path).context("Failed to open existing lock file")?;
 
         let mut contents = String::new();
         file.read_to_string(&mut contents)
@@ -112,7 +109,6 @@ impl ProcessLock {
     fn is_process_running(pid: u32) -> bool {
         // On Unix, we can use kill with signal 0 to check if process exists
         // This doesn't actually send a signal, just checks if the process exists
-        
 
         // Try to read /proc/PID/cmdline to verify it's a SAIREN process
         let proc_path = format!("/proc/{}/cmdline", pid);

@@ -139,6 +139,8 @@ fn pipeline_200_packets_baseline_locks() {
 }
 
 /// With enough data, the Volve anomalies should generate at least one advisory.
+/// Requires 2000 drilling packets — pit rate debounce (3-packet sustained) means
+/// single-packet spikes near baseline lock no longer trigger tickets.
 #[test]
 fn pipeline_200_packets_generates_advisories() {
     ensure_config();
@@ -146,7 +148,7 @@ fn pipeline_200_packets_generates_advisories() {
         return;
     };
     let drilling = replay.drilling_packets();
-    let count = 200.min(drilling.len());
+    let count = 4000.min(drilling.len());
 
     let (_, tickets, _, _, _) = run_pipeline(&drilling, count);
 

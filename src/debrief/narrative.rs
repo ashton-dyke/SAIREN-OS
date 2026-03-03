@@ -85,10 +85,7 @@ pub fn generate_narrative(
                 critical_events.len()
             ));
             for evt in critical_events.iter().take(5) {
-                let fm = evt
-                    .formation_name
-                    .as_deref()
-                    .unwrap_or("unknown formation");
+                let fm = evt.formation_name.as_deref().unwrap_or("unknown formation");
                 highlight_lines.push(format!(
                     "  - At {:.0} ft ({}): {}",
                     evt.depth_ft, fm, evt.recommendation
@@ -275,7 +272,8 @@ mod tests {
             feedback: Some("confirmed".to_string()),
         }];
 
-        let narrative = generate_narrative("Well-A", 6000.0, 100.0, &comparisons, &feedback, &timeline);
+        let narrative =
+            generate_narrative("Well-A", 6000.0, 100.0, &comparisons, &feedback, &timeline);
 
         assert!(!narrative.is_empty());
         assert!(narrative.contains("## Summary"));

@@ -27,8 +27,8 @@ use crate::baseline::{wits_metrics, BaselineOverrides, ThresholdManager};
 use crate::physics_engine;
 use crate::types::{
     AdvisoryTicket, AnomalyCategory, Campaign, CfcFeatureSurpriseInfo, DrillingMetrics,
-    HistoryEntry, Operation, RigState, ThresholdBreach, TicketContext, TicketSeverity,
-    TicketStage, TicketType, WitsPacket,
+    HistoryEntry, Operation, RigState, ThresholdBreach, TicketContext, TicketSeverity, TicketStage,
+    TicketType, WitsPacket,
 };
 
 // ============================================================================
@@ -91,7 +91,11 @@ impl Default for DrillingBaseline {
 impl DrillingBaseline {
     /// Update baseline with new readings (exponential moving average)
     pub fn update(&mut self, packet: &WitsPacket, metrics: &DrillingMetrics) {
-        let alpha = if self.samples_collected < 10 { 0.5 } else { 0.1 };
+        let alpha = if self.samples_collected < 10 {
+            0.5
+        } else {
+            0.1
+        };
 
         if metrics.mse > 0.0 {
             if self.mse == 0.0 {
@@ -222,8 +226,13 @@ pub fn detect_operation(packet: &WitsPacket, campaign: Campaign) -> Operation {
 
         // Priority 4: Cement Drill-Out - high WOB, moderate torque, slow drilling
         // Cement drill-out involves drilling through cement plugs
-        let is_cement_drillout = packet.wob >= cfg.thresholds.operation_detection.cement_drillout_wob_min
-            && packet.torque >= cfg.thresholds.operation_detection.cement_drillout_torque_min
+        let is_cement_drillout = packet.wob
+            >= cfg.thresholds.operation_detection.cement_drillout_wob_min
+            && packet.torque
+                >= cfg
+                    .thresholds
+                    .operation_detection
+                    .cement_drillout_torque_min
             && packet.rop > 0.0
             && packet.rop < cfg.thresholds.operation_detection.cement_drillout_rop_max
             && flow_active
@@ -342,6 +351,8 @@ pub struct TacticalAgent {
     pending_operation_count: u32,
     /// Count of consecutive founder-positive packets (debounce counter)
     founder_consecutive_count: u32,
+    /// Count of consecutive pit-rate-anomaly packets (debounce counter)
+    pit_rate_consecutive_count: u32,
     /// Depth-ahead CfC network for formation transition forecasting
     depth_ahead: Option<crate::cfc::depth_ahead::DepthAheadNetwork>,
     /// Latest depth-ahead result (only during drilling/reaming)
@@ -376,7 +387,8 @@ impl TacticalAgent {
             aci_result: None,
             cfc_network: crate::cfc::DualCfcNetwork::new(42),
             cfc_result: None,
-            cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
+            cfc_formation_detector:
+                crate::cfc::formation_detector::FormationTransitionDetector::new(),
             latest_formation_transition: None,
             regime_clusterer: crate::cfc::RegimeClusterer::new(),
             latest_regime_id: 0,
@@ -389,6 +401,7 @@ impl TacticalAgent {
             pending_operation: None,
             pending_operation_count: 0,
             founder_consecutive_count: 0,
+            pit_rate_consecutive_count: 0,
             depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
             depth_ahead_result: None,
         }
@@ -410,7 +423,8 @@ impl TacticalAgent {
             aci_result: None,
             cfc_network: crate::cfc::DualCfcNetwork::new(42),
             cfc_result: None,
-            cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
+            cfc_formation_detector:
+                crate::cfc::formation_detector::FormationTransitionDetector::new(),
             latest_formation_transition: None,
             regime_clusterer: crate::cfc::RegimeClusterer::new(),
             latest_regime_id: 0,
@@ -423,6 +437,7 @@ impl TacticalAgent {
             pending_operation: None,
             pending_operation_count: 0,
             founder_consecutive_count: 0,
+            pit_rate_consecutive_count: 0,
             depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
             depth_ahead_result: None,
         }
@@ -488,7 +503,8 @@ impl TacticalAgent {
             aci_result: None,
             cfc_network: crate::cfc::DualCfcNetwork::new(42),
             cfc_result: None,
-            cfc_formation_detector: crate::cfc::formation_detector::FormationTransitionDetector::new(),
+            cfc_formation_detector:
+                crate::cfc::formation_detector::FormationTransitionDetector::new(),
             latest_formation_transition: None,
             regime_clusterer: crate::cfc::RegimeClusterer::new(),
             latest_regime_id: 0,
@@ -501,6 +517,7 @@ impl TacticalAgent {
             pending_operation: None,
             pending_operation_count: 0,
             founder_consecutive_count: 0,
+            pit_rate_consecutive_count: 0,
             depth_ahead: Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042)),
             depth_ahead_result: None,
         }
@@ -551,8 +568,11 @@ impl TacticalAgent {
         // ====================================================================
         // PHASE 2: Basic Drilling Physics Calculations (target: < 15ms)
         // ====================================================================
-        let mut metrics =
-            physics_engine::tactical_update(packet, self.prev_active_packet.as_ref(), self.baseline_overrides.as_ref());
+        let mut metrics = physics_engine::tactical_update(
+            packet,
+            self.prev_active_packet.as_ref(),
+            self.baseline_overrides.as_ref(),
+        );
 
         // Update metrics with baseline deltas
         metrics.mse_delta_percent = self.baseline.mse_delta_percent(metrics.mse);
@@ -599,26 +619,40 @@ impl TacticalAgent {
 
         let elapsed = start.elapsed();
         if elapsed.as_millis() > 15 {
-            warn!(elapsed_ms = elapsed.as_millis(), "Phase 2 exceeded 15ms target");
+            warn!(
+                elapsed_ms = elapsed.as_millis(),
+                "Phase 2 exceeded 15ms target"
+            );
         }
 
         // ====================================================================
         // PHASE 2.7: ACI Conformal Interval Update (during drilling/reaming)
         // ====================================================================
-        self.aci_result = if metrics.state == RigState::Drilling || metrics.state == RigState::Reaming {
-            Some(crate::aci::update_from_drilling(&mut self.aci_tracker, packet, &metrics))
-        } else {
-            None
-        };
+        self.aci_result =
+            if metrics.state == RigState::Drilling || metrics.state == RigState::Reaming {
+                Some(crate::aci::update_from_drilling(
+                    &mut self.aci_tracker,
+                    packet,
+                    &metrics,
+                ))
+            } else {
+                None
+            };
 
         // ====================================================================
         // PHASE 2.8: Dual CfC Neural Network Update (shadow mode, drilling/reaming)
         // ====================================================================
-        self.cfc_result = if metrics.state == RigState::Drilling || metrics.state == RigState::Reaming {
-            Some(crate::cfc::update_dual_from_drilling(&mut self.cfc_network, packet, &metrics, 1.0))
-        } else {
-            None
-        };
+        self.cfc_result =
+            if metrics.state == RigState::Drilling || metrics.state == RigState::Reaming {
+                Some(crate::cfc::update_dual_from_drilling(
+                    &mut self.cfc_network,
+                    packet,
+                    &metrics,
+                    1.0,
+                ))
+            } else {
+                None
+            };
 
         // ====================================================================
         // PHASE 2.8.1: Regime clustering from CfC motor outputs
@@ -633,11 +667,12 @@ impl TacticalAgent {
         // ====================================================================
         // PHASE 2.8.2: Depth-Ahead CfC Network Update (drilling/reaming)
         // ====================================================================
-        self.depth_ahead_result = if metrics.state == RigState::Drilling || metrics.state == RigState::Reaming {
+        self.depth_ahead_result = if metrics.state == RigState::Drilling
+            || metrics.state == RigState::Reaming
+        {
             if let Some(ref mut da) = self.depth_ahead {
-                let da_features = crate::cfc::depth_ahead::extract_da_features(
-                    packet, &metrics, formation_ctx,
-                );
+                let da_features =
+                    crate::cfc::depth_ahead::extract_da_features(packet, &metrics, formation_ctx);
                 Some(da.process(&da_features, 1.0))
             } else {
                 None
@@ -696,7 +731,10 @@ impl TacticalAgent {
 
         // Only track previous active-state packet for delta calculations
         // to avoid false positives from Idle→Drilling state transitions
-        if matches!(metrics.state, RigState::Drilling | RigState::Reaming | RigState::Circulating) {
+        if matches!(
+            metrics.state,
+            RigState::Drilling | RigState::Reaming | RigState::Circulating
+        ) {
             self.prev_active_packet = Some(packet.clone());
         }
 
@@ -704,11 +742,29 @@ impl TacticalAgent {
         // packets before allowing a ticket (filters transient WOB spikes)
         if metrics.is_anomaly
             && metrics.anomaly_category == AnomalyCategory::Mechanical
-            && metrics.anomaly_description.as_ref().map_or(false, |d| d.contains("Founder"))
+            && metrics
+                .anomaly_description
+                .as_ref()
+                .map_or(false, |d| d.contains("Founder"))
         {
             self.founder_consecutive_count += 1;
         } else {
             self.founder_consecutive_count = 0;
+        }
+
+        // Update pit rate debounce counter — must see N consecutive pit-rate-anomaly
+        // packets before allowing a WellControl ticket from pit rate alone.
+        // Filters single-packet CSV noise while still catching real kicks/losses.
+        if metrics.is_anomaly
+            && metrics.anomaly_category == AnomalyCategory::WellControl
+            && metrics
+                .anomaly_description
+                .as_ref()
+                .map_or(false, |d| d.contains("Pit"))
+        {
+            self.pit_rate_consecutive_count += 1;
+        } else {
+            self.pit_rate_consecutive_count = 0;
         }
 
         // Update sustained anomaly throttle normal-packet counters.
@@ -770,17 +826,42 @@ impl TacticalAgent {
 
             // Feed all WITS metrics for baseline learning
             mgr.add_sample(&self.equipment_id, wits_metrics::MSE, packet.mse, timestamp);
-            mgr.add_sample(&self.equipment_id, wits_metrics::D_EXPONENT, packet.d_exponent, timestamp);
+            mgr.add_sample(
+                &self.equipment_id,
+                wits_metrics::D_EXPONENT,
+                packet.d_exponent,
+                timestamp,
+            );
             mgr.add_sample(&self.equipment_id, wits_metrics::DXC, packet.dxc, timestamp);
-            mgr.add_sample(&self.equipment_id, wits_metrics::FLOW_BALANCE, packet.flow_balance(), timestamp);
+            mgr.add_sample(
+                &self.equipment_id,
+                wits_metrics::FLOW_BALANCE,
+                packet.flow_balance(),
+                timestamp,
+            );
             mgr.add_sample(&self.equipment_id, wits_metrics::SPP, packet.spp, timestamp);
-            mgr.add_sample(&self.equipment_id, wits_metrics::TORQUE, packet.torque, timestamp);
+            mgr.add_sample(
+                &self.equipment_id,
+                wits_metrics::TORQUE,
+                packet.torque,
+                timestamp,
+            );
             mgr.add_sample(&self.equipment_id, wits_metrics::ROP, packet.rop, timestamp);
             mgr.add_sample(&self.equipment_id, wits_metrics::WOB, packet.wob, timestamp);
             mgr.add_sample(&self.equipment_id, wits_metrics::RPM, packet.rpm, timestamp);
             mgr.add_sample(&self.equipment_id, wits_metrics::ECD, packet.ecd, timestamp);
-            mgr.add_sample(&self.equipment_id, wits_metrics::PIT_VOLUME, packet.pit_volume, timestamp);
-            mgr.add_sample(&self.equipment_id, wits_metrics::GAS_UNITS, packet.gas_units, timestamp);
+            mgr.add_sample(
+                &self.equipment_id,
+                wits_metrics::PIT_VOLUME,
+                packet.pit_volume,
+                timestamp,
+            );
+            mgr.add_sample(
+                &self.equipment_id,
+                wits_metrics::GAS_UNITS,
+                packet.gas_units,
+                timestamp,
+            );
         }
     }
 
@@ -801,9 +882,9 @@ impl TacticalAgent {
 
             let status = mgr.get_status(&self.equipment_id, wits_metrics::MSE);
             let should_lock = match status {
-                Some(crate::baseline::LearningStatus::Learning { samples_collected, .. }) => {
-                    samples_collected >= 100
-                }
+                Some(crate::baseline::LearningStatus::Learning {
+                    samples_collected, ..
+                }) => samples_collected >= 100,
                 _ => false,
             };
 
@@ -822,12 +903,19 @@ impl TacticalAgent {
                     );
                     mgr.overrides = Some(overrides.clone());
                     // Persist overrides alongside thresholds
-                    if let Err(e) = mgr.save_to_file(std::path::Path::new(crate::baseline::DEFAULT_STATE_PATH)) {
+                    if let Err(e) =
+                        mgr.save_to_file(std::path::Path::new(crate::baseline::DEFAULT_STATE_PATH))
+                    {
                         warn!(error = %e, "Failed to persist baseline overrides");
                     }
                     drop(mgr);
                     self.baseline_overrides = Some(overrides);
                     self.mode = TacticalMode::DynamicThresholds;
+
+                    // Reset ACI windows — discard noisy learning-phase samples
+                    // so intervals converge quickly on stable post-lock parameters.
+                    self.aci_tracker.reset_windows();
+                    info!("ACI windows reset after baseline lock — intervals will re-converge from clean data");
                 }
             }
         }
@@ -839,7 +927,9 @@ impl TacticalAgent {
         let cfg = crate::config::get();
         let current_anomaly_cat = if is_anomaly { Some(category) } else { None };
 
-        let to_remove: Vec<_> = self.sustained_throttle.iter_mut()
+        let to_remove: Vec<_> = self
+            .sustained_throttle
+            .iter_mut()
             .filter_map(|(cat, state)| {
                 if Some(*cat) != current_anomaly_cat {
                     state.consecutive_normal_count += 1;
@@ -850,7 +940,8 @@ impl TacticalAgent {
                     state.consecutive_normal_count = 0;
                 }
                 None
-            }).collect();
+            })
+            .collect();
 
         for cat in to_remove {
             self.sustained_throttle.remove(&cat);
@@ -886,19 +977,30 @@ impl TacticalAgent {
 
         // RULE 3: Per-category cooldown (packet count + depth + time)
         let cfg = crate::config::get();
-        if let Some(&(last_count, last_depth, last_time)) = self.category_cooldowns.get(&metrics.anomaly_category) {
+        if let Some(&(last_count, last_depth, last_time)) =
+            self.category_cooldowns.get(&metrics.anomaly_category)
+        {
             let packets_since = self.packets_processed.saturating_sub(last_count);
             let depth_change = (packet.bit_depth - last_depth).abs();
             let elapsed = last_time.elapsed().as_secs();
 
             let (min_packets, min_depth, min_time) = if severity == TicketSeverity::Critical {
-                (cfg.advisory.critical_packet_cooldown, cfg.advisory.critical_depth_cooldown_ft, 0u64)
+                (
+                    cfg.advisory.critical_packet_cooldown,
+                    cfg.advisory.critical_depth_cooldown_ft,
+                    0u64,
+                )
             } else {
-                (cfg.advisory.packet_cooldown, cfg.advisory.depth_cooldown_ft, cfg.advisory.default_cooldown_seconds)
+                (
+                    cfg.advisory.packet_cooldown,
+                    cfg.advisory.depth_cooldown_ft,
+                    cfg.advisory.default_cooldown_seconds,
+                )
             };
 
             // ALL conditions must be met to suppress (packet count AND depth change AND time elapsed)
-            if packets_since < min_packets && depth_change < min_depth && elapsed < min_time.max(1) {
+            if packets_since < min_packets && depth_change < min_depth && elapsed < min_time.max(1)
+            {
                 debug!(
                     packets_since = packets_since,
                     depth_change = depth_change,
@@ -918,7 +1020,8 @@ impl TacticalAgent {
             if let Some(state) = self.sustained_throttle.get(&metrics.anomaly_category) {
                 if state.consecutive_ticket_count >= cfg.advisory.sustained_throttle_onset {
                     let exponent = (state.consecutive_ticket_count
-                        - cfg.advisory.sustained_throttle_onset) as f64;
+                        - cfg.advisory.sustained_throttle_onset)
+                        as f64;
                     let base_depth = if severity == TicketSeverity::Critical {
                         cfg.advisory.critical_depth_cooldown_ft
                     } else {
@@ -926,7 +1029,7 @@ impl TacticalAgent {
                     };
                     let progressive_depth = (base_depth
                         * cfg.advisory.sustained_depth_multiplier.powf(exponent))
-                        .min(cfg.advisory.sustained_max_depth_cooldown_ft);
+                    .min(cfg.advisory.sustained_max_depth_cooldown_ft);
 
                     let depth_since_last = (packet.bit_depth - state.last_ticket_depth).abs();
                     if depth_since_last < progressive_depth {
@@ -957,12 +1060,10 @@ impl TacticalAgent {
         }
 
         // RULE 5: CfC anomaly score gate — neural network must corroborate.
-        // During warm-up (<500 drilling packets): suppresses non-safety tickets.
-        // After calibration: vetoes when CfC scores state as normal (< 0.3).
+        // During warm-up (<300 drilling packets): suppresses non-safety tickets.
+        // After calibration: vetoes when CfC scores state as normal (< 0.4).
         // WellControl is always allowed through (safety-critical).
-        if metrics.anomaly_category != AnomalyCategory::WellControl
-            && !self.cfc_corroborates()
-        {
+        if metrics.anomaly_category != AnomalyCategory::WellControl && !self.cfc_corroborates() {
             let is_calibrated = self.cfc_result.as_ref().map_or(false, |r| r.is_calibrated);
             debug!(
                 category = ?metrics.anomaly_category,
@@ -977,7 +1078,10 @@ impl TacticalAgent {
         // RULE 6: Founder debounce — require consecutive founder-positive packets.
         // Single-packet WOB spikes are transient noise; real founder persists.
         if metrics.anomaly_category == AnomalyCategory::Mechanical
-            && metrics.anomaly_description.as_ref().map_or(false, |d| d.contains("Founder"))
+            && metrics
+                .anomaly_description
+                .as_ref()
+                .map_or(false, |d| d.contains("Founder"))
             && self.founder_consecutive_count < cfg.thresholds.founder.debounce_packets
         {
             debug!(
@@ -989,9 +1093,29 @@ impl TacticalAgent {
             return None;
         }
 
+        // RULE 6b: Pit rate debounce — require consecutive pit-rate-anomaly packets.
+        // Single-packet pit volume spikes are CSV noise; real kicks/losses persist.
+        // Flow balance, gas, and H2S-triggered WellControl bypass this gate.
+        if metrics.anomaly_category == AnomalyCategory::WellControl
+            && metrics
+                .anomaly_description
+                .as_ref()
+                .map_or(false, |d| d.contains("Pit"))
+            && self.pit_rate_consecutive_count
+                < cfg.thresholds.well_control.pit_rate_debounce_packets
+        {
+            debug!(
+                consecutive = self.pit_rate_consecutive_count,
+                required = cfg.thresholds.well_control.pit_rate_debounce_packets,
+                "Ticket suppressed — pit rate debounce (need {} more consecutive packets)",
+                cfg.thresholds.well_control.pit_rate_debounce_packets
+                    - self.pit_rate_consecutive_count
+            );
+            return None;
+        }
+
         // Determine trigger parameter and value
-        let (trigger_parameter, trigger_value, threshold_value) =
-            self.determine_trigger(metrics);
+        let (trigger_parameter, trigger_value, threshold_value) = self.determine_trigger(metrics);
 
         // Build description
         let description = metrics
@@ -1006,7 +1130,8 @@ impl TacticalAgent {
         );
 
         // Update sustained anomaly throttle state
-        let sustained = self.sustained_throttle
+        let sustained = self
+            .sustained_throttle
             .entry(metrics.anomaly_category)
             .or_insert(SustainedAnomalyState {
                 consecutive_ticket_count: 0,
@@ -1034,14 +1159,25 @@ impl TacticalAgent {
             context: Some(context),
             depth: packet.bit_depth,
             trace_log: Vec::new(),
-            cfc_anomaly_score: self.cfc_result.as_ref()
+            cfc_anomaly_score: self
+                .cfc_result
+                .as_ref()
                 .filter(|r| r.is_calibrated)
                 .map(|r| r.anomaly_score),
-            cfc_feature_surprises: self.cfc_result.as_ref()
+            cfc_feature_surprises: self
+                .cfc_result
+                .as_ref()
                 .filter(|r| r.is_calibrated)
-                .map(|r| r.feature_surprises.iter().map(|s| CfcFeatureSurpriseInfo {
-                    name: s.name.to_string(), error: s.error, magnitude: s.magnitude,
-                }).collect())
+                .map(|r| {
+                    r.feature_surprises
+                        .iter()
+                        .map(|s| CfcFeatureSurpriseInfo {
+                            name: s.name.to_string(),
+                            error: s.error,
+                            magnitude: s.magnitude,
+                        })
+                        .collect()
+                })
                 .unwrap_or_default(),
             causal_leads: Vec::new(),
             damping_recommendation: None,
@@ -1056,22 +1192,33 @@ impl TacticalAgent {
 
         // Log CfC neural network state
         if let Some(cfc) = &self.cfc_result {
-            ticket.log_info(TicketStage::TacticalCreation,
-                format!("CfC: fast={:.3} slow={:.3} combined={:.3} calibrated={} surprises={}",
-                    cfc.fast.anomaly_score, cfc.slow.anomaly_score,
-                    cfc.anomaly_score, cfc.is_calibrated, cfc.feature_surprises.len()));
+            ticket.log_info(
+                TicketStage::TacticalCreation,
+                format!(
+                    "CfC: fast={:.3} slow={:.3} combined={:.3} calibrated={} surprises={}",
+                    cfc.fast.anomaly_score,
+                    cfc.slow.anomaly_score,
+                    cfc.anomaly_score,
+                    cfc.is_calibrated,
+                    cfc.feature_surprises.len()
+                ),
+            );
         }
 
         Some(ticket)
     }
 
     /// Determine ticket severity and type based on metrics
-    fn determine_severity_and_type(&self, metrics: &DrillingMetrics) -> (TicketSeverity, TicketType) {
+    fn determine_severity_and_type(
+        &self,
+        metrics: &DrillingMetrics,
+    ) -> (TicketSeverity, TicketType) {
         let cfg = crate::config::get();
         let (base_severity, ticket_type) = match metrics.anomaly_category {
             AnomalyCategory::WellControl => {
                 // Well control issues are always high priority
-                if metrics.flow_balance.abs() > cfg.thresholds.well_control.flow_imbalance_critical_gpm
+                if metrics.flow_balance.abs()
+                    > cfg.thresholds.well_control.flow_imbalance_critical_gpm
                     || metrics.pit_rate.abs() > cfg.thresholds.well_control.pit_rate_critical_bbl_hr
                 {
                     (TicketSeverity::Critical, TicketType::Intervention)
@@ -1081,7 +1228,8 @@ impl TacticalAgent {
             }
             AnomalyCategory::Hydraulics => {
                 if metrics.ecd_margin < cfg.thresholds.hydraulics.ecd_margin_critical_ppg
-                    || metrics.spp_delta.abs() > cfg.thresholds.hydraulics.spp_deviation_critical_psi
+                    || metrics.spp_delta.abs()
+                        > cfg.thresholds.hydraulics.spp_deviation_critical_psi
                 {
                     (TicketSeverity::High, TicketType::RiskWarning)
                 } else {
@@ -1089,7 +1237,8 @@ impl TacticalAgent {
                 }
             }
             AnomalyCategory::Mechanical => {
-                if metrics.torque_delta_percent > cfg.thresholds.mechanical.torque_increase_critical {
+                if metrics.torque_delta_percent > cfg.thresholds.mechanical.torque_increase_critical
+                {
                     (TicketSeverity::High, TicketType::Intervention)
                 } else {
                     (TicketSeverity::Medium, TicketType::RiskWarning)
@@ -1195,9 +1344,14 @@ impl TacticalAgent {
     }
 
     /// Use CfC neural network anomaly score as a second opinion on severity.
-    /// Downgrades severity by one level when CfC sees nothing abnormal (score < 0.3).
-    /// Escalates by one level when CfC strongly corroborates (score >= 0.7).
-    /// Never downgrades well control below High (safety critical).
+    ///
+    /// Thresholds (tuned Phase 2.1):
+    /// - score < 0.2  → downgrade ±2 levels (CfC strongly disagrees)
+    /// - score < 0.4  → downgrade ±1 level  (CfC mildly disagrees)
+    /// - score >= 0.6 → escalate ±1 level   (CfC corroborates)
+    /// - score >= 0.8 → escalate ±2 levels  (CfC strongly corroborates)
+    ///
+    /// Never downgrades WellControl below High (safety critical).
     fn cfc_adjust_severity(
         &self,
         base: TicketSeverity,
@@ -1210,10 +1364,50 @@ impl TacticalAgent {
 
         let score = cfc.anomaly_score;
 
-        if score < 0.3 {
-            // CfC sees nothing abnormal → downgrade one level
+        // Helper: step severity down by N levels
+        let step_down = |s: TicketSeverity, n: u8| -> TicketSeverity {
+            let mut current = s;
+            for _ in 0..n {
+                current = match current {
+                    TicketSeverity::Critical => TicketSeverity::High,
+                    TicketSeverity::High => TicketSeverity::Medium,
+                    TicketSeverity::Medium => TicketSeverity::Low,
+                    TicketSeverity::Low => TicketSeverity::Low,
+                };
+            }
+            current
+        };
+
+        // Helper: step severity up by N levels
+        let step_up = |s: TicketSeverity, n: u8| -> TicketSeverity {
+            let mut current = s;
+            for _ in 0..n {
+                current = match current {
+                    TicketSeverity::Low => TicketSeverity::Medium,
+                    TicketSeverity::Medium => TicketSeverity::High,
+                    TicketSeverity::High => TicketSeverity::Critical,
+                    TicketSeverity::Critical => TicketSeverity::Critical,
+                };
+            }
+            current
+        };
+
+        if score < 0.2 {
+            // CfC strongly disagrees → downgrade 2 levels
             match category {
-                // Never downgrade well control below High
+                AnomalyCategory::WellControl => {
+                    // Never below High for safety
+                    if base == TicketSeverity::Critical {
+                        TicketSeverity::High
+                    } else {
+                        base
+                    }
+                }
+                _ => step_down(base, 2),
+            }
+        } else if score < 0.4 {
+            // CfC mildly disagrees → downgrade 1 level
+            match category {
                 AnomalyCategory::WellControl => {
                     if base == TicketSeverity::Critical {
                         TicketSeverity::High
@@ -1221,23 +1415,16 @@ impl TacticalAgent {
                         base
                     }
                 }
-                _ => match base {
-                    TicketSeverity::Critical => TicketSeverity::High,
-                    TicketSeverity::High => TicketSeverity::Medium,
-                    TicketSeverity::Medium => TicketSeverity::Low,
-                    TicketSeverity::Low => TicketSeverity::Low,
-                },
+                _ => step_down(base, 1),
             }
-        } else if score >= 0.7 {
-            // CfC strongly corroborates → escalate one level
-            match base {
-                TicketSeverity::Low => TicketSeverity::Medium,
-                TicketSeverity::Medium => TicketSeverity::High,
-                TicketSeverity::High => TicketSeverity::Critical,
-                TicketSeverity::Critical => TicketSeverity::Critical,
-            }
+        } else if score >= 0.8 {
+            // CfC strongly corroborates → escalate 2 levels
+            step_up(base, 2)
+        } else if score >= 0.6 {
+            // CfC corroborates → escalate 1 level
+            step_up(base, 1)
         } else {
-            // 0.3 <= score < 0.7: ambiguous → no change
+            // 0.4 <= score < 0.6: ambiguous → no change
             base
         }
     }
@@ -1260,17 +1447,19 @@ impl TacticalAgent {
 
         // Check calibration of relevant metric(s)
         let calibrated = match metrics.anomaly_category {
-            AnomalyCategory::Hydraulics =>
+            AnomalyCategory::Hydraulics => {
                 self.aci_tracker.is_calibrated(aci_m::SPP)
-                || self.aci_tracker.is_calibrated(aci_m::ECD),
-            AnomalyCategory::Mechanical =>
+                    || self.aci_tracker.is_calibrated(aci_m::ECD)
+            }
+            AnomalyCategory::Mechanical => {
                 self.aci_tracker.is_calibrated(aci_m::TORQUE)
-                || self.aci_tracker.is_calibrated(aci_m::WOB),
-            AnomalyCategory::DrillingEfficiency =>
-                self.aci_tracker.is_calibrated(aci_m::MSE),
-            AnomalyCategory::Formation =>
+                    || self.aci_tracker.is_calibrated(aci_m::WOB)
+            }
+            AnomalyCategory::DrillingEfficiency => self.aci_tracker.is_calibrated(aci_m::MSE),
+            AnomalyCategory::Formation => {
                 self.aci_tracker.is_calibrated(aci_m::D_EXPONENT)
-                || self.aci_tracker.is_calibrated(aci_m::DXC),
+                    || self.aci_tracker.is_calibrated(aci_m::DXC)
+            }
             _ => return true,
         };
 
@@ -1290,8 +1479,8 @@ impl TacticalAgent {
 
     /// Check whether CfC anomaly score corroborates the anomaly.
     /// Returns true if ticket should proceed, false to veto.
-    /// During warm-up (<500 packets): vetoes non-safety tickets until the
-    /// network has learned enough to distinguish normal from abnormal.
+    /// During warm-up (<300 drilling packets): vetoes non-safety tickets until
+    /// the network has learned enough to distinguish normal from abnormal.
     /// WellControl bypass is handled at the RULE 5 call site.
     fn cfc_corroborates(&self) -> bool {
         let cfc = match &self.cfc_result {
@@ -1300,8 +1489,8 @@ impl TacticalAgent {
         };
 
         // CfC confidently says normal → veto
-        // Uses same 0.3 boundary as cfc_adjust_severity()
-        cfc.anomaly_score >= 0.3
+        // Uses same 0.4 boundary as cfc_adjust_severity()
+        cfc.anomaly_score >= 0.4
     }
 
     /// Determine the primary trigger parameter and its value
@@ -1309,7 +1498,9 @@ impl TacticalAgent {
         let cfg = crate::config::get();
         match metrics.anomaly_category {
             AnomalyCategory::WellControl => {
-                if metrics.flow_balance.abs() > cfg.thresholds.well_control.flow_imbalance_warning_gpm {
+                if metrics.flow_balance.abs()
+                    > cfg.thresholds.well_control.flow_imbalance_warning_gpm
+                {
                     (
                         "flow_balance".to_string(),
                         metrics.flow_balance,
@@ -1446,8 +1637,8 @@ impl TacticalAgent {
             });
         }
         if metrics.spp_delta.abs() > cfg.thresholds.hydraulics.spp_deviation_warning_psi {
-            let is_critical = metrics.spp_delta.abs()
-                > cfg.thresholds.hydraulics.spp_deviation_critical_psi;
+            let is_critical =
+                metrics.spp_delta.abs() > cfg.thresholds.hydraulics.spp_deviation_critical_psi;
             triggers.push(ThresholdBreach {
                 parameter: "spp_delta".into(),
                 actual_value: metrics.spp_delta,
@@ -1463,8 +1654,8 @@ impl TacticalAgent {
 
         // --- Mechanical breaches ---
         if metrics.torque_delta_percent > cfg.thresholds.mechanical.torque_increase_warning {
-            let is_critical = metrics.torque_delta_percent
-                > cfg.thresholds.mechanical.torque_increase_critical;
+            let is_critical =
+                metrics.torque_delta_percent > cfg.thresholds.mechanical.torque_increase_critical;
             triggers.push(ThresholdBreach {
                 parameter: "torque_increase".into(),
                 actual_value: metrics.torque_delta_percent * 100.0,
@@ -1480,8 +1671,7 @@ impl TacticalAgent {
 
         // --- Efficiency breaches ---
         if metrics.mse_efficiency < cfg.thresholds.mse.efficiency_warning_percent {
-            let is_poor =
-                metrics.mse_efficiency < cfg.thresholds.mse.efficiency_poor_percent;
+            let is_poor = metrics.mse_efficiency < cfg.thresholds.mse.efficiency_poor_percent;
             triggers.push(ThresholdBreach {
                 parameter: "mse_efficiency".into(),
                 actual_value: metrics.mse_efficiency,
@@ -1554,8 +1744,7 @@ impl TacticalAgent {
                 }
             }
             AnomalyCategory::Mechanical => {
-                if metrics.torque_delta_percent
-                    > cfg.thresholds.mechanical.torque_increase_critical
+                if metrics.torque_delta_percent > cfg.thresholds.mechanical.torque_increase_critical
                     && metrics.spp_delta > cfg.thresholds.hydraulics.spp_deviation_warning_psi
                 {
                     "Pack-off".into()
@@ -1654,7 +1843,8 @@ impl TacticalAgent {
         self.aci_result = None;
         self.cfc_network.reset();
         self.cfc_result = None;
-        self.cfc_formation_detector = crate::cfc::formation_detector::FormationTransitionDetector::new();
+        self.cfc_formation_detector =
+            crate::cfc::formation_detector::FormationTransitionDetector::new();
         self.latest_formation_transition = None;
         self.regime_clusterer.reset();
         self.latest_regime_id = 0;
@@ -1664,6 +1854,7 @@ impl TacticalAgent {
         self.pending_operation = None;
         self.pending_operation_count = 0;
         self.founder_consecutive_count = 0;
+        self.pit_rate_consecutive_count = 0;
         self.sustained_throttle.clear();
         self.depth_ahead = Some(crate::cfc::depth_ahead::DepthAheadNetwork::new(1042));
         self.depth_ahead_result = None;
@@ -1743,11 +1934,13 @@ impl std::fmt::Display for AgentStats {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::Arc;
 
     fn ensure_config() {
         if !crate::config::is_initialized() {
-            crate::config::init(crate::config::WellConfig::default(), crate::config::ConfigProvenance::default());
+            crate::config::init(
+                crate::config::WellConfig::default(),
+                crate::config::ConfigProvenance::default(),
+            );
         }
     }
 
@@ -1790,7 +1983,9 @@ mod tests {
         let (ticket, metrics, _entry) = agent.process(&packet, false, None);
 
         // Normal drilling should not generate ticket
-        assert!(ticket.is_none() || metrics.anomaly_category == AnomalyCategory::DrillingEfficiency);
+        assert!(
+            ticket.is_none() || metrics.anomaly_category == AnomalyCategory::DrillingEfficiency
+        );
     }
 
     #[test]
@@ -1798,9 +1993,12 @@ mod tests {
         ensure_config();
         let mut agent = TacticalAgent::new();
         let packet = create_kick_packet();
-        let (ticket, metrics, _entry) = agent.process(&packet, false, None);
+        let (_ticket, metrics, _entry) = agent.process(&packet, false, None);
 
-        assert!(metrics.is_anomaly, "Kick conditions should be detected as anomaly");
+        assert!(
+            metrics.is_anomaly,
+            "Kick conditions should be detected as anomaly"
+        );
         assert_eq!(
             metrics.anomaly_category,
             AnomalyCategory::WellControl,
@@ -1857,18 +2055,23 @@ mod tests {
         let cat = AnomalyCategory::Hydraulics;
 
         // Insert state with 2 tickets (below onset of 3)
-        agent.sustained_throttle.insert(cat, SustainedAnomalyState {
-            consecutive_ticket_count: 2,
-            last_ticket_depth: 8000.0,
-            consecutive_normal_count: 0,
-        });
+        agent.sustained_throttle.insert(
+            cat,
+            SustainedAnomalyState {
+                consecutive_ticket_count: 2,
+                last_ticket_depth: 8000.0,
+                consecutive_normal_count: 0,
+            },
+        );
 
         // At onset boundary (count=2 < 3), throttle should NOT engage.
         // Verify by checking state directly — the struct has count < onset.
         let state = agent.sustained_throttle.get(&cat).unwrap();
         let cfg = crate::config::get();
-        assert!(state.consecutive_ticket_count < cfg.advisory.sustained_throttle_onset,
-            "Below onset: throttle should not be active");
+        assert!(
+            state.consecutive_ticket_count < cfg.advisory.sustained_throttle_onset,
+            "Below onset: throttle should not be active"
+        );
     }
 
     #[test]
@@ -1880,29 +2083,42 @@ mod tests {
         let cfg = crate::config::get();
 
         // Simulate 5 tickets already issued (onset=3, so exponent=2 → 50*4=200ft)
-        agent.sustained_throttle.insert(cat, SustainedAnomalyState {
-            consecutive_ticket_count: 5,
-            last_ticket_depth: 8000.0,
-            consecutive_normal_count: 0,
-        });
+        agent.sustained_throttle.insert(
+            cat,
+            SustainedAnomalyState {
+                consecutive_ticket_count: 5,
+                last_ticket_depth: 8000.0,
+                consecutive_normal_count: 0,
+            },
+        );
 
         let state = agent.sustained_throttle.get(&cat).unwrap();
-        let exponent = (state.consecutive_ticket_count - cfg.advisory.sustained_throttle_onset) as f64;
+        let exponent =
+            (state.consecutive_ticket_count - cfg.advisory.sustained_throttle_onset) as f64;
         let progressive_depth = (cfg.advisory.depth_cooldown_ft
             * cfg.advisory.sustained_depth_multiplier.powf(exponent))
-            .min(cfg.advisory.sustained_max_depth_cooldown_ft);
+        .min(cfg.advisory.sustained_max_depth_cooldown_ft);
 
         // exponent=2, base=50, multiplier=2 → 50*4=200ft required
-        assert!((progressive_depth - 200.0).abs() < 0.01,
-            "Expected 200ft progressive depth, got {}", progressive_depth);
+        assert!(
+            (progressive_depth - 200.0).abs() < 0.01,
+            "Expected 200ft progressive depth, got {}",
+            progressive_depth
+        );
 
         // 100ft depth change is insufficient
         let depth_since = (8100.0_f64 - state.last_ticket_depth).abs();
-        assert!(depth_since < progressive_depth, "100ft should be insufficient for 200ft requirement");
+        assert!(
+            depth_since < progressive_depth,
+            "100ft should be insufficient for 200ft requirement"
+        );
 
         // 250ft depth change is sufficient
         let depth_since = (8250.0_f64 - state.last_ticket_depth).abs();
-        assert!(depth_since >= progressive_depth, "250ft should pass 200ft requirement");
+        assert!(
+            depth_since >= progressive_depth,
+            "250ft should pass 200ft requirement"
+        );
     }
 
     #[test]
@@ -1912,16 +2128,22 @@ mod tests {
         let mut agent = TacticalAgent::new();
 
         // Even with high ticket count, WellControl should not be in throttle logic
-        agent.sustained_throttle.insert(AnomalyCategory::WellControl, SustainedAnomalyState {
-            consecutive_ticket_count: 100,
-            last_ticket_depth: 8000.0,
-            consecutive_normal_count: 0,
-        });
+        agent.sustained_throttle.insert(
+            AnomalyCategory::WellControl,
+            SustainedAnomalyState {
+                consecutive_ticket_count: 100,
+                last_ticket_depth: 8000.0,
+                consecutive_normal_count: 0,
+            },
+        );
 
         // The RULE 3b code checks: if category != WellControl { ... }
         // So WellControl always bypasses. Verify the exemption condition.
-        assert_ne!(AnomalyCategory::WellControl, AnomalyCategory::Hydraulics,
-            "WellControl must be a distinct category");
+        assert_ne!(
+            AnomalyCategory::WellControl,
+            AnomalyCategory::Hydraulics,
+            "WellControl must be a distinct category"
+        );
     }
 
     #[test]
@@ -1931,11 +2153,14 @@ mod tests {
         let mut agent = TacticalAgent::new();
         let cat = AnomalyCategory::Hydraulics;
 
-        agent.sustained_throttle.insert(cat, SustainedAnomalyState {
-            consecutive_ticket_count: 10,
-            last_ticket_depth: 8000.0,
-            consecutive_normal_count: 0,
-        });
+        agent.sustained_throttle.insert(
+            cat,
+            SustainedAnomalyState {
+                consecutive_ticket_count: 10,
+                last_ticket_depth: 8000.0,
+                consecutive_normal_count: 0,
+            },
+        );
 
         // Simulate 500 non-anomalous drilling packets (default threshold)
         let cfg = crate::config::get();
@@ -1943,9 +2168,11 @@ mod tests {
             agent.update_sustained_normal_counts(false, AnomalyCategory::None);
         }
 
-        assert!(agent.sustained_throttle.get(&cat).is_none(),
+        assert!(
+            agent.sustained_throttle.get(&cat).is_none(),
             "Throttle state should be removed after {} normal packets",
-            cfg.advisory.sustained_reset_normal_count);
+            cfg.advisory.sustained_reset_normal_count
+        );
     }
 
     #[test]
@@ -1954,21 +2181,29 @@ mod tests {
         ensure_config();
         let mut agent = TacticalAgent::new();
 
-        agent.sustained_throttle.insert(AnomalyCategory::Hydraulics, SustainedAnomalyState {
-            consecutive_ticket_count: 20,
-            last_ticket_depth: 8000.0,
-            consecutive_normal_count: 0,
-        });
-        agent.sustained_throttle.insert(AnomalyCategory::WellControl, SustainedAnomalyState {
-            consecutive_ticket_count: 5,
-            last_ticket_depth: 8000.0,
-            consecutive_normal_count: 0,
-        });
+        agent.sustained_throttle.insert(
+            AnomalyCategory::Hydraulics,
+            SustainedAnomalyState {
+                consecutive_ticket_count: 20,
+                last_ticket_depth: 8000.0,
+                consecutive_normal_count: 0,
+            },
+        );
+        agent.sustained_throttle.insert(
+            AnomalyCategory::WellControl,
+            SustainedAnomalyState {
+                consecutive_ticket_count: 5,
+                last_ticket_depth: 8000.0,
+                consecutive_normal_count: 0,
+            },
+        );
 
         agent.reset();
 
-        assert!(agent.sustained_throttle.is_empty(),
-            "All throttle state should be cleared on reset");
+        assert!(
+            agent.sustained_throttle.is_empty(),
+            "All throttle state should be cleared on reset"
+        );
     }
 
     #[test]
@@ -1981,9 +2216,12 @@ mod tests {
         let exponent = 10.0_f64;
         let progressive = (cfg.advisory.depth_cooldown_ft
             * cfg.advisory.sustained_depth_multiplier.powf(exponent))
-            .min(cfg.advisory.sustained_max_depth_cooldown_ft);
+        .min(cfg.advisory.sustained_max_depth_cooldown_ft);
 
-        assert!((progressive - 500.0).abs() < 0.01,
-            "Should cap at 500ft, got {}", progressive);
+        assert!(
+            (progressive - 500.0).abs() < 0.01,
+            "Should cap at 500ft, got {}",
+            progressive
+        );
     }
 }

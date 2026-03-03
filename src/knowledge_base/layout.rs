@@ -83,7 +83,9 @@ impl KnowledgeBaseConfig {
             let entry = entry?;
             let path = entry.path();
             if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                if name.starts_with("performance_") && (name.ends_with(".toml") || name.ends_with(".toml.zst")) {
+                if name.starts_with("performance_")
+                    && (name.ends_with(".toml") || name.ends_with(".toml.zst"))
+                {
                     files.push(path);
                 }
             }
@@ -114,9 +116,18 @@ mod tests {
         assert_eq!(cfg.field_dir(), dir.join("TestField"));
         assert_eq!(cfg.geology_path(), dir.join("TestField/geology.toml"));
         assert_eq!(cfg.well_dir("Well-A"), dir.join("TestField/wells/Well-A"));
-        assert_eq!(cfg.pre_spud_dir("Well-A"), dir.join("TestField/wells/Well-A/pre-spud"));
-        assert_eq!(cfg.mid_well_dir(), dir.join("TestField/wells/Well-A/mid-well"));
-        assert_eq!(cfg.post_well_dir("Well-B"), dir.join("TestField/wells/Well-B/post-well"));
+        assert_eq!(
+            cfg.pre_spud_dir("Well-A"),
+            dir.join("TestField/wells/Well-A/pre-spud")
+        );
+        assert_eq!(
+            cfg.mid_well_dir(),
+            dir.join("TestField/wells/Well-A/mid-well")
+        );
+        assert_eq!(
+            cfg.post_well_dir("Well-B"),
+            dir.join("TestField/wells/Well-B/post-well")
+        );
     }
 
     #[test]

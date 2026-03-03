@@ -116,7 +116,12 @@ impl OptimalFinder {
         // Avoid degenerate cases
         if wob_max - wob_min < 1.0 || rpm_max - rpm_min < 5.0 {
             // Not enough variation - fall back to simple median
-            return Some(Self::fallback_median(packets, metrics, n, dysfunction_filtered));
+            return Some(Self::fallback_median(
+                packets,
+                metrics,
+                n,
+                dysfunction_filtered,
+            ));
         }
 
         // Create bins
@@ -173,7 +178,12 @@ impl OptimalFinder {
 
         if valid_bin_count == 0 {
             // No bins have enough samples - fall back to median
-            return Some(Self::fallback_median(packets, metrics, n, dysfunction_filtered));
+            return Some(Self::fallback_median(
+                packets,
+                metrics,
+                n,
+                dysfunction_filtered,
+            ));
         }
 
         // Find best bin
@@ -233,7 +243,8 @@ impl OptimalFinder {
         let mut flow_values: Vec<f64> = indices.iter().map(|&i| packets[i].flow_in).collect();
         let mut rop_values: Vec<f64> = indices.iter().map(|&i| packets[i].rop).collect();
         let mut mse_values: Vec<f64> = indices.iter().map(|&i| packets[i].mse).collect();
-        let mut mse_eff_values: Vec<f64> = indices.iter().map(|&i| metrics[i].mse_efficiency).collect();
+        let mut mse_eff_values: Vec<f64> =
+            indices.iter().map(|&i| metrics[i].mse_efficiency).collect();
 
         // Sort for median/min/max calculation
         wob_values.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
@@ -394,14 +405,12 @@ impl OptimalFinder {
             _ => "POOR - optimization needed",
         }
     }
-
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::types::{AnomalyCategory, Operation, RigState};
-    use std::sync::Arc;
 
     fn make_packet(wob: f64, rpm: f64, flow: f64, rop: f64, mse: f64, torque: f64) -> WitsPacket {
         WitsPacket {
@@ -442,7 +451,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     fn make_metric(mse: f64, mse_efficiency: f64) -> DrillingMetrics {
@@ -477,7 +487,8 @@ mod tests {
         let packet_refs: Vec<_> = packets.iter().collect();
         let metric_refs: Vec<_> = metrics.iter().collect();
 
-        let result = OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, false);
+        let result =
+            OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, false);
         assert!(result.is_none());
     }
 
@@ -516,7 +527,8 @@ mod tests {
         let packet_refs: Vec<_> = packets.iter().collect();
         let metric_refs: Vec<_> = metrics.iter().collect();
 
-        let result = OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, true);
+        let result =
+            OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, true);
         assert!(result.is_some());
 
         let optimal = result.unwrap();
@@ -540,7 +552,8 @@ mod tests {
         let packet_refs: Vec<_> = stable_packets.iter().collect();
         let metric_refs: Vec<_> = stable_metrics.iter().collect();
 
-        let result = OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, false);
+        let result =
+            OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, false);
         assert!(result.is_some());
 
         let optimal = result.unwrap();
@@ -554,7 +567,16 @@ mod tests {
     #[test]
     fn test_pa_campaign_weights_stability_more() {
         let packets: Vec<_> = (0..400)
-            .map(|i| make_packet(20.0 + (i % 10) as f64, 100.0 + (i % 20) as f64, 500.0, 50.0, 20000.0, 10.0))
+            .map(|i| {
+                make_packet(
+                    20.0 + (i % 10) as f64,
+                    100.0 + (i % 20) as f64,
+                    500.0,
+                    50.0,
+                    20000.0,
+                    10.0,
+                )
+            })
             .collect();
         let metrics: Vec<_> = (0..400).map(|_| make_metric(20000.0, 75.0)).collect();
 
@@ -563,8 +585,12 @@ mod tests {
 
         let prod_result =
             OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, false);
-        let pa_result =
-            OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::PlugAbandonment, false);
+        let pa_result = OptimalFinder::find_optimal(
+            &packet_refs,
+            &metric_refs,
+            Campaign::PlugAbandonment,
+            false,
+        );
 
         assert!(prod_result.is_some());
         assert!(pa_result.is_some());
@@ -594,7 +620,8 @@ mod tests {
         let packet_refs: Vec<_> = packets.iter().collect();
         let metric_refs: Vec<_> = metrics.iter().collect();
 
-        let result = OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, false);
+        let result =
+            OptimalFinder::find_optimal(&packet_refs, &metric_refs, Campaign::Production, false);
         assert!(result.is_some());
 
         let optimal = result.unwrap();

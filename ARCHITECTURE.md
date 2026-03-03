@@ -12,7 +12,7 @@ Developer and contributor reference for SAIREN-OS internals. For operator docume
 4. [Causal Inference](#causal-inference)
 5. [Regime-Aware Orchestrator Weighting](#regime-aware-orchestrator-weighting)
 6. [Knowledge Base](#knowledge-base)
-7. [Fleet Hub Internals](#fleet-hub-internals)
+7. [P2P Mesh Gossip](#p2p-mesh-gossip)
 8. [Trait Architecture](#trait-architecture)
 9. [Advisory Composition](#advisory-composition)
 10. [Background Services](#background-services)
@@ -25,26 +25,25 @@ Developer and contributor reference for SAIREN-OS internals. For operator docume
 
 ## System Architecture
 
-SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agent** handles real-time anomaly detection via deterministic pattern-matched routing, and a deeper **Strategic Agent** performs comprehensive drilling physics analysis only when anomalies are detected. Structured `TicketContext` (all threshold breaches, pattern name, rig state, operation, campaign) travels with each ticket and is templated into the strategic LLM prompt.
+SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agent** handles real-time anomaly detection via deterministic pattern-matched routing, and a deeper **Strategic Agent** performs comprehensive drilling physics analysis only when anomalies are detected. Structured `TicketContext` (all threshold breaches, pattern name, rig state, operation, campaign) travels with each ticket and is used by the template advisory system.
 
 The **Orchestrator** uses trait-based `Specialist` implementations for domain-specific evaluation, returning a `VotingResult`. The **AdvisoryComposer** then assembles the final `StrategicAdvisory` with CRITICAL cooldown (30s) to prevent alert spam. Knowledge lookup uses the `KnowledgeStore` trait, allowing swappable backends (static DB, RAMRecall, or NoOp for pilot mode).
 
-**Fleet topology**: A central **Fleet Hub** collects AMBER/RED events from all rigs, curates them into a scored episode library, and syncs the library back so every rig benefits from fleet-wide precedents.
+**Fleet topology**: A decentralized **P2P mesh** where every Pi node gossips operational reports (anomaly events, outcomes, formation context) directly to all peers. No central server — each node runs identical software with identical capabilities. CfC models are rig-specific and not shared.
 
 ```
-                           Fleet Hub-and-Spoke Topology
+                           P2P Mesh Topology
     ===============================================================================
 
-    +----------+                                               +----------+
-    |  RIG-001 |---upload events--->  +------------------+  <--| RIG-003  |
-    | (spoke)  |<--sync library----  |   FLEET HUB      |  -->| (spoke)  |
-    +----------+                     |  (PostgreSQL)     |     +----------+
-                                     |                   |
-    +----------+                     |  - Event Store    |     +----------+
-    |  RIG-002 |---upload events-->  |  - Curator        |  <--| RIG-004  |
-    | (spoke)  |<--sync library----  |  - Episode Library|  -->| (spoke)  |
-    +----------+                     |  - Dashboard      |     +----------+
-                                     +------------------+
+    +----------+          +----------+          +----------+
+    |  RIG-001 |◄--gossip--►|  RIG-002 |◄--gossip--►|  RIG-003 |
+    |   (Pi)   |          |   (Pi)   |          |   (Pi)   |
+    +-----┬----+          +----------+          +----┬-----+
+          │                                          │
+          └──────────────gossip──────────────────────┘
+
+    Every node: CfC inference + health scoring + template advisories + gossip
+    No central server, no special roles, no single point of failure
     ===============================================================================
 ```
 
@@ -96,7 +95,7 @@ The **Orchestrator** uses trait-based `Specialist` implementations for domain-sp
     ===============================================================================
 ```
 
-### 11-Phase Processing Pipeline
+### 9-Phase Processing Pipeline
 
 | Phase | Component | Function |
 |-------|-----------|----------|
@@ -109,10 +108,9 @@ The **Orchestrator** uses trait-based `Specialist` implementations for domain-sp
 | 4.5 | Causal Inference | Cross-correlate WOB/RPM/Torque/SPP/ROP against MSE at lags 1-20s; attach `CausalLead` results to ticket |
 | 5 | Advanced Physics | Strategic verification of tickets (CfC tiebreaker on Uncertain) |
 | 6 | Context Lookup | Query KnowledgeStore (StaticKnowledgeBase, RAMRecall, or NoOp) |
-| 7 | LLM Advisory | Generate recommendations (Qwen 2.5 7B) or template fallback (causal leads appended) |
+| 7 | Template Advisory | Campaign-aware template recommendations with causal leads appended |
 | 8 | Orchestrator Voting | 4 trait-based specialists vote with regime-adjusted weights -> VotingResult |
 | 9 | Advisory Composition | AdvisoryComposer assembles StrategicAdvisory (CRITICAL cooldown) |
-| 10 | Dashboard API | REST endpoints and web dashboard |
 
 ### Phase 3 Ticket Gate (6 Rules)
 
@@ -165,14 +163,14 @@ CfC participates in three pipeline stages:
 | Stage | Role | Mechanism |
 |-------|------|-----------|
 | **Severity modulation** (Phase 3) | Adjusts ticket severity like ACI | Score < 0.3 -> downgrade, >= 0.7 -> escalate |
-| **LLM context** (Phase 7) | CfC section in strategic prompt | Anomaly score + top 5 surprised features |
+| **Template context** (Phase 7) | CfC data in advisory text | Anomaly score + top 5 surprised features |
 | **Tiebreaker** (Phase 5) | Resolves Uncertain verifications | Score >= 0.7 -> Confirmed, < 0.2 -> Rejected |
 
 Safety rule: WellControl tickets are never downgraded below High severity.
 
 ### Per-Feature Surprise Decomposition
 
-When the CfC detects anomalies, it reports which specific features deviated most from prediction (e.g., "SPP up 2.36 sigma, torque up 0.48 sigma"), giving operators and the strategic LLM interpretable context for the anomaly signal.
+When the CfC detects anomalies, it reports which specific features deviated most from prediction (e.g., "SPP up 2.36 sigma, torque up 0.48 sigma"), giving operators interpretable context for the anomaly signal.
 
 ### Validation Results
 
@@ -194,7 +192,7 @@ When the CfC detects anomalies, it reports which specific features deviated most
 | `src/cfc/network.rs` | CfcNetwork: process(), anomaly scoring, calibration |
 | `src/cfc/regime_clusterer.rs` | K-means clustering of 8 motor outputs -> regime_id (0-3) |
 | `src/cfc/formation_detector.rs` | Motor-output pattern analysis for formation boundary detection |
-| `src/cfc/checkpoint.rs` | `DualCfcCheckpoint`, `CfcNetworkCheckpoint`, atomic disk save/load for federation |
+| `src/cfc/checkpoint.rs` | `DualCfcCheckpoint`, `CfcNetworkCheckpoint`, atomic disk save/load |
 | `src/cfc/depth_ahead.rs` | Depth-ahead CfC network (64 neurons, seed=1042, BPTT=6), 8-feature extraction, formation-boundary reset |
 
 **Adam optimizer**: Decaying base LR, beta1=0.9, beta2=0.999 — 64% lower loss vs SGD baseline. Fast network: 0.001 → 0.0001; Slow network: 0.0001 → 0.00001.
@@ -345,7 +343,6 @@ Per-well directory-based knowledge base that separates geologist-authored geolog
 | **Mid-Well Writer** | `knowledge_base/mid_well.rs` | Writes hourly ML snapshots during drilling, enforces cap (168 hot, then compress, then delete) |
 | **Post-Well Generator** | `knowledge_base/post_well.rs` | Aggregates snapshots into per-formation performance files on well completion |
 | **Watcher** | `knowledge_base/watcher.rs` | Polls directories for changes, hot-reloads assembled prognosis via `Arc<RwLock>` |
-| **Fleet Bridge** | `knowledge_base/fleet_bridge.rs` | Uploads post-well data to hub, downloads offset data from hub |
 | **Migration** | `knowledge_base/migration.rs` | Converts flat `well_prognosis.toml` into KB directory structure |
 | **Compressor** | `knowledge_base/compressor.rs` | Transparent zstd read/write for `.toml` and `.toml.zst` files |
 
@@ -359,78 +356,77 @@ Per-well directory-based knowledge base that separates geologist-authored geolog
 
 **Legacy fallback:** When `SAIREN_KB` is not set, the system falls back to `FormationPrognosis::load()` from a flat `well_prognosis.toml` file.
 
-### Fleet Performance Sharing
-
-- **Upload** — `POST /api/fleet/performance` receives zstd-compressed post-well performance data
-- **Download** — `GET /api/fleet/performance?field=&since=&exclude_rig=` returns performance records for a field
-- **Fleet bridge** — `upload_post_well()` sends all per-formation files after well completion; `sync_performance()` pulls offset data during fleet sync loop
-
 ---
 
-## Fleet Hub Internals
+## P2P Mesh Gossip
 
-### Rig-Side (Spoke) Components
+Decentralized event sharing between Pi nodes via a broadcast-all gossip protocol. Replaces the previous hub-and-spoke fleet topology. Every node is identical — no central server, no special roles.
+
+### What Gets Shared
+
+- **Anomaly events** — "Rig 1 saw stick-slip at 8,000ft in shale" with full sensor context
+- **Outcomes** — "This alert was resolved by reducing WOB 10%" or "This was a false positive"
+- **Formation context** — Depth ranges, formation types, risk levels from other rigs' experience
+
+CfC weights are **not** shared — each rig's models are trained on its specific equipment's sensor signatures.
+
+### Components
 
 | Component | Module | Function |
 |-----------|--------|----------|
-| **FleetEvent** | `fleet/types.rs` | Full advisory + history window + outcome metadata |
-| **FleetEpisode** | `fleet/types.rs` | Compact precedent for library (from_event constructor) |
-| **UploadQueue** | `fleet/queue.rs` | Disk-backed durable queue, idempotent by event ID |
-| **FleetClient** | `fleet/client.rs` | HTTP client for hub communication (upload, sync, outcome forwarding) |
-| **Uploader** | `fleet/uploader.rs` | Background task draining queue to hub with retry |
-| **LibrarySync** | `fleet/sync.rs` | Periodic library pull from hub with jitter |
+| **GossipEnvelope** | `gossip/protocol.rs` | Wire format: sender_id, version, timestamp, recent_events, known_peers; zstd-compressed JSON |
+| **EventStore** | `gossip/store.rs` | SQLite (WAL mode) with indexed columns + zstd-compressed `data` blob; formation/depth/category queries |
+| **GossipClient** | `gossip/client.rs` | Async broadcast loop: contacts all peers concurrently each round |
+| **GossipServer** | `gossip/server.rs` | Axum handlers: `POST /api/mesh/gossip`, `GET /api/mesh/status`, `GET /api/mesh/fleet` |
+| **MeshState** | `gossip/state.rs` | Sled-backed per-peer sync cursors with exponential backoff |
+| **FleetEvent** | `fleet/types.rs` | Full advisory + history window + outcome metadata (reused from fleet module) |
 | **RAMRecall** | `context/ram_recall.rs` | In-memory episode search with metadata filtering + scoring |
-| **Federation Upload** | `fleet/federation.rs` | Background task: snapshot CfC weights via watch channel, upload checkpoint to hub |
-| **Federation Pull** | `fleet/federation.rs` | Background task: pull federated model from hub, restore into CfcNetwork via watch channel |
 
-### Hub-Side (Central Server) Components
+### SQLite Event Store Schema
 
-| Component | Module | Function |
-|-----------|--------|----------|
-| **Fleet Hub Binary** | `bin/fleet_hub.rs` | Standalone Axum server with PostgreSQL backend |
-| **Event Ingestion** | `hub/api/events.rs` | Validates, decompresses, and stores uploaded events |
-| **Library Curator** | `hub/curator/` | Scores, deduplicates, and prunes episodes on a configurable schedule |
-| **Library Sync API** | `hub/api/library.rs` | Delta sync with zstd compression and version tracking |
-| **Rig Registry** | `hub/api/registry.rs` | API key management with bcrypt hashing and cache |
-| **Auth Middleware** | `hub/auth/` | Bearer token extractors (RigAuth, AdminAuth) with 5-min cache |
-| **Fleet Dashboard** | `hub/api/dashboard.rs` | Real-time fleet overview with Chart.js visualizations |
-| **Pairing** | `hub/api/pairing.rs` | 6-digit pairing code flow with DashMap store |
-| **Federation** | `hub/federation.rs`, `hub/api/federation.rs` | Federated averaging (weighted + Welford merge + Adam reset); checkpoint UPSERT + model serve endpoints |
+```sql
+CREATE TABLE events (
+    id            TEXT PRIMARY KEY,
+    rig_id        TEXT NOT NULL,
+    well_id       TEXT NOT NULL,
+    timestamp     INTEGER NOT NULL,
+    last_modified INTEGER NOT NULL,
+    formation     TEXT,
+    depth_ft      REAL,
+    category      TEXT NOT NULL,
+    severity      TEXT NOT NULL,
+    risk_level    TEXT,
+    outcome       TEXT DEFAULT 'Pending',
+    action_taken  TEXT,
+    data          BLOB NOT NULL              -- zstd-compressed full FleetEvent JSON
+);
+```
 
-### Curator Rules
+Indexed on `formation`, `category`, `timestamp`, `depth_ft`, `last_modified`. The `last_modified` column is the sync cursor — outcome updates on old events propagate to peers.
 
-The background curator runs hourly (configurable) and applies these rules:
+### Gossip Protocol
 
-| Rule | Condition | Action |
-|------|-----------|--------|
-| Age limit | Episode > 12 months | Archive |
-| False positive cleanup | FalsePositive + age > 3 months | Archive |
-| Stale pending | Pending + age > 30 days | Downgrade score to 0.05 |
-| Capacity limit | Total > 50,000 | Prune lowest-scored |
+Every `interval_secs` (default 60), each node:
 
-### Episode Scoring
+1. For each peer concurrently:
+   - Build envelope with events where `last_modified > peer's last_sync_cursor`
+   - POST zstd-compressed `GossipEnvelope` to `{peer.address}/api/mesh/gossip`
+   - Receive response envelope, upsert events into local store
+   - Update per-peer sync cursor
 
-Episodes are scored for library ranking based on four factors:
+With broadcast-all, every event reaches every reachable node in **one round**. Unreachable peers are skipped with exponential backoff (cap at 1 hour).
 
-| Factor | Weight | Description |
-|--------|--------|-------------|
-| Outcome quality | 50% | Resolved (1.0), Escalated (0.7), Pending (0.2), FalsePositive (0.1) |
-| Recency | 25% | Exponential decay (half-life ~180 days) |
-| Detail completeness | 15% | Resolution notes, action taken, metrics present |
-| Category diversity | 10% | Underrepresented categories score higher |
+### Fleet Dashboard
 
-### Design Principles
+`GET /api/mesh/fleet` performs server-side aggregation: queries all peers' `/api/mesh/status` concurrently (5s timeout each) and returns a combined fleet view. The browser only talks to one node.
 
-- Only AMBER/RED events qualify for upload (`should_upload()` filter)
-- Upload queue survives process restarts (scans directory on open)
-- Rigs operate independently when hub is unreachable (local autonomy)
-- Bandwidth-conscious: zstd compression, delta sync, configurable cadence
-- RAMRecall holds up to 10,000 episodes in memory (~50MB)
-- Hub episodes scored by outcome (50%), recency (25%), detail (15%), diversity (10%)
+### Retention
 
-### Database Schema
-
-PostgreSQL schema: `rigs`, `events`, `episodes`, `sync_log`, `fleet_performance` tables. Indexes on rig_id, timestamp, needs_curation, category, score, updated_at. Auto-updated `updated_at` triggers, `library_version_seq` sequence.
+Each node independently enforces:
+- Max 50,000 events (prune oldest first)
+- Age limit: 12 months
+- False positives cleaned after 3 months
+- Stale pending outcomes scored to 0.05 after 30 days
 
 ---
 
@@ -453,18 +449,18 @@ The orchestrator voting and advisory generation are decoupled:
 
 1. **Orchestrator** evaluates all specialists and returns a `VotingResult` (votes, severity, risk level, efficiency score)
 2. **AdvisoryComposer** assembles the final `StrategicAdvisory` with a 30-second CRITICAL cooldown to prevent alert spam
-3. **Template fallback** provides campaign-aware advisories when LLM is unavailable (confidence: 0.70)
+3. **Template system** provides campaign-aware advisories with actual metric values and causal leads (confidence: 0.70)
 
 ### VotingResult Decoupling
 
 The orchestrator returns `VotingResult` (votes, severity, risk level, efficiency score) instead of directly composing advisories. This separation allows:
 - Independent testing of voting logic and advisory formatting
-- Template-based fallback when LLM is unavailable
+- Template-based advisory system for all recommendations
 - CRITICAL cooldown enforcement at the composition layer
 
 ### Template System
 
-Campaign-aware template advisories per `AnomalyCategory` with actual metric values. P&A-specific notes for well control. Causal leads appended when present via `format_causal_block()`.
+Campaign-aware template advisories per `AnomalyCategory` with actual metric values and CfC anomaly context. P&A-specific notes for well control. Causal leads appended when present via `format_causal_block()`.
 
 ---
 
@@ -496,25 +492,17 @@ Automatic detection of current drilling operation based on parameters.
 
 ## Performance Benchmarks
 
-### GPU Mode (with CUDA)
+### Real-Time Processing
 
 | Metric | Target | Actual |
 |--------|--------|--------|
 | Tactical Physics + Routing | < 15ms | ~10ms |
-| Strategic LLM | < 800ms | ~750ms |
+| Template Advisory | < 1ms | ~0.1ms |
+| CfC Dual Network (rayon) | < 15ms | ~9ms |
 | WITS Packet Rate | 1 Hz | 1 Hz |
 | History Buffer | 60 packets | 60 |
 
-### CPU Mode (no CUDA)
-
-| Metric | Target | Actual |
-|--------|--------|--------|
-| Tactical Physics + Routing | < 15ms | ~10ms |
-| Strategic LLM | < 30s | ~10-30s |
-| WITS Packet Rate | 1 Hz | 1 Hz |
-| History Buffer | 60 packets | 60 |
-
-### Replay Throughput (Volve data, no LLM, rayon parallel CfC)
+### Replay Throughput (Volve data, rayon parallel CfC)
 
 | Well | Packets | Wall Time | us/packet | CPU Util | Tickets | Confirmed |
 |------|---------|-----------|-----------|----------|---------|-----------|
@@ -526,10 +514,6 @@ Automatic detection of current drilling operation based on parameters.
 **Aggregate: ~238,000 packets/second (~4 days of real-time WITS data per second of processing).**
 
 The full pipeline (ACI conformal intervals, dual CfC neural network online training, physics engine, tactical/strategic two-stage verification, specialist voting) processes 2.7M packets in 11.5 seconds with no batch preprocessing or cloud round-trips. All computation runs locally in a single Rust binary with no GPU dependency. The dual CfC networks run in parallel via `rayon::join()`, with CPU utilization of 168-177% on drilling-heavy wells confirming effective parallelization.
-
-> **Note**: Tactical routing (pattern matching, ticket creation) is purely deterministic and
-> runs at physics speed (~10ms) on all hardware. Only the strategic LLM advisory generation
-> is affected by GPU/CPU selection.
 
 ---
 
@@ -556,7 +540,6 @@ src/
 
   bin/
     simulation.rs      # WITS Level 0 data simulator for testing
-    fleet_hub.rs       # Fleet Hub server binary (fleet-hub feature)
     volve_replay.rs    # Volve field data replay with ACI + CfC shadow logging
     witsml_to_csv.rs   # WITSML XML to CSV converter (Rust binary)
 
@@ -587,10 +570,9 @@ src/
   strategic/
     mod.rs             # Strategic analysis module
     advisory.rs        # AdvisoryComposer + VotingResult + CRITICAL cooldown
-    templates.rs       # Campaign-aware template fallback per AnomalyCategory; appends causal leads
+    templates.rs       # Campaign-aware template advisories per AnomalyCategory; appends causal leads
     aggregation.rs     # Report aggregation helpers
     parsing.rs         # Structured output parsing
-    actor.rs           # Strategic actor
 
   pipeline/
     coordinator.rs     # 11-phase pipeline coordinator (uses KnowledgeStore + AdvisoryComposer)
@@ -655,41 +637,19 @@ src/
     mid_well.rs        # ML snapshot writer + cap enforcement (compress old, delete expired)
     post_well.rs       # Post-well summary generator from mid-well snapshots
     watcher.rs         # Polling directory watcher, triggers reassembly on changes
-    fleet_bridge.rs    # Upload post-well data to hub, download offset data from hub
     migration.rs       # Flat well_prognosis.toml -> KB directory migration
 
   fleet/
-    mod.rs             # Fleet hub-and-spoke module
+    mod.rs             # Fleet data types module
     types.rs           # FleetEvent, FleetEpisode, EventOutcome, HistorySnapshot
-    queue.rs           # UploadQueue: disk-backed durable queue for fleet uploads
-    client.rs          # FleetClient: HTTP client for hub communication
-    uploader.rs        # Background upload task draining queue to hub
-    sync.rs            # Periodic library sync from hub with jitter
-    federation.rs      # Spoke-side federation tasks: checkpoint upload + federated model pull via watch channels
 
-  hub/                   # Fleet Hub server (fleet-hub feature)
-    mod.rs             # HubState, module exports
-    config.rs          # HubConfig from env vars and CLI args
-    db.rs              # PostgreSQL pool and migration runner
-    federation.rs      # federated_average(): weighted weight averaging, Welford merge, Adam reset
-    api/
-      mod.rs           # Router builder with all fleet routes
-      events.rs        # Event ingestion (POST), retrieval (GET), outcome update (PATCH)
-      library.rs       # Library sync with delta support and zstd compression
-      performance.rs   # Post-well performance data upload and query endpoints
-      registry.rs      # Rig registration, listing, revocation
-      pairing.rs       # 6-digit pairing code flow (DashMap store, approve/reject)
-      federation.rs    # POST /federation/checkpoint (UPSERT), GET /federation/model; FederationState
-      dashboard.rs     # Fleet dashboard API endpoints and HTML serving
-      health.rs        # Health check endpoint
-    auth/
-      mod.rs           # Auth module exports
-      api_key.rs       # API key generation, bcrypt hashing, RigAuth/AdminAuth extractors
-    curator/
-      mod.rs           # Curation background task runner
-      scoring.rs       # Episode scoring (outcome, recency, detail, diversity)
-      dedup.rs         # Episode deduplication (rig + category + depth + time)
-      pruning.rs       # Archival rules (age, false positive, capacity)
+  gossip/                # P2P mesh gossip protocol
+    mod.rs             # Module exports
+    protocol.rs        # GossipEnvelope, zstd compress/decompress helpers
+    store.rs           # SQLite event store (WAL mode, indexed columns, zstd data blob)
+    client.rs          # Async broadcast loop: contact all peers concurrently each round
+    server.rs          # Axum handlers: POST /api/mesh/gossip, GET /api/mesh/status, GET /api/mesh/fleet
+    state.rs           # Sled-backed per-peer sync cursors with exponential backoff
 
   background/
     mod.rs             # Background services module
@@ -710,12 +670,6 @@ src/
     wits_parser.rs     # WITS Level 0 TCP with reconnection, timeouts,
                        # and data quality validation
     scanner.rs         # WITS subnet scanner for setup wizard (port probing)
-
-  llm/
-    strategic_llm.rs   # Qwen 2.5 7B (GPU) / 4B (CPU) advisory generation
-    tactical_llm.rs    # Legacy 1.5B classification (behind `tactical_llm` feature)
-    mistral_rs.rs      # Backend with runtime CUDA detection
-    scheduler.rs       # LLM scheduling
 
   api/
     mod.rs             # App builder, CORS, SPA fallback (rust-embed serving React dashboard)
@@ -767,28 +721,21 @@ dashboard/               # React SPA (Vite + Tailwind + Recharts)
 static/
   index.html           # Legacy rig dashboard UI
   reports.html         # Strategic reports viewer
-  fleet_dashboard.html # Fleet Hub dashboard UI (Chart.js visualizations)
   setup.html           # Setup wizard UI (embedded in setup binary)
-
-migrations/
-  001_initial_schema.sql  # PostgreSQL schema (rigs, events, episodes, sync_log)
-  002_fleet_performance.sql # Fleet performance table for offset well sharing
 
 deploy/
   sairen-os.service    # systemd service unit for rig (hardened)
   install.sh           # Rig production install script
-  fleet-hub.service    # systemd service unit for Fleet Hub
-  install_hub.sh       # Fleet Hub install script (PostgreSQL + binary + systemd)
   wireguard/
-    hub_wg0.conf.template   # WireGuard config template for hub server
-    rig_wg0.conf.template   # WireGuard config template for rig
+    hub_wg0.conf.template   # WireGuard config template for mesh node
+    rig_wg0.conf.template   # WireGuard config template for mesh node
 
 tests/
   api_regression.rs              # In-process API regression tests (tower::oneshot)
   auto_detect_tests.rs           # Phase 2 auto-detection integration tests
   config_validation_tests.rs     # Config validation integration tests
   csv_replay_integration.rs      # CSV replay integration tests
-  fleet_integration.rs           # Fleet Hub integration tests (11 tests)
+  gossip_integration.rs          # P2P gossip exchange and fleet aggregation tests
   knowledge_base_integration.rs  # KB lifecycle tests (migrate, assemble, offset wells)
   pipeline_regression.rs         # Pipeline regression tests (synthetic data, always passes)
 
@@ -821,8 +768,9 @@ well_config.default.toml  # Reference configuration with all thresholds document
 | **Regime ID** | 0-3 integer stamped on each packet by the CfC k-means clusterer based on motor neuron output patterns |
 | **RegimeProfile** | Multiplicative weight adjustment table per drilling regime; applied to `ensemble_weights` before orchestrator voting |
 | **Granger Causality** | Statistical test for whether one time series improves prediction of another; approximated via Pearson cross-correlation |
-| **FleetEvent** | An AMBER/RED advisory with history window and outcome, uploaded to the hub |
-| **FleetEpisode** | Compact precedent extracted from a FleetEvent, scored and stored in the library |
-| **Curator** | Background process on the hub that scores, deduplicates, and prunes episodes |
-| **RAMRecall** | In-memory episode search on each rig, populated by library syncs from the hub |
+| **FleetEvent** | An AMBER/RED advisory with history window and outcome, shared via gossip |
+| **FleetEpisode** | Compact precedent extracted from a FleetEvent, used for knowledge lookup |
+| **GossipEnvelope** | Wire format for P2P event exchange: sender_id, version, timestamp, recent_events; zstd-compressed JSON |
+| **EventStore** | SQLite database on each node storing gossipped events with indexed columns for structured queries |
+| **RAMRecall** | In-memory episode search on each rig, populated from the local event store |
 | **Founder Point** | The WOB at which ROP peaks; beyond this point, additional weight reduces efficiency |

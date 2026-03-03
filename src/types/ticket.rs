@@ -4,8 +4,8 @@
 use serde::{Deserialize, Serialize};
 
 use super::{
-    AnomalyCategory, Campaign, DrillingMetrics, DrillingPhysicsReport, FinalSeverity,
-    Operation, RigState, TicketSeverity, TicketType, WitsPacket,
+    AnomalyCategory, Campaign, DrillingMetrics, DrillingPhysicsReport, FinalSeverity, Operation,
+    RigState, TicketSeverity, TicketType, WitsPacket,
 };
 
 // ============================================================================
@@ -34,8 +34,14 @@ pub struct TicketContext {
 impl TicketContext {
     /// Format as structured text for the strategic LLM prompt
     pub fn to_prompt_section(&self) -> String {
-        let mut s = format!("TICKET: {} ({})\n", self.pattern, self.triggers.first()
-            .map(|t| t.threshold_type.as_str()).unwrap_or("INFO"));
+        let mut s = format!(
+            "TICKET: {} ({})\n",
+            self.pattern,
+            self.triggers
+                .first()
+                .map(|t| t.threshold_type.as_str())
+                .unwrap_or("INFO")
+        );
         s.push_str("TRIGGERS:\n");
         for t in &self.triggers {
             s.push_str(&format!(
@@ -312,7 +318,6 @@ pub type PhysicsReport = DrillingPhysicsReport;
 pub type StrategicReport = super::StrategicAdvisory;
 /// Alias for backward compatibility during migration
 pub type VerificationTicket = AdvisoryTicket;
-
 
 // ============================================================================
 // Flight Recorder / Ticket Tracker System

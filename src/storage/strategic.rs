@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 //! Strategic Report Storage
 //!
 //! Persistent storage for hourly and daily strategic reports using Sled DB.
@@ -34,7 +35,6 @@ struct StoredReport<T> {
 // Implementation
 // ============================================================================
 
-#[cfg_attr(not(feature = "llm"), allow(dead_code))]
 impl StrategicStorage {
     /// Open or create the strategic storage database
     pub fn open<P: AsRef<Path>>(path: P) -> Result<Self> {
@@ -206,7 +206,8 @@ impl StrategicStorage {
         }
 
         for key in keys_to_delete {
-            tree.remove(key).context("Failed to delete old hourly report")?;
+            tree.remove(key)
+                .context("Failed to delete old hourly report")?;
             deleted_count += 1;
         }
 
@@ -249,7 +250,8 @@ impl StrategicStorage {
         }
 
         for key in keys_to_delete {
-            tree.remove(key).context("Failed to delete old daily report")?;
+            tree.remove(key)
+                .context("Failed to delete old daily report")?;
             deleted_count += 1;
         }
 
@@ -291,8 +293,8 @@ impl StrategicStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::strategic::{HourlyReport, DailyReport};
     use crate::strategic::parsing::DetailsSection;
+    use crate::strategic::{DailyReport, HourlyReport};
 
     fn create_test_hourly() -> HourlyReport {
         HourlyReport {

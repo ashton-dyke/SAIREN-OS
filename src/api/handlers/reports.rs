@@ -90,8 +90,10 @@ pub async fn get_hourly_reports(
     if let Some(storage) = &state.strategic_storage {
         match storage.get_hourly(limit) {
             Ok(reports) => {
-                let responses: Vec<HourlyReportResponse> =
-                    reports.into_iter().map(HourlyReportResponse::from).collect();
+                let responses: Vec<HourlyReportResponse> = reports
+                    .into_iter()
+                    .map(HourlyReportResponse::from)
+                    .collect();
                 Json(responses)
             }
             Err(e) => {
@@ -196,8 +198,9 @@ pub async fn get_critical_reports(
 ) -> Json<Vec<CriticalReportEntry>> {
     let limit = query
         .get("limit")
-        .and_then(|s| s.parse().ok())
-        .unwrap_or(50);
+        .and_then(|s| s.parse::<usize>().ok())
+        .unwrap_or(50)
+        .min(1000);
 
     let reports = crate::storage::history::get_critical_reports(limit);
 
@@ -218,10 +221,12 @@ pub async fn get_critical_reports(
             let digital_signature = format!("MD5-{:x}", md5::compute(signature_content.as_bytes()));
 
             // Format timestamp
-            let dt = chrono::DateTime::from_timestamp(report.timestamp as i64, 0)
-                .unwrap_or_default();
+            let dt =
+                chrono::DateTime::from_timestamp(report.timestamp as i64, 0).unwrap_or_default();
             let timestamp_formatted = dt.format("%Y-%m-%d %H:%M:%S UTC").to_string();
-            let signature_timestamp = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string();
+            let signature_timestamp = chrono::Utc::now()
+                .format("%Y-%m-%d %H:%M:%S UTC")
+                .to_string();
 
             // Generate report ID
             let report_id = format!("RPT-{}", report.timestamp);
@@ -230,8 +235,17 @@ pub async fn get_critical_reports(
             let (trigger_param, trigger_val, threshold_val) = extract_trigger_info(&report);
 
             // Summarize votes
-            let votes_summary: Vec<String> = report.votes.iter()
-                .map(|v| format!("{} ({}%): {}", v.specialist, (v.weight * 100.0).clamp(0.0, 100.0) as u8, v.vote))
+            let votes_summary: Vec<String> = report
+                .votes
+                .iter()
+                .map(|v| {
+                    format!(
+                        "{} ({}%): {}",
+                        v.specialist,
+                        (v.weight * 100.0).clamp(0.0, 100.0) as u8,
+                        v.vote
+                    )
+                })
                 .collect();
 
             CriticalReportEntry {
@@ -283,12 +297,17 @@ pub fn extract_trigger_info(report: &crate::types::StrategicReport) -> (String, 
             }
         }
         if vote.specialist == "MSE" && vote.vote == crate::types::TicketSeverity::Critical {
-            return ("MSE Efficiency".to_string(), report.physics_report.mse_efficiency, 70.0);
+            return (
+                "MSE Efficiency".to_string(),
+                report.physics_report.mse_efficiency,
+                70.0,
+            );
         }
     }
 
     // Default to flow balance from physics
-    let flow_balance = report.physics_report.current_flow_out - report.physics_report.current_flow_in;
+    let flow_balance =
+        report.physics_report.current_flow_out - report.physics_report.current_flow_in;
     if flow_balance.abs() > 10.0 {
         return ("Flow Balance".to_string(), flow_balance, 10.0);
     }
@@ -319,7 +338,10 @@ fn extract_flow_balance(reasoning: &str) -> Option<f64> {
 
 /// POST /api/v1/reports/test - Create a test critical report for UI testing
 pub async fn create_test_critical_report() -> Json<serde_json::Value> {
-    use crate::types::{DrillingPhysicsReport, FinalSeverity, RiskLevel, StrategicReport, SpecialistVote, TicketSeverity};
+    use crate::types::{
+        DrillingPhysicsReport, FinalSeverity, RiskLevel, SpecialistVote, StrategicReport,
+        TicketSeverity,
+    };
 
     let timestamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -483,7 +505,9 @@ pub async fn get_shift_summary(
     let app_state = state.app_state.read().await;
 
     // Count acknowledgments in the time range
-    let acks_in_period = app_state.acknowledgments.iter()
+    let acks_in_period = app_state
+        .acknowledgments
+        .iter()
         .filter(|a| a.acknowledged_at >= from_ts && a.acknowledged_at <= to_ts)
         .count();
 

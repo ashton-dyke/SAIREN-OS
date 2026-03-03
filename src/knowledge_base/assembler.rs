@@ -2,9 +2,9 @@
 
 use crate::knowledge_base::compressor;
 use crate::types::{
-    BestParams, FieldGeology, FormationInterval, FormationParameters,
-    FormationPrognosis, KnowledgeBaseConfig, OffsetPerformance, ParameterRange,
-    PostWellFormationPerformance, PreSpudPrognosis, PrognosisWellInfo,
+    BestParams, FieldGeology, FormationInterval, FormationParameters, FormationPrognosis,
+    KnowledgeBaseConfig, OffsetPerformance, ParameterRange, PostWellFormationPerformance,
+    PreSpudPrognosis, PrognosisWellInfo,
 };
 use tracing::{debug, info, warn};
 
@@ -38,13 +38,17 @@ pub fn assemble_prognosis(config: &KnowledgeBaseConfig) -> Option<FormationProgn
 
     for geo in &geology.formations {
         // Find matching pre-spud formation
-        let pre_spud_fm = pre_spud.as_ref().and_then(|ps| {
-            ps.formations.iter().find(|f| f.name == geo.name)
-        });
+        let pre_spud_fm = pre_spud
+            .as_ref()
+            .and_then(|ps| ps.formations.iter().find(|f| f.name == geo.name));
 
         // Apply depth overrides from pre-spud
-        let depth_top = pre_spud_fm.and_then(|f| f.depth_top_ft).unwrap_or(geo.depth_top_ft);
-        let depth_base = pre_spud_fm.and_then(|f| f.depth_base_ft).unwrap_or(geo.depth_base_ft);
+        let depth_top = pre_spud_fm
+            .and_then(|f| f.depth_top_ft)
+            .unwrap_or(geo.depth_top_ft);
+        let depth_base = pre_spud_fm
+            .and_then(|f| f.depth_base_ft)
+            .unwrap_or(geo.depth_base_ft);
 
         // Parameters: from pre-spud or derived from hardness
         let parameters = match pre_spud_fm {
@@ -75,7 +79,10 @@ pub fn assemble_prognosis(config: &KnowledgeBaseConfig) -> Option<FormationProgn
                 avg_rop_ft_hr: 0.0,
                 best_rop_ft_hr: 0.0,
                 avg_mse_psi: 0.0,
-                best_params: BestParams { wob_klbs: parameters.wob_klbs.optimal, rpm: parameters.rpm.optimal },
+                best_params: BestParams {
+                    wob_klbs: parameters.wob_klbs.optimal,
+                    rpm: parameters.rpm.optimal,
+                },
                 notes: String::new(),
             }
         };
@@ -97,19 +104,22 @@ pub fn assemble_prognosis(config: &KnowledgeBaseConfig) -> Option<FormationProgn
 
     // 5. Sort by depth
     formations.sort_by(|a, b| {
-        a.depth_top_ft.partial_cmp(&b.depth_top_ft).unwrap_or(std::cmp::Ordering::Equal)
+        a.depth_top_ft
+            .partial_cmp(&b.depth_top_ft)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     // Well info from pre-spud or defaults from geology
-    let well_info = pre_spud.as_ref().map(|ps| ps.well.clone()).unwrap_or_else(|| {
-        PrognosisWellInfo {
+    let well_info = pre_spud
+        .as_ref()
+        .map(|ps| ps.well.clone())
+        .unwrap_or_else(|| PrognosisWellInfo {
             name: config.well.clone(),
             field: config.field.clone(),
             spud_date: String::new(),
             target_depth_ft: formations.last().map(|f| f.depth_base_ft).unwrap_or(0.0),
             coordinate_system: String::new(),
-        }
-    });
+        });
 
     let casings = pre_spud.map(|ps| ps.casings).unwrap_or_default();
 
@@ -131,27 +141,63 @@ fn derive_default_parameters(hardness: f64) -> FormationParameters {
     if hardness < 3.5 {
         // Soft
         FormationParameters {
-            wob_klbs: ParameterRange { min: 5.0, optimal: 10.0, max: 15.0 },
-            rpm: ParameterRange { min: 80.0, optimal: 120.0, max: 160.0 },
-            flow_gpm: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+            wob_klbs: ParameterRange {
+                min: 5.0,
+                optimal: 10.0,
+                max: 15.0,
+            },
+            rpm: ParameterRange {
+                min: 80.0,
+                optimal: 120.0,
+                max: 160.0,
+            },
+            flow_gpm: ParameterRange {
+                min: 400.0,
+                optimal: 500.0,
+                max: 600.0,
+            },
             mud_weight_ppg: 9.0,
             bit_type: "PDC".to_string(),
         }
     } else if hardness < 6.0 {
         // Medium
         FormationParameters {
-            wob_klbs: ParameterRange { min: 15.0, optimal: 25.0, max: 35.0 },
-            rpm: ParameterRange { min: 80.0, optimal: 110.0, max: 140.0 },
-            flow_gpm: ParameterRange { min: 450.0, optimal: 520.0, max: 600.0 },
+            wob_klbs: ParameterRange {
+                min: 15.0,
+                optimal: 25.0,
+                max: 35.0,
+            },
+            rpm: ParameterRange {
+                min: 80.0,
+                optimal: 110.0,
+                max: 140.0,
+            },
+            flow_gpm: ParameterRange {
+                min: 450.0,
+                optimal: 520.0,
+                max: 600.0,
+            },
             mud_weight_ppg: 10.0,
             bit_type: "PDC".to_string(),
         }
     } else {
         // Hard
         FormationParameters {
-            wob_klbs: ParameterRange { min: 20.0, optimal: 30.0, max: 40.0 },
-            rpm: ParameterRange { min: 60.0, optimal: 90.0, max: 120.0 },
-            flow_gpm: ParameterRange { min: 500.0, optimal: 550.0, max: 650.0 },
+            wob_klbs: ParameterRange {
+                min: 20.0,
+                optimal: 30.0,
+                max: 40.0,
+            },
+            rpm: ParameterRange {
+                min: 60.0,
+                optimal: 90.0,
+                max: 120.0,
+            },
+            flow_gpm: ParameterRange {
+                min: 500.0,
+                optimal: 550.0,
+                max: 650.0,
+            },
             mud_weight_ppg: 11.0,
             bit_type: "PDC".to_string(),
         }
@@ -167,7 +213,9 @@ fn collect_offset_data(
     let mut results = Vec::new();
 
     // Sanitize formation name for filename matching
-    let safe_name = formation_name.replace(' ', "_").replace(['/', '\\', '(', ')'], "");
+    let safe_name = formation_name
+        .replace(' ', "_")
+        .replace(['/', '\\', '(', ')'], "");
 
     for well in siblings {
         let perf_files = match config.list_post_well_performance(well) {
@@ -203,7 +251,10 @@ fn aggregate_offset_performance(data: &[PostWellFormationPerformance]) -> Offset
             avg_rop_ft_hr: 0.0,
             best_rop_ft_hr: 0.0,
             avg_mse_psi: 0.0,
-            best_params: BestParams { wob_klbs: 0.0, rpm: 0.0 },
+            best_params: BestParams {
+                wob_klbs: 0.0,
+                rpm: 0.0,
+            },
             notes: String::new(),
         };
     }
@@ -212,27 +263,38 @@ fn aggregate_offset_performance(data: &[PostWellFormationPerformance]) -> Offset
     let total_snapshots_f = total_snapshots.max(1) as f64;
 
     // Weighted average by total_snapshots
-    let avg_rop = data.iter()
+    let avg_rop = data
+        .iter()
         .map(|d| d.avg_rop_ft_hr * d.total_snapshots as f64)
-        .sum::<f64>() / total_snapshots_f;
+        .sum::<f64>()
+        / total_snapshots_f;
 
-    let best_rop = data.iter()
+    let best_rop = data
+        .iter()
         .map(|d| d.best_rop_ft_hr)
         .fold(0.0_f64, f64::max);
 
-    let avg_mse = data.iter()
+    let avg_mse = data
+        .iter()
         .map(|d| d.avg_mse_psi * d.total_snapshots as f64)
-        .sum::<f64>() / total_snapshots_f;
+        .sum::<f64>()
+        / total_snapshots_f;
 
     // Best params from the well with highest best_rop
-    let best_well = data.iter()
-        .max_by(|a, b| a.best_rop_ft_hr.partial_cmp(&b.best_rop_ft_hr).unwrap_or(std::cmp::Ordering::Equal))
+    let best_well = data
+        .iter()
+        .max_by(|a, b| {
+            a.best_rop_ft_hr
+                .partial_cmp(&b.best_rop_ft_hr)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
         .expect("data is non-empty");
 
     let wells: Vec<String> = data.iter().map(|d| d.well_id.clone()).collect();
 
     // Collect unique notes
-    let mut notes_set: Vec<&str> = data.iter()
+    let mut notes_set: Vec<&str> = data
+        .iter()
         .map(|d| d.notes.as_str())
         .filter(|n| !n.is_empty())
         .collect();
@@ -350,10 +412,25 @@ mod tests {
             avg_rop_ft_hr: 100.0,
             best_rop_ft_hr: 150.0,
             avg_mse_psi: 10000.0,
-            best_params: BestParams { wob_klbs: 12.0, rpm: 130.0 },
-            avg_wob_range: ParameterRange { min: 5.0, optimal: 12.0, max: 15.0 },
-            avg_rpm_range: ParameterRange { min: 80.0, optimal: 130.0, max: 160.0 },
-            avg_flow_range: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+            best_params: BestParams {
+                wob_klbs: 12.0,
+                rpm: 130.0,
+            },
+            avg_wob_range: ParameterRange {
+                min: 5.0,
+                optimal: 12.0,
+                max: 15.0,
+            },
+            avg_rpm_range: ParameterRange {
+                min: 80.0,
+                optimal: 130.0,
+                max: 160.0,
+            },
+            avg_flow_range: ParameterRange {
+                min: 400.0,
+                optimal: 500.0,
+                max: 600.0,
+            },
             total_snapshots: 50,
             avg_confidence: 0.8,
             avg_stability: 0.9,

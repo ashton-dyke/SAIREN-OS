@@ -71,9 +71,11 @@ pub fn get_by_formation(formation_name: &str) -> Vec<DampingRecipe> {
 /// Get the best recipe for a formation (lowest achieved CV).
 pub fn best_recipe(formation_name: &str) -> Option<DampingRecipe> {
     let recipes = get_by_formation(formation_name);
-    recipes
-        .into_iter()
-        .min_by(|a, b| a.achieved_cv.partial_cmp(&b.achieved_cv).unwrap_or(std::cmp::Ordering::Equal))
+    recipes.into_iter().min_by(|a, b| {
+        a.achieved_cv
+            .partial_cmp(&b.achieved_cv)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    })
 }
 
 /// List all formations that have stored recipes.
@@ -84,12 +86,14 @@ pub fn list_formations() -> Vec<String> {
     };
     tree.iter()
         .filter_map(|item| {
-            item.ok().and_then(|(k, _)| String::from_utf8(k.to_vec()).ok())
+            item.ok()
+                .and_then(|(k, _)| String::from_utf8(k.to_vec()).ok())
         })
         .collect()
 }
 
 /// Load all recipes across all formations.
+#[allow(dead_code)]
 pub fn load_all() -> Vec<DampingRecipe> {
     let tree = match get_tree() {
         Ok(t) => t,
@@ -97,9 +101,8 @@ pub fn load_all() -> Vec<DampingRecipe> {
     };
     tree.iter()
         .filter_map(|item| {
-            item.ok().and_then(|(_, v)| {
-                serde_json::from_slice::<Vec<DampingRecipe>>(&v).ok()
-            })
+            item.ok()
+                .and_then(|(_, v)| serde_json::from_slice::<Vec<DampingRecipe>>(&v).ok())
         })
         .flatten()
         .collect()

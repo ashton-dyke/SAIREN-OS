@@ -21,15 +21,15 @@
 //! - `analyzer`: Main orchestrator for ML analysis
 //! - `scheduler`: Configurable interval scheduler (ML_INTERVAL_SECS)
 
-pub mod quality_filter;
+pub mod analyzer;
+pub mod correlations;
 pub mod dysfunction_filter;
 pub mod formation_segmenter;
-pub mod correlations;
 pub mod optimal_finder;
-pub mod analyzer;
+pub mod param_change_tracker;
+pub mod quality_filter;
 pub mod scheduler;
 pub mod storage;
-pub mod param_change_tracker;
 
 // Re-export public types
 pub use formation_segmenter::FormationSegmenter;

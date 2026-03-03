@@ -222,7 +222,9 @@ impl MLInsightsStorage {
         reports.sort_by(|a, b| {
             let a_dist = ((a.depth_range.0 + a.depth_range.1) / 2.0 - depth).abs();
             let b_dist = ((b.depth_range.0 + b.depth_range.1) / 2.0 - depth).abs();
-            a_dist.partial_cmp(&b_dist).unwrap_or(std::cmp::Ordering::Equal)
+            a_dist
+                .partial_cmp(&b_dist)
+                .unwrap_or(std::cmp::Ordering::Equal)
         });
 
         reports.truncate(limit);
@@ -259,9 +261,7 @@ impl MLInsightsStorage {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::types::{
-        AnalysisInsights, ConfidenceLevel, OptimalParams, SignificantCorrelation,
-    };
+    use crate::types::{AnalysisInsights, ConfidenceLevel, OptimalParams, SignificantCorrelation};
 
     fn make_report(
         well_id: &str,
@@ -340,7 +340,13 @@ mod tests {
 
         // Store production and P&A reports
         let prod = make_report("WELL-001", "FIELD-A", Campaign::Production, 1000, 5000.0);
-        let pa = make_report("WELL-001", "FIELD-A", Campaign::PlugAbandonment, 2000, 5000.0);
+        let pa = make_report(
+            "WELL-001",
+            "FIELD-A",
+            Campaign::PlugAbandonment,
+            2000,
+            5000.0,
+        );
 
         storage.store_report(&prod).unwrap();
         storage.store_report(&pa).unwrap();
@@ -376,7 +382,9 @@ mod tests {
             storage.store_report(&report).unwrap();
         }
 
-        let history = storage.get_well_history("FIELD-A", "WELL-001", None, 10).unwrap();
+        let history = storage
+            .get_well_history("FIELD-A", "WELL-001", None, 10)
+            .unwrap();
         assert_eq!(history.len(), 5);
 
         // Should be in reverse chronological order
@@ -419,7 +427,9 @@ mod tests {
         storage.store_report(&report3).unwrap();
 
         // Search near 5000ft
-        let near_5000 = storage.find_by_depth("FIELD-A", "WELL-001", 5000.0, 100.0, 10).unwrap();
+        let near_5000 = storage
+            .find_by_depth("FIELD-A", "WELL-001", 5000.0, 100.0, 10)
+            .unwrap();
         assert_eq!(near_5000.len(), 1);
         assert!((near_5000[0].depth_range.0 - 4950.0).abs() < 1.0);
     }
@@ -431,12 +441,24 @@ mod tests {
         assert_eq!(storage.count(), 0);
 
         storage
-            .store_report(&make_report("WELL-001", "FIELD-A", Campaign::Production, 1000, 5000.0))
+            .store_report(&make_report(
+                "WELL-001",
+                "FIELD-A",
+                Campaign::Production,
+                1000,
+                5000.0,
+            ))
             .unwrap();
         assert_eq!(storage.count(), 1);
 
         storage
-            .store_report(&make_report("WELL-002", "FIELD-A", Campaign::Production, 2000, 5500.0))
+            .store_report(&make_report(
+                "WELL-002",
+                "FIELD-A",
+                Campaign::Production,
+                2000,
+                5500.0,
+            ))
             .unwrap();
         assert_eq!(storage.count(), 2);
     }

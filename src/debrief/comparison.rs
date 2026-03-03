@@ -86,9 +86,9 @@ pub fn compare_formations(
 mod tests {
     use super::*;
     use crate::types::{
-        BestParams, FormationInterval, FormationParameters, FormationPrognosis,
-        OffsetPerformance, ParameterRange, PostWellFormationPerformance, PostWellSummary,
-        PrognosisWellInfo, TimelineEvent,
+        BestParams, FormationInterval, FormationParameters, FormationPrognosis, OffsetPerformance,
+        ParameterRange, PostWellFormationPerformance, PostWellSummary, PrognosisWellInfo,
+        TimelineEvent,
     };
 
     fn make_post_well(formations: Vec<PostWellFormationPerformance>) -> PostWellSummary {
@@ -112,10 +112,25 @@ mod tests {
             avg_rop_ft_hr: avg_rop,
             best_rop_ft_hr: avg_rop * 1.2,
             avg_mse_psi: 15000.0,
-            best_params: BestParams { wob_klbs: 25.0, rpm: 120.0 },
-            avg_wob_range: ParameterRange { min: 15.0, optimal: 25.0, max: 35.0 },
-            avg_rpm_range: ParameterRange { min: 80.0, optimal: 120.0, max: 160.0 },
-            avg_flow_range: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+            best_params: BestParams {
+                wob_klbs: 25.0,
+                rpm: 120.0,
+            },
+            avg_wob_range: ParameterRange {
+                min: 15.0,
+                optimal: 25.0,
+                max: 35.0,
+            },
+            avg_rpm_range: ParameterRange {
+                min: 80.0,
+                optimal: 120.0,
+                max: 160.0,
+            },
+            avg_flow_range: ParameterRange {
+                min: 400.0,
+                optimal: 500.0,
+                max: 600.0,
+            },
             total_snapshots: 100,
             avg_confidence: 0.8,
             avg_stability: 0.9,
@@ -125,7 +140,12 @@ mod tests {
         }
     }
 
-    fn make_prognosis_formation(name: &str, avg_rop: f64, top: f64, base: f64) -> FormationInterval {
+    fn make_prognosis_formation(
+        name: &str,
+        avg_rop: f64,
+        top: f64,
+        base: f64,
+    ) -> FormationInterval {
         FormationInterval {
             name: name.to_string(),
             depth_top_ft: top,
@@ -137,9 +157,21 @@ mod tests {
             fracture_gradient_ppg: 14.0,
             hazards: Vec::new(),
             parameters: FormationParameters {
-                wob_klbs: ParameterRange { min: 10.0, optimal: 20.0, max: 30.0 },
-                rpm: ParameterRange { min: 80.0, optimal: 120.0, max: 160.0 },
-                flow_gpm: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+                wob_klbs: ParameterRange {
+                    min: 10.0,
+                    optimal: 20.0,
+                    max: 30.0,
+                },
+                rpm: ParameterRange {
+                    min: 80.0,
+                    optimal: 120.0,
+                    max: 160.0,
+                },
+                flow_gpm: ParameterRange {
+                    min: 400.0,
+                    optimal: 500.0,
+                    max: 600.0,
+                },
                 mud_weight_ppg: 9.5,
                 bit_type: "PDC".to_string(),
             },
@@ -148,7 +180,10 @@ mod tests {
                 avg_rop_ft_hr: avg_rop,
                 best_rop_ft_hr: avg_rop * 1.5,
                 avg_mse_psi: 12000.0,
-                best_params: BestParams { wob_klbs: 22.0, rpm: 130.0 },
+                best_params: BestParams {
+                    wob_klbs: 22.0,
+                    rpm: 130.0,
+                },
                 notes: String::new(),
             },
         }
@@ -172,9 +207,8 @@ mod tests {
     fn test_formation_comparison_exceeded() {
         // Planned ROP 60, actual 80 → +33% → exceeded_plan
         let post_well = make_post_well(vec![make_perf("Shallow", 80.0, 0.0, 3000.0)]);
-        let prognosis = make_prognosis(vec![
-            make_prognosis_formation("Shallow", 60.0, 0.0, 3000.0),
-        ]);
+        let prognosis =
+            make_prognosis(vec![make_prognosis_formation("Shallow", 60.0, 0.0, 3000.0)]);
 
         let comparisons = compare_formations(Some(&prognosis), &post_well, &[]);
 
@@ -188,9 +222,9 @@ mod tests {
     fn test_formation_comparison_below() {
         // Planned ROP 100, actual 60 → -40% → below_plan
         let post_well = make_post_well(vec![make_perf("Deep", 60.0, 3000.0, 6000.0)]);
-        let prognosis = make_prognosis(vec![
-            make_prognosis_formation("Deep", 100.0, 3000.0, 6000.0),
-        ]);
+        let prognosis = make_prognosis(vec![make_prognosis_formation(
+            "Deep", 100.0, 3000.0, 6000.0,
+        )]);
 
         let comparisons = compare_formations(Some(&prognosis), &post_well, &[]);
 

@@ -32,10 +32,7 @@ const DEBOUNCE_DELAY: Duration = Duration::from_millis(500);
 ///
 /// Polls `path` for mtime changes and reloads the global config when detected.
 /// Sends events on `tx`. Returns when the channel is closed or the task is cancelled.
-pub async fn run_config_watcher(
-    path: PathBuf,
-    tx: mpsc::Sender<ConfigEvent>,
-) {
+pub async fn run_config_watcher(path: PathBuf, tx: mpsc::Sender<ConfigEvent>) {
     tracing::info!(path = %path.display(), "Config watcher started");
 
     let mut last_mtime = get_mtime(&path);
@@ -100,7 +97,5 @@ pub async fn run_config_watcher(
 
 /// Read the modification time of a file, returning None on any error.
 fn get_mtime(path: &PathBuf) -> Option<SystemTime> {
-    std::fs::metadata(path)
-        .ok()
-        .and_then(|m| m.modified().ok())
+    std::fs::metadata(path).ok().and_then(|m| m.modified().ok())
 }

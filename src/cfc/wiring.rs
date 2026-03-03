@@ -45,10 +45,10 @@ const NUM_PRIMARY: usize = 8;
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct NcpConfig {
     pub num_neurons: usize,
-    pub sensory_end: usize,    // sensory = 0..sensory_end
-    pub inter_end: usize,      // inter = sensory_end..inter_end
-    pub command_end: usize,    // command = inter_end..command_end
-    // motor = command_end..num_neurons
+    pub sensory_end: usize, // sensory = 0..sensory_end
+    pub inter_end: usize,   // inter = sensory_end..inter_end
+    pub command_end: usize, // command = inter_end..command_end
+                            // motor = command_end..num_neurons
 }
 
 impl NcpConfig {
@@ -69,16 +69,51 @@ impl NcpConfig {
         Self {
             num_neurons: 64,
             sensory_end: 24,
-            inter_end: 44,   // 24 + 20 inter
-            command_end: 56,  // 44 + 12 command
-            // motor = 56..64 = 8 motor
+            inter_end: 44, // 24 + 20 inter
+            command_end: 56, // 44 + 12 command
+                           // motor = 56..64 = 8 motor
         }
     }
 
     /// Number of motor neurons.
     #[inline]
     pub fn num_motor(&self) -> usize {
-        self.num_neurons - self.command_end
+        self.num_neurons.saturating_sub(self.command_end)
+    }
+
+    /// Validate that neuron group boundaries are consistent.
+    ///
+    /// Invariants: `0 < sensory_end <= inter_end <= command_end <= num_neurons`
+    /// and each group must have at least 1 neuron.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.num_neurons == 0 {
+            return Err("num_neurons must be > 0".into());
+        }
+        if self.sensory_end == 0 {
+            return Err("sensory group must have at least 1 neuron".into());
+        }
+        if self.sensory_end > self.inter_end {
+            return Err(format!(
+                "sensory_end ({}) > inter_end ({})",
+                self.sensory_end, self.inter_end,
+            ));
+        }
+        if self.inter_end > self.command_end {
+            return Err(format!(
+                "inter_end ({}) > command_end ({})",
+                self.inter_end, self.command_end,
+            ));
+        }
+        if self.command_end > self.num_neurons {
+            return Err(format!(
+                "command_end ({}) > num_neurons ({})",
+                self.command_end, self.num_neurons,
+            ));
+        }
+        if self.command_end == self.num_neurons {
+            return Err("motor group must have at least 1 neuron".into());
+        }
+        Ok(())
     }
 }
 
@@ -118,7 +153,13 @@ impl NcpWiring {
     }
 
     /// Generate NCP wiring with a given neuron topology configuration.
+    ///
+    /// # Panics
+    /// Panics if `config` has invalid group boundaries (use [`NcpConfig::validate`] first).
     pub fn generate_with_config(seed: u64, config: &NcpConfig) -> Self {
+        if let Err(e) = config.validate() {
+            panic!("invalid NcpConfig: {}", e);
+        }
         let n = config.num_neurons;
         let mut rng = StdRng::seed_from_u64(seed);
         let mut adj = vec![false; n * n];
@@ -137,9 +178,12 @@ impl NcpWiring {
         let motor_end = config.num_neurons;
 
         // Helper: connect group src_range → dst_range with given density
-        let mut connect = |src_start: usize, src_end: usize,
-                           dst_start: usize, dst_end: usize,
-                           rng: &mut StdRng| -> usize {
+        let mut connect = |src_start: usize,
+                           src_end: usize,
+                           dst_start: usize,
+                           dst_end: usize,
+                           rng: &mut StdRng|
+         -> usize {
             let mut count = 0;
             for dst in dst_start..dst_end {
                 for src in src_start..src_end {
@@ -153,7 +197,9 @@ impl NcpWiring {
                     }
                 }
                 // Ensure every neuron has at least one incoming connection
-                if incoming[dst].is_empty() || incoming[dst].iter().all(|&s| s < src_start || s >= src_end) {
+                if incoming[dst].is_empty()
+                    || incoming[dst].iter().all(|&s| s < src_start || s >= src_end)
+                {
                     let src = src_start + (rng.gen::<usize>() % (src_end - src_start));
                     let idx = src * n + dst;
                     if !adj[idx] {
@@ -253,14 +299,30 @@ mod tests {
     #[test]
     fn test_wiring_connectivity() {
         let w = NcpWiring::generate(42);
-        assert!(w.num_connections > 500, "too few connections: {}", w.num_connections);
-        assert!(w.num_connections < 10000, "too many connections: {}", w.num_connections);
+        assert!(
+            w.num_connections > 500,
+            "too few connections: {}",
+            w.num_connections
+        );
+        assert!(
+            w.num_connections < 10000,
+            "too many connections: {}",
+            w.num_connections
+        );
 
         for i in INTER_START..INTER_END {
-            assert!(!w.incoming[i].is_empty(), "inter neuron {} has no inputs", i);
+            assert!(
+                !w.incoming[i].is_empty(),
+                "inter neuron {} has no inputs",
+                i
+            );
         }
         for i in MOTOR_START..MOTOR_END {
-            assert!(!w.incoming[i].is_empty(), "motor neuron {} has no inputs", i);
+            assert!(
+                !w.incoming[i].is_empty(),
+                "motor neuron {} has no inputs",
+                i
+            );
         }
     }
 
@@ -271,11 +333,21 @@ mod tests {
 
         // Primary features get 2 sensory neurons
         for i in 0..NUM_PRIMARY {
-            assert_eq!(w.input_map[i].len(), 2, "primary feature {} should map to 2 neurons", i);
+            assert_eq!(
+                w.input_map[i].len(),
+                2,
+                "primary feature {} should map to 2 neurons",
+                i
+            );
         }
         // Supplementary features get 1 sensory neuron
         for i in NUM_PRIMARY..NUM_FEATURES {
-            assert_eq!(w.input_map[i].len(), 1, "supplementary feature {} should map to 1 neuron", i);
+            assert_eq!(
+                w.input_map[i].len(),
+                1,
+                "supplementary feature {} should map to 1 neuron",
+                i
+            );
         }
 
         // All mapped neurons should be in the sensory range
@@ -294,9 +366,9 @@ mod tests {
         let cfg = NcpConfig::dual_64();
         assert_eq!(cfg.num_neurons, 64);
         assert_eq!(cfg.sensory_end, 24);
-        assert_eq!(cfg.inter_end, 44);   // 24 + 20 inter
-        assert_eq!(cfg.command_end, 56);  // 44 + 12 command
-        assert_eq!(cfg.num_motor(), 8);   // 64 - 56 = 8 motor
+        assert_eq!(cfg.inter_end, 44); // 24 + 20 inter
+        assert_eq!(cfg.command_end, 56); // 44 + 12 command
+        assert_eq!(cfg.num_motor(), 8); // 64 - 56 = 8 motor
     }
 
     #[test]
@@ -310,16 +382,32 @@ mod tests {
 
         // Every inter neuron should have at least one input
         for i in cfg.sensory_end..cfg.inter_end {
-            assert!(!w.incoming[i].is_empty(), "inter neuron {} has no inputs", i);
+            assert!(
+                !w.incoming[i].is_empty(),
+                "inter neuron {} has no inputs",
+                i
+            );
         }
         // Every motor neuron should have at least one input
         for i in cfg.command_end..cfg.num_neurons {
-            assert!(!w.incoming[i].is_empty(), "motor neuron {} has no inputs", i);
+            assert!(
+                !w.incoming[i].is_empty(),
+                "motor neuron {} has no inputs",
+                i
+            );
         }
 
         // Connection count should be reasonable
-        assert!(w.num_connections > 50, "too few connections: {}", w.num_connections);
-        assert!(w.num_connections < 5000, "too many connections: {}", w.num_connections);
+        assert!(
+            w.num_connections > 50,
+            "too few connections: {}",
+            w.num_connections
+        );
+        assert!(
+            w.num_connections < 5000,
+            "too many connections: {}",
+            w.num_connections
+        );
 
         // Input mapping still works (24 sensory neurons, same as 128)
         assert_eq!(w.total_input_weights, 24);
@@ -345,5 +433,68 @@ mod tests {
                 let _ = w.is_connected(src, dst);
             }
         }
+    }
+
+    #[test]
+    fn test_valid_configs_pass_validation() {
+        assert!(NcpConfig::default_128().validate().is_ok());
+        assert!(NcpConfig::dual_64().validate().is_ok());
+    }
+
+    #[test]
+    fn test_invalid_command_end_exceeds_neurons() {
+        let cfg = NcpConfig {
+            num_neurons: 64,
+            sensory_end: 24,
+            inter_end: 44,
+            command_end: 100, // > num_neurons
+        };
+        assert!(cfg.validate().is_err());
+        assert_eq!(cfg.num_motor(), 0); // saturating_sub prevents underflow
+    }
+
+    #[test]
+    fn test_invalid_reversed_boundaries() {
+        let cfg = NcpConfig {
+            num_neurons: 64,
+            sensory_end: 50,
+            inter_end: 30, // < sensory_end
+            command_end: 56,
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_zero_neurons() {
+        let cfg = NcpConfig {
+            num_neurons: 0,
+            sensory_end: 0,
+            inter_end: 0,
+            command_end: 0,
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    fn test_invalid_no_motor_neurons() {
+        let cfg = NcpConfig {
+            num_neurons: 64,
+            sensory_end: 24,
+            inter_end: 44,
+            command_end: 64, // no room for motor
+        };
+        assert!(cfg.validate().is_err());
+    }
+
+    #[test]
+    #[should_panic(expected = "invalid NcpConfig")]
+    fn test_generate_with_invalid_config_panics() {
+        let cfg = NcpConfig {
+            num_neurons: 64,
+            sensory_end: 24,
+            inter_end: 44,
+            command_end: 100,
+        };
+        NcpWiring::generate_with_config(42, &cfg);
     }
 }

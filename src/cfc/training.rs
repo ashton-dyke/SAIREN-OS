@@ -7,7 +7,7 @@
 //! The loss is feature-weighted MSE between predicted and actual next-step values.
 //! Primary drilling features (WOB, ROP, torque, SPP) are weighted 2x.
 
-use crate::cfc::cell::{CfcWeights, ForwardCache, sigmoid};
+use crate::cfc::cell::{sigmoid, CfcWeights, ForwardCache};
 use crate::cfc::wiring::{NcpWiring, NUM_OUTPUTS};
 
 #[cfg(test)]
@@ -62,8 +62,10 @@ impl TrainingConfig {
 /// Per-output feature weights for loss computation.
 /// Primary features (0-7) get weight 2.0, supplementary (8-15) get weight 1.0.
 const FEATURE_WEIGHTS: [f64; NUM_OUTPUTS] = [
-    2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0, // WOB, ROP, RPM, torque, MSE, SPP, d-exp, hookload
-    1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0, // ECD, flow_bal, pit_rate, DXC, pump, MW, gas, pit_vol
+    2.0, 2.0, 2.0, 2.0, 2.0, 2.0, 2.0,
+    2.0, // WOB, ROP, RPM, torque, MSE, SPP, d-exp, hookload
+    1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0,
+    1.0, // ECD, flow_bal, pit_rate, DXC, pump, MW, gas, pit_vol
 ];
 
 /// Accumulated gradients matching the CfcWeights layout.
@@ -97,9 +99,16 @@ impl GradAccum {
     /// Compute L2 norm of all accumulated gradients.
     fn grad_norm(&self) -> f64 {
         let mut sum = 0.0;
-        for v in self.d_w_tau.iter().chain(self.d_w_f.iter()).chain(self.d_w_g.iter())
-            .chain(self.d_b_tau.iter()).chain(self.d_b_f.iter()).chain(self.d_b_g.iter())
-            .chain(self.d_w_out.iter()).chain(self.d_b_out.iter())
+        for v in self
+            .d_w_tau
+            .iter()
+            .chain(self.d_w_f.iter())
+            .chain(self.d_w_g.iter())
+            .chain(self.d_b_tau.iter())
+            .chain(self.d_b_f.iter())
+            .chain(self.d_b_g.iter())
+            .chain(self.d_w_out.iter())
+            .chain(self.d_b_out.iter())
             .chain(self.d_w_in.iter())
         {
             sum += v * v;
@@ -109,9 +118,16 @@ impl GradAccum {
 
     /// Scale all gradients by a factor.
     fn scale(&mut self, factor: f64) {
-        for v in self.d_w_tau.iter_mut().chain(self.d_w_f.iter_mut()).chain(self.d_w_g.iter_mut())
-            .chain(self.d_b_tau.iter_mut()).chain(self.d_b_f.iter_mut()).chain(self.d_b_g.iter_mut())
-            .chain(self.d_w_out.iter_mut()).chain(self.d_b_out.iter_mut())
+        for v in self
+            .d_w_tau
+            .iter_mut()
+            .chain(self.d_w_f.iter_mut())
+            .chain(self.d_w_g.iter_mut())
+            .chain(self.d_b_tau.iter_mut())
+            .chain(self.d_b_f.iter_mut())
+            .chain(self.d_b_g.iter_mut())
+            .chain(self.d_w_out.iter_mut())
+            .chain(self.d_b_out.iter_mut())
             .chain(self.d_w_in.iter_mut())
         {
             *v *= factor;
@@ -215,9 +231,15 @@ fn flatten_weights(w: &CfcWeights) -> Vec<f64> {
 
 fn flatten_grads(g: &GradAccum) -> Vec<f64> {
     let mut flat = Vec::with_capacity(
-        g.d_w_tau.len() + g.d_w_f.len() + g.d_w_g.len()
-        + g.d_b_tau.len() + g.d_b_f.len() + g.d_b_g.len()
-        + g.d_w_out.len() + g.d_b_out.len() + g.d_w_in.len()
+        g.d_w_tau.len()
+            + g.d_w_f.len()
+            + g.d_w_g.len()
+            + g.d_b_tau.len()
+            + g.d_b_f.len()
+            + g.d_b_g.len()
+            + g.d_w_out.len()
+            + g.d_b_out.len()
+            + g.d_w_in.len(),
     );
     flat.extend_from_slice(&g.d_w_tau);
     flat.extend_from_slice(&g.d_w_f);
@@ -234,21 +256,29 @@ fn flatten_grads(g: &GradAccum) -> Vec<f64> {
 fn unflatten_weights(flat: &[f64], w: &mut CfcWeights) {
     let mut offset = 0;
     let n = w.w_tau.len();
-    w.w_tau.copy_from_slice(&flat[offset..offset + n]); offset += n;
+    w.w_tau.copy_from_slice(&flat[offset..offset + n]);
+    offset += n;
     let n = w.w_f.len();
-    w.w_f.copy_from_slice(&flat[offset..offset + n]); offset += n;
+    w.w_f.copy_from_slice(&flat[offset..offset + n]);
+    offset += n;
     let n = w.w_g.len();
-    w.w_g.copy_from_slice(&flat[offset..offset + n]); offset += n;
+    w.w_g.copy_from_slice(&flat[offset..offset + n]);
+    offset += n;
     let n = w.b_tau.len();
-    w.b_tau.copy_from_slice(&flat[offset..offset + n]); offset += n;
+    w.b_tau.copy_from_slice(&flat[offset..offset + n]);
+    offset += n;
     let n = w.b_f.len();
-    w.b_f.copy_from_slice(&flat[offset..offset + n]); offset += n;
+    w.b_f.copy_from_slice(&flat[offset..offset + n]);
+    offset += n;
     let n = w.b_g.len();
-    w.b_g.copy_from_slice(&flat[offset..offset + n]); offset += n;
+    w.b_g.copy_from_slice(&flat[offset..offset + n]);
+    offset += n;
     let n = w.w_out.len();
-    w.w_out.copy_from_slice(&flat[offset..offset + n]); offset += n;
+    w.w_out.copy_from_slice(&flat[offset..offset + n]);
+    offset += n;
     let n = w.b_out.len();
-    w.b_out.copy_from_slice(&flat[offset..offset + n]); offset += n;
+    w.b_out.copy_from_slice(&flat[offset..offset + n]);
+    offset += n;
     let n = w.w_in.len();
     w.w_in.copy_from_slice(&flat[offset..offset + n]);
 }
@@ -333,7 +363,16 @@ pub fn train_step_with_config(
         let cache = &cache_history[step];
         let decay = bptt_decay.powi(step as i32);
 
-        d_h = backprop_cfc_gates(&mut grads, weights, cache, &d_h, wiring, decay, n, inter_start);
+        d_h = backprop_cfc_gates(
+            &mut grads,
+            weights,
+            cache,
+            &d_h,
+            wiring,
+            decay,
+            n,
+            inter_start,
+        );
         backprop_input_projection(&mut grads, cache, &d_h, wiring, decay);
     }
 
@@ -667,7 +706,8 @@ mod tests {
         let motor_start = wiring.config.command_end;
 
         // Identify recurrent connections where src > dst (these were broken before the fix)
-        let mut recurrent_sources: std::collections::HashSet<usize> = std::collections::HashSet::new();
+        let mut recurrent_sources: std::collections::HashSet<usize> =
+            std::collections::HashSet::new();
         for dst in inter_start..n {
             for &src in &wiring.incoming[dst] {
                 if src > dst && src >= inter_start {
@@ -675,8 +715,10 @@ mod tests {
                 }
             }
         }
-        assert!(!recurrent_sources.is_empty(),
-            "Expected recurrent connections in the wiring (src > dst)");
+        assert!(
+            !recurrent_sources.is_empty(),
+            "Expected recurrent connections in the wiring (src > dst)"
+        );
 
         // Run a forward pass with non-trivial inputs to get a cache
         let input = [0.5; NUM_FEATURES];
@@ -690,7 +732,16 @@ mod tests {
         }
 
         let mut grads = GradAccum::new(&weights, n);
-        let d_h_prev = backprop_cfc_gates(&mut grads, &weights, &cache, &d_h_in, &wiring, 1.0, n, inter_start);
+        let d_h_prev = backprop_cfc_gates(
+            &mut grads,
+            &weights,
+            &cache,
+            &d_h_in,
+            &wiring,
+            1.0,
+            n,
+            inter_start,
+        );
 
         // Check that recurrent source neurons received temporal gradient via d_h_prev.
         // Without the two-pass fix, these would be zero because the gradient from
@@ -703,17 +754,23 @@ mod tests {
         }
 
         // At least some recurrent sources should get nonzero d_h_prev
-        assert!(nonzero_count > 0,
+        assert!(
+            nonzero_count > 0,
             "No recurrent source neurons received gradient in d_h_prev. \
              Found {} recurrent sources (src > dst), all had zero gradient.",
-            recurrent_sources.len());
+            recurrent_sources.len()
+        );
 
         // Majority should have nonzero gradient (allowing for some that may
         // coincidentally be near zero due to gate values)
         let ratio = nonzero_count as f64 / recurrent_sources.len() as f64;
-        assert!(ratio > 0.5,
+        assert!(
+            ratio > 0.5,
             "Only {}/{} ({:.0}%) recurrent source neurons got nonzero d_h_prev gradient",
-            nonzero_count, recurrent_sources.len(), ratio * 100.0);
+            nonzero_count,
+            recurrent_sources.len(),
+            ratio * 100.0
+        );
     }
 
     #[test]
@@ -753,7 +810,12 @@ mod tests {
 
         let (_, _, cache) = CfcCell::forward(&input, &h, 1.0, &weights, &wiring);
         let loss = train_step_with_config(
-            &mut weights, &[cache], &target, &wiring, &mut optimizer, Some(&training_cfg)
+            &mut weights,
+            &[cache],
+            &target,
+            &wiring,
+            &mut optimizer,
+            Some(&training_cfg),
         );
         assert!(loss.is_finite());
         assert!(loss >= 0.0);

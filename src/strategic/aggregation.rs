@@ -67,7 +67,8 @@ impl HourlyAggregate {
 
         let mean_rpm = analyses.iter().map(|a| a.rpm).sum::<f64>() / count as f64;
         let mean_motor_temp = analyses.iter().map(|a| a.motor_temp_avg).sum::<f64>() / count as f64;
-        let mean_gearbox_temp = analyses.iter().map(|a| a.gearbox_temp_avg).sum::<f64>() / count as f64;
+        let mean_gearbox_temp =
+            analyses.iter().map(|a| a.gearbox_temp_avg).sum::<f64>() / count as f64;
         let mean_rms = analyses.iter().map(|a| a.rms).sum::<f64>() / count as f64;
         let mean_bpfo = analyses.iter().map(|a| a.bpfo_amp).sum::<f64>() / count as f64;
         let mean_bpfi = analyses.iter().map(|a| a.bpfi_amp).sum::<f64>() / count as f64;
@@ -172,7 +173,10 @@ impl DailyAggregate {
         }
 
         let count = aggregates.len();
-        let start_time = aggregates.first().expect("checked non-empty above").start_time;
+        let start_time = aggregates
+            .first()
+            .expect("checked non-empty above")
+            .start_time;
         let end_time = aggregates.last().expect("checked non-empty above").end_time;
 
         let mean_health_score =
@@ -192,7 +196,8 @@ impl DailyAggregate {
         let health_scores: Vec<f64> = aggregates.iter().map(|h| h.mean_health_score).collect();
         let health_score_trend = Self::simple_slope(&health_scores);
 
-        let mean_motor_temp = aggregates.iter().map(|h| h.mean_motor_temp).sum::<f64>() / count as f64;
+        let mean_motor_temp =
+            aggregates.iter().map(|h| h.mean_motor_temp).sum::<f64>() / count as f64;
         let mean_gearbox_temp =
             aggregates.iter().map(|h| h.mean_gearbox_temp).sum::<f64>() / count as f64;
         let mean_bpfo = aggregates.iter().map(|h| h.mean_bpfo).sum::<f64>() / count as f64;

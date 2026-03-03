@@ -17,9 +17,8 @@ pub fn build_timeline(
         .map(|adv| {
             let depth = adv.physics_report.current_depth;
 
-            let formation_name = prognosis.and_then(|prog| {
-                prog.formation_at_depth(depth).map(|f| f.name.clone())
-            });
+            let formation_name =
+                prognosis.and_then(|prog| prog.formation_at_depth(depth).map(|f| f.name.clone()));
 
             let feedback = feedback_records
                 .iter()
@@ -50,9 +49,9 @@ pub fn build_timeline(
 mod tests {
     use super::*;
     use crate::types::{
-        AnomalyCategory, DrillingPhysicsReport, FinalSeverity, FormationInterval,
-        FormationParameters, FormationPrognosis, OffsetPerformance, BestParams,
-        ParameterRange, PrognosisWellInfo, StrategicAdvisory,
+        AnomalyCategory, BestParams, DrillingPhysicsReport, FinalSeverity, FormationInterval,
+        FormationParameters, FormationPrognosis, OffsetPerformance, ParameterRange,
+        PrognosisWellInfo, StrategicAdvisory,
     };
 
     fn make_advisory(ts: u64, depth: f64, category: AnomalyCategory) -> StrategicAdvisory {
@@ -90,9 +89,21 @@ mod tests {
                     fracture_gradient_ppg: 14.0,
                     hazards: Vec::new(),
                     parameters: FormationParameters {
-                        wob_klbs: ParameterRange { min: 10.0, optimal: 20.0, max: 30.0 },
-                        rpm: ParameterRange { min: 80.0, optimal: 120.0, max: 160.0 },
-                        flow_gpm: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+                        wob_klbs: ParameterRange {
+                            min: 10.0,
+                            optimal: 20.0,
+                            max: 30.0,
+                        },
+                        rpm: ParameterRange {
+                            min: 80.0,
+                            optimal: 120.0,
+                            max: 160.0,
+                        },
+                        flow_gpm: ParameterRange {
+                            min: 400.0,
+                            optimal: 500.0,
+                            max: 600.0,
+                        },
                         mud_weight_ppg: 9.5,
                         bit_type: "PDC".to_string(),
                     },
@@ -101,7 +112,10 @@ mod tests {
                         avg_rop_ft_hr: 80.0,
                         best_rop_ft_hr: 120.0,
                         avg_mse_psi: 12000.0,
-                        best_params: BestParams { wob_klbs: 22.0, rpm: 130.0 },
+                        best_params: BestParams {
+                            wob_klbs: 22.0,
+                            rpm: 130.0,
+                        },
                         notes: String::new(),
                     },
                 },
@@ -116,9 +130,21 @@ mod tests {
                     fracture_gradient_ppg: 15.0,
                     hazards: Vec::new(),
                     parameters: FormationParameters {
-                        wob_klbs: ParameterRange { min: 15.0, optimal: 25.0, max: 35.0 },
-                        rpm: ParameterRange { min: 60.0, optimal: 100.0, max: 140.0 },
-                        flow_gpm: ParameterRange { min: 450.0, optimal: 550.0, max: 650.0 },
+                        wob_klbs: ParameterRange {
+                            min: 15.0,
+                            optimal: 25.0,
+                            max: 35.0,
+                        },
+                        rpm: ParameterRange {
+                            min: 60.0,
+                            optimal: 100.0,
+                            max: 140.0,
+                        },
+                        flow_gpm: ParameterRange {
+                            min: 450.0,
+                            optimal: 550.0,
+                            max: 650.0,
+                        },
                         mud_weight_ppg: 10.5,
                         bit_type: "PDC".to_string(),
                     },
@@ -127,7 +153,10 @@ mod tests {
                         avg_rop_ft_hr: 40.0,
                         best_rop_ft_hr: 60.0,
                         avg_mse_psi: 18000.0,
-                        best_params: BestParams { wob_klbs: 28.0, rpm: 110.0 },
+                        best_params: BestParams {
+                            wob_klbs: 28.0,
+                            rpm: 110.0,
+                        },
                         notes: String::new(),
                     },
                 },

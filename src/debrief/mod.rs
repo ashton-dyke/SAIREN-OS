@@ -8,8 +8,8 @@ pub mod timeline;
 use crate::storage::feedback::{FeedbackOutcome, FeedbackRecord};
 use crate::storage::suggestions;
 use crate::types::{
-    CategoryFeedbackRate, FeedbackSummary, FormationPrognosis, PostWellSummary,
-    StrategicAdvisory, WellDebrief,
+    CategoryFeedbackRate, FeedbackSummary, FormationPrognosis, PostWellSummary, StrategicAdvisory,
+    WellDebrief,
 };
 
 /// Generate a complete well debrief from post-well data, advisories, and feedback.
@@ -29,8 +29,7 @@ pub fn generate_debrief(
     let timeline = timeline::build_timeline(advisories, feedback_records, prognosis);
 
     // 2. Compare formations
-    let formation_comparisons =
-        comparison::compare_formations(prognosis, post_well, &timeline);
+    let formation_comparisons = comparison::compare_formations(prognosis, post_well, &timeline);
 
     // 3. Build feedback summary
     let feedback_summary = build_feedback_summary(advisories.len(), feedback_records);
@@ -115,10 +114,9 @@ fn build_feedback_summary(
 mod tests {
     use super::*;
     use crate::types::{
-        AnomalyCategory, BestParams, DrillingPhysicsReport, FinalSeverity,
-        FormationInterval, FormationParameters, FormationPrognosis, OffsetPerformance,
-        ParameterRange, PostWellFormationPerformance, PostWellSummary, PrognosisWellInfo,
-        StrategicAdvisory,
+        AnomalyCategory, BestParams, DrillingPhysicsReport, FinalSeverity, FormationInterval,
+        FormationParameters, FormationPrognosis, OffsetPerformance, ParameterRange,
+        PostWellFormationPerformance, PostWellSummary, PrognosisWellInfo, StrategicAdvisory,
     };
 
     fn make_advisory(ts: u64, depth: f64, category: AnomalyCategory) -> StrategicAdvisory {
@@ -151,10 +149,25 @@ mod tests {
                 avg_rop_ft_hr: 90.0,
                 best_rop_ft_hr: 120.0,
                 avg_mse_psi: 14000.0,
-                best_params: BestParams { wob_klbs: 24.0, rpm: 125.0 },
-                avg_wob_range: ParameterRange { min: 15.0, optimal: 24.0, max: 30.0 },
-                avg_rpm_range: ParameterRange { min: 90.0, optimal: 125.0, max: 150.0 },
-                avg_flow_range: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+                best_params: BestParams {
+                    wob_klbs: 24.0,
+                    rpm: 125.0,
+                },
+                avg_wob_range: ParameterRange {
+                    min: 15.0,
+                    optimal: 24.0,
+                    max: 30.0,
+                },
+                avg_rpm_range: ParameterRange {
+                    min: 90.0,
+                    optimal: 125.0,
+                    max: 150.0,
+                },
+                avg_flow_range: ParameterRange {
+                    min: 400.0,
+                    optimal: 500.0,
+                    max: 600.0,
+                },
                 total_snapshots: 100,
                 avg_confidence: 0.8,
                 avg_stability: 0.9,
@@ -185,9 +198,21 @@ mod tests {
                 fracture_gradient_ppg: 14.0,
                 hazards: Vec::new(),
                 parameters: FormationParameters {
-                    wob_klbs: ParameterRange { min: 10.0, optimal: 20.0, max: 30.0 },
-                    rpm: ParameterRange { min: 80.0, optimal: 120.0, max: 160.0 },
-                    flow_gpm: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+                    wob_klbs: ParameterRange {
+                        min: 10.0,
+                        optimal: 20.0,
+                        max: 30.0,
+                    },
+                    rpm: ParameterRange {
+                        min: 80.0,
+                        optimal: 120.0,
+                        max: 160.0,
+                    },
+                    flow_gpm: ParameterRange {
+                        min: 400.0,
+                        optimal: 500.0,
+                        max: 600.0,
+                    },
                     mud_weight_ppg: 9.5,
                     bit_type: "PDC".to_string(),
                 },
@@ -196,7 +221,10 @@ mod tests {
                     avg_rop_ft_hr: 70.0,
                     best_rop_ft_hr: 100.0,
                     avg_mse_psi: 12000.0,
-                    best_params: BestParams { wob_klbs: 22.0, rpm: 130.0 },
+                    best_params: BestParams {
+                        wob_klbs: 22.0,
+                        rpm: 130.0,
+                    },
                     notes: String::new(),
                 },
             }],
@@ -268,9 +296,11 @@ mod tests {
     #[test]
     fn test_debrief_serde_roundtrip() {
         let post_well = make_post_well();
-        let advisories = vec![
-            make_advisory(1000, 1500.0, AnomalyCategory::DrillingEfficiency),
-        ];
+        let advisories = vec![make_advisory(
+            1000,
+            1500.0,
+            AnomalyCategory::DrillingEfficiency,
+        )];
         let prognosis = make_prognosis();
 
         let debrief = generate_debrief(&post_well, &advisories, &[], Some(&prognosis), 1000);

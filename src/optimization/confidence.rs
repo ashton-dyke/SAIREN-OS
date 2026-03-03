@@ -1,8 +1,6 @@
 //! 5-factor confidence scoring for optimization recommendations
 
-use crate::types::{
-    ConfidenceBreakdown, DrillingPhysicsReport, FormationInterval, HistoryEntry,
-};
+use crate::types::{ConfidenceBreakdown, DrillingPhysicsReport, FormationInterval, HistoryEntry};
 
 /// Score confidence across 5 weighted factors.
 ///
@@ -95,7 +93,6 @@ fn score_cfc_agreement(cfc_anomaly_score: Option<f64>) -> f64 {
 mod tests {
     use super::*;
     use crate::types::*;
-    use std::sync::Arc;
 
     fn make_formation(num_wells: usize) -> FormationInterval {
         FormationInterval {
@@ -109,9 +106,21 @@ mod tests {
             fracture_gradient_ppg: 14.0,
             hazards: vec![],
             parameters: FormationParameters {
-                wob_klbs: ParameterRange { min: 15.0, optimal: 25.0, max: 35.0 },
-                rpm: ParameterRange { min: 80.0, optimal: 120.0, max: 160.0 },
-                flow_gpm: ParameterRange { min: 400.0, optimal: 500.0, max: 600.0 },
+                wob_klbs: ParameterRange {
+                    min: 15.0,
+                    optimal: 25.0,
+                    max: 35.0,
+                },
+                rpm: ParameterRange {
+                    min: 80.0,
+                    optimal: 120.0,
+                    max: 160.0,
+                },
+                flow_gpm: ParameterRange {
+                    min: 400.0,
+                    optimal: 500.0,
+                    max: 600.0,
+                },
                 mud_weight_ppg: 12.0,
                 bit_type: "PDC".to_string(),
             },
@@ -120,7 +129,10 @@ mod tests {
                 avg_rop_ft_hr: 80.0,
                 best_rop_ft_hr: 100.0,
                 avg_mse_psi: 20000.0,
-                best_params: BestParams { wob_klbs: 28.0, rpm: 130.0 },
+                best_params: BestParams {
+                    wob_klbs: 28.0,
+                    rpm: 130.0,
+                },
                 notes: String::new(),
             },
         }
@@ -176,7 +188,8 @@ mod tests {
                     spp_delta: 0.0,
                     rig_state: RigState::Drilling,
                     regime_id: 0,
-                    seconds_since_param_change: 0,                },
+                    seconds_since_param_change: 0,
+                },
                 metrics: DrillingMetrics {
                     state: RigState::Drilling,
                     operation: Operation::ProductionDrilling,
@@ -238,14 +251,20 @@ mod tests {
     fn trend_consistency_with_low_efficiency() {
         let history = make_history(10, 50.0); // all below 70%
         let score = score_trend_consistency(&history);
-        assert!(score > 0.9, "All low-efficiency entries should score high: {score}");
+        assert!(
+            score > 0.9,
+            "All low-efficiency entries should score high: {score}"
+        );
     }
 
     #[test]
     fn trend_consistency_with_high_efficiency() {
         let history = make_history(10, 90.0); // all above 70%
         let score = score_trend_consistency(&history);
-        assert!(score < 0.1, "All high-efficiency entries should score low: {score}");
+        assert!(
+            score < 0.1,
+            "All high-efficiency entries should score low: {score}"
+        );
     }
 
     #[test]

@@ -9,11 +9,13 @@
 //!   cargo run --bin volve-replay -- --file data/volve/some_other_well.csv
 
 use sairen_os::aci::{self, ConformalInterval};
+use sairen_os::acquisition::wits_parser::{sanitize_packet, DepthContinuityTracker};
 use sairen_os::agents::{StrategicAgent, TacticalAgent};
 use sairen_os::baseline::ThresholdManager;
 use sairen_os::config::{self, WellConfig};
+use sairen_os::strategic::templates::template_advisory;
 use sairen_os::types::{
-    AnomalyCategory, DrillingMetrics, HistoryEntry, RigState, VerificationStatus,
+    AnomalyCategory, Campaign, DrillingMetrics, HistoryEntry, RigState, VerificationStatus,
 };
 use sairen_os::volve::{VolveConfig, VolveReplay};
 use std::collections::VecDeque;
@@ -26,6 +28,8 @@ use std::sync::{Arc, RwLock};
 #[derive(Default)]
 struct ReplayStats {
     total_packets: u64,
+    sanitized_rejected: u64,
+    depth_rejected: u64,
     drilling_packets: u64,
     tickets_generated: u64,
     tickets_confirmed: u64,
@@ -81,11 +85,19 @@ impl ReplayStats {
     }
 
     fn avg_mse(&self) -> f64 {
-        if self.mse_count > 0 { self.mse_sum / self.mse_count as f64 } else { 0.0 }
+        if self.mse_count > 0 {
+            self.mse_sum / self.mse_count as f64
+        } else {
+            0.0
+        }
     }
 
     fn avg_rop(&self) -> f64 {
-        if self.rop_count > 0 { self.rop_sum / self.rop_count as f64 } else { 0.0 }
+        if self.rop_count > 0 {
+            self.rop_sum / self.rop_count as f64
+        } else {
+            0.0
+        }
     }
 }
 
@@ -94,8 +106,14 @@ fn fmt_interval(name: &str, ci: &ConformalInterval, unit: &str) -> String {
     let flag = if ci.is_outlier { " ◀ OUTLIER" } else { "" };
     format!(
         "    {:<8} {:>8.1} {} [{:.1} — {:.1}] cov={:.0}% dev={:.2}{}",
-        name, ci.value, unit, ci.lower, ci.upper,
-        ci.coverage * 100.0, ci.deviation_score, flag
+        name,
+        ci.value,
+        unit,
+        ci.lower,
+        ci.upper,
+        ci.coverage * 100.0,
+        ci.deviation_score,
+        flag
     )
 }
 
@@ -106,11 +124,23 @@ fn fmt_interval(name: &str, ci: &ConformalInterval, unit: &str) -> String {
 fn main() {
     // Parse args
     let args: Vec<String> = std::env::args().collect();
-    let csv_path = if args.len() > 2 && args[1] == "--file" {
-        args[2].clone()
-    } else {
-        "data/volve/Norway-NA-15_47_9-F-9 A time.csv".to_string()
-    };
+    let mut csv_path = "data/volve/Norway-NA-15_47_9-F-9 A time.csv".to_string();
+    let mut json_summary = false;
+
+    let mut i = 1;
+    while i < args.len() {
+        match args[i].as_str() {
+            "--file" => {
+                i += 1;
+                if i < args.len() {
+                    csv_path = args[i].clone();
+                }
+            }
+            "--json-summary" => json_summary = true,
+            _ => {}
+        }
+        i += 1;
+    }
 
     // Initialize config (required before agents)
     if !config::is_initialized() {
@@ -125,14 +155,18 @@ fn main() {
         .build_global()
         .expect("Failed to initialize rayon thread pool");
 
-    println!("╔══════════════════════════════════════════════════════════════╗");
-    println!("║  SAIREN-OS  ·  Volve Field Data Replay                     ║");
-    println!("║  CPU-only  ·  No LLM  ·  Physics + ACI + Rule-Based Agents ║");
-    println!("╚══════════════════════════════════════════════════════════════╝");
-    println!();
+    if !json_summary {
+        println!("╔══════════════════════════════════════════════════════════════╗");
+        println!("║  SAIREN-OS  ·  Volve Field Data Replay                     ║");
+        println!("║  CPU-only  ·  No LLM  ·  Physics + ACI + Rule-Based Agents ║");
+        println!("╚══════════════════════════════════════════════════════════════╝");
+        println!();
+    }
 
     // Load Volve data
-    println!("[1/5] Loading Volve CSV...");
+    if !json_summary {
+        println!("[1/5] Loading Volve CSV...");
+    }
     let volve_config = VolveConfig {
         skip_null_rows: true,
         nan_to_zero: true,
@@ -148,11 +182,15 @@ fn main() {
         }
     };
 
-    replay.print_summary();
-    println!();
+    if !json_summary {
+        replay.print_summary();
+        println!();
+    }
 
     // Set up threshold manager for baseline learning
-    println!("[2/5] Initializing agents...");
+    if !json_summary {
+        println!("[2/5] Initializing agents...");
+    }
     let threshold_manager = Arc::new(RwLock::new(ThresholdManager::new()));
 
     let mut tactical = TacticalAgent::new_with_thresholds(
@@ -161,21 +199,21 @@ fn main() {
         true, // start in baseline learning mode
     );
 
-    let mut strategic = StrategicAgent::with_thresholds(
-        "VOLVE-F9A",
-        threshold_manager.clone(),
-    );
+    let mut strategic = StrategicAgent::with_thresholds("VOLVE-F9A", threshold_manager);
 
-    println!("  Tactical Agent:  baseline learning + ACI conformal intervals");
-    println!("  Strategic Agent: rule-based verification (no LLM)");
-    println!("  ACI:             90% coverage, window=200, γ=0.005 (integrated into tactical)");
-    println!("  CfC Network:     Dual 64-neuron (fast+slow), NCP wiring, rayon parallel");
-    println!();
-
-    // Process all packets
-    println!("[3/5] Replaying {} packets through pipeline...", replay.info.packet_count);
-    println!("─────────────────────────────────────────────────────────────────");
-    println!();
+    if !json_summary {
+        println!("  Tactical Agent:  baseline learning + ACI conformal intervals");
+        println!("  Strategic Agent: rule-based verification (no LLM)");
+        println!("  ACI:             90% coverage, window=200, γ=0.005 (integrated into tactical)");
+        println!("  CfC Network:     Dual 64-neuron (fast+slow), NCP wiring, rayon parallel");
+        println!();
+        println!(
+            "[3/5] Replaying {} packets through pipeline...",
+            replay.info.packet_count
+        );
+        println!("─────────────────────────────────────────────────────────────────");
+        println!();
+    }
 
     let mut history: VecDeque<HistoryEntry> = VecDeque::with_capacity(60);
     let mut stats = ReplayStats::default();
@@ -193,12 +231,52 @@ fn main() {
     let packets = replay.packets();
     let total = packets.len();
 
+    let mut first_rejection_announced = false;
+    let mut depth_tracker = DepthContinuityTracker::new();
+
     for (i, packet) in packets.iter().enumerate() {
-        // Phase 2-3: Tactical agent processes packet
-        let (ticket_opt, metrics, history_entry) = tactical.process(packet, false, None);
+        // Phase 1.1a: Input sanitization (two-pass: hard gate then soft clamp)
+        let mut pkt = packet.clone();
+        let quality = sanitize_packet(&mut pkt);
+        if !quality.usable {
+            stats.sanitized_rejected += 1;
+            if !json_summary && !first_rejection_announced && stats.sanitized_rejected == 1 {
+                first_rejection_announced = true;
+                let reasons: Vec<&str> = quality
+                    .issues
+                    .iter()
+                    .filter(|i| {
+                        i.severity == sairen_os::acquisition::wits_parser::QualitySeverity::Critical
+                    })
+                    .map(|i| i.message.as_str())
+                    .collect();
+                println!(
+                    "  ✗ FIRST REJECTION at packet {} (depth {:.0} ft): {}",
+                    i,
+                    packet.bit_depth,
+                    reasons.join("; ")
+                );
+            }
+            continue;
+        }
+
+        // Phase 1.1b: Depth continuity (stateful cross-packet check)
+        if let Some(reason) = depth_tracker.check(&pkt) {
+            stats.depth_rejected += 1;
+            if !json_summary && stats.depth_rejected == 1 {
+                println!(
+                    "  ✗ FIRST DEPTH REJECT at packet {} (depth {:.0} ft): {}",
+                    i, pkt.bit_depth, reason
+                );
+            }
+            continue;
+        }
+
+        // Phase 2-3: Tactical agent processes sanitized packet
+        let (ticket_opt, metrics, history_entry) = tactical.process(&pkt, false, None);
 
         // Track stats
-        stats.record_metrics(&metrics, packet);
+        stats.record_metrics(&metrics, &pkt);
 
         // Phase 4: Update rolling history
         if history.len() >= 60 {
@@ -221,39 +299,45 @@ fn main() {
         if !baseline_announced && tactical.is_baseline_locked() {
             baseline_announced = true;
             stats.baseline_locked_at_packet = Some(i as u64);
-            println!(
-                "  ✓ BASELINE LOCKED at packet {} (depth {:.0} ft) — switching to dynamic thresholds",
-                i, packet.bit_depth
-            );
+            if !json_summary {
+                println!(
+                    "  ✓ BASELINE LOCKED at packet {} (depth {:.0} ft) — switching to dynamic thresholds",
+                    i, pkt.bit_depth
+                );
+            }
         }
 
         // Announce ACI calibration
         if !aci_calibrated_announced && tactical.aci_tracker().is_calibrated(aci::metrics::MSE) {
             aci_calibrated_announced = true;
-            println!(
-                "  ✓ ACI CALIBRATED at packet {} (depth {:.0} ft) — conformal intervals active",
-                i, packet.bit_depth
-            );
-            println!();
+            if !json_summary {
+                println!(
+                    "  ✓ ACI CALIBRATED at packet {} (depth {:.0} ft) — conformal intervals active",
+                    i, pkt.bit_depth
+                );
+                println!();
+            }
         }
 
-        // Announce CfC calibration (fast network calibrates first at 500 packets)
+        // Announce CfC calibration (fast network calibrates first at 300 packets)
         if !cfc_calibrated_announced && tactical.cfc_network().fast.is_calibrated() {
             cfc_calibrated_announced = true;
-            println!(
-                "  ✓ CfC CALIBRATED at packet {} (depth {:.0} ft) — fast: {} params/{} conn, slow: {} params/{} conn",
-                i, packet.bit_depth,
-                tactical.cfc_network().fast.num_params(),
-                tactical.cfc_network().fast.num_connections(),
-                tactical.cfc_network().slow.num_params(),
-                tactical.cfc_network().slow.num_connections(),
-            );
-            println!();
+            if !json_summary {
+                println!(
+                    "  ✓ CfC CALIBRATED at packet {} (depth {:.0} ft) — fast: {} params/{} conn, slow: {} params/{} conn",
+                    i, pkt.bit_depth,
+                    tactical.cfc_network().fast.num_params(),
+                    tactical.cfc_network().fast.num_connections(),
+                    tactical.cfc_network().slow.num_params(),
+                    tactical.cfc_network().slow.num_connections(),
+                );
+                println!();
+            }
         }
 
         // Progress: print every 500 ft of new depth
-        if packet.bit_depth > last_depth_print + 500.0 && packet.bit_depth > 0.0 {
-            last_depth_print = packet.bit_depth;
+        if !json_summary && pkt.bit_depth > last_depth_print + 500.0 && pkt.bit_depth > 0.0 {
+            last_depth_print = pkt.bit_depth;
             let pct = (i as f64 / total as f64) * 100.0;
 
             // Show drilling metrics with ACI intervals when available
@@ -261,10 +345,12 @@ fn main() {
                 // CfC shadow info
                 let cfc_info = if let Some(ref cfc_r) = tactical.cfc_result() {
                     if cfc_r.is_calibrated {
-                        format!(" | CfC fast={:.2} slow={:.2} combined={:.2}",
-                            cfc_r.fast.anomaly_score, cfc_r.slow.anomaly_score, cfc_r.anomaly_score)
+                        format!(
+                            " | CfC fast={:.2} slow={:.2} combined={:.2}",
+                            cfc_r.fast.anomaly_score, cfc_r.slow.anomaly_score, cfc_r.anomaly_score
+                        )
                     } else {
-                        format!(" | CfC calibrating ({}/500)", cfc_r.packets_processed)
+                        format!(" | CfC calibrating ({}/300)", cfc_r.packets_processed)
                     }
                 } else {
                     String::new()
@@ -272,7 +358,12 @@ fn main() {
 
                 println!(
                     "  [{:5.1}%] Depth: {:6.0} ft | State: {:?} | ACI outliers: {} | Tickets: {}{}",
-                    pct, packet.bit_depth, metrics.state, aci_r.outlier_count, stats.tickets_generated, cfc_info
+                    pct,
+                    pkt.bit_depth,
+                    metrics.state,
+                    aci_r.outlier_count,
+                    stats.tickets_generated,
+                    cfc_info
                 );
                 println!("{}", fmt_interval("MSE", &aci_r.mse, "psi"));
                 println!("{}", fmt_interval("ROP", &aci_r.rop, "ft/hr"));
@@ -282,35 +373,39 @@ fn main() {
             } else {
                 println!(
                     "  [{:5.1}%] Depth: {:6.0} ft | MSE: {:8.0} psi | ROP: {:5.1} ft/hr | State: {:?} | Tickets: {}",
-                    pct, packet.bit_depth, metrics.mse, packet.rop, metrics.state, stats.tickets_generated
+                    pct, pkt.bit_depth, metrics.mse, pkt.rop, metrics.state, stats.tickets_generated
                 );
             }
         }
 
         // Report ACI multi-outlier events — debounced into zones
-        if let Some(ref aci_r) = aci_result {
-            let is_alert = aci_r.outlier_count >= 3 && tactical.aci_tracker().is_calibrated(aci::metrics::MSE);
-            if is_alert {
-                // In an alert zone
-                if aci_alert_zone_start.is_none() {
-                    aci_alert_zone_start = Some(packet.bit_depth);
-                    aci_alert_zone_packets = 0;
-                    aci_alert_zone_peak_outliers = 0;
-                }
-                aci_alert_zone_packets += 1;
-                if aci_r.outlier_count > aci_alert_zone_peak_outliers {
-                    aci_alert_zone_peak_outliers = aci_r.outlier_count;
-                }
-            } else if let Some(start_depth) = aci_alert_zone_start.take() {
-                // Zone just ended — only print significant zones (3+ packets or 5+ ft span)
-                aci_alert_zones_total += 1;
-                let span = (packet.bit_depth - start_depth).abs();
-                if aci_alert_zone_packets >= 3 || span >= 5.0 || aci_alert_zone_peak_outliers >= 5 {
-                    println!(
-                        "  ⚡ ACI ZONE #{} | {:.0}–{:.0} ft | {} packets | peak {} metrics outside interval",
-                        aci_alert_zones_total, start_depth, packet.bit_depth,
-                        aci_alert_zone_packets, aci_alert_zone_peak_outliers
-                    );
+        if !json_summary {
+            if let Some(ref aci_r) = aci_result {
+                let is_alert = aci_r.outlier_count >= 3
+                    && tactical.aci_tracker().is_calibrated(aci::metrics::MSE);
+                if is_alert {
+                    if aci_alert_zone_start.is_none() {
+                        aci_alert_zone_start = Some(pkt.bit_depth);
+                        aci_alert_zone_packets = 0;
+                        aci_alert_zone_peak_outliers = 0;
+                    }
+                    aci_alert_zone_packets += 1;
+                    if aci_r.outlier_count > aci_alert_zone_peak_outliers {
+                        aci_alert_zone_peak_outliers = aci_r.outlier_count;
+                    }
+                } else if let Some(start_depth) = aci_alert_zone_start.take() {
+                    aci_alert_zones_total += 1;
+                    let span = (pkt.bit_depth - start_depth).abs();
+                    if aci_alert_zone_packets >= 3
+                        || span >= 5.0
+                        || aci_alert_zone_peak_outliers >= 5
+                    {
+                        println!(
+                            "  ⚡ ACI ZONE #{} | {:.0}–{:.0} ft | {} packets | peak {} metrics outside interval",
+                            aci_alert_zones_total, start_depth, pkt.bit_depth,
+                            aci_alert_zone_packets, aci_alert_zone_peak_outliers
+                        );
+                    }
                 }
             }
         }
@@ -329,74 +424,86 @@ fn main() {
             }
 
             if stats.depth_at_first_ticket.is_none() {
-                stats.depth_at_first_ticket = Some(packet.bit_depth);
+                stats.depth_at_first_ticket = Some(pkt.bit_depth);
             }
-            stats.depth_at_last_ticket = Some(packet.bit_depth);
+            stats.depth_at_last_ticket = Some(pkt.bit_depth);
 
             // Strategic verification
             let history_slice: Vec<HistoryEntry> = history.iter().cloned().collect();
             let result = strategic.verify_ticket(ticket, &history_slice);
 
-            let status_str = match result.status {
-                VerificationStatus::Confirmed => {
-                    stats.tickets_confirmed += 1;
-                    "CONFIRMED"
-                }
-                VerificationStatus::Rejected => {
-                    stats.tickets_rejected += 1;
-                    "REJECTED "
-                }
+            match result.status {
+                VerificationStatus::Confirmed => stats.tickets_confirmed += 1,
+                VerificationStatus::Rejected => stats.tickets_rejected += 1,
                 VerificationStatus::Uncertain | VerificationStatus::Pending => {
                     stats.tickets_uncertain += 1;
-                    "UNCERTAIN"
                 }
-            };
-
-            println!(
-                "  ▶ TICKET #{:<3} @ {:6.0} ft | {:?} {:?} | {} | {}",
-                stats.tickets_generated,
-                packet.bit_depth,
-                ticket.severity,
-                ticket.category,
-                status_str,
-                ticket.description
-            );
-
-            // Print strategic reasoning for confirmed tickets
-            if result.status == VerificationStatus::Confirmed {
-                println!(
-                    "    └─ Severity: {:?} | {}",
-                    result.final_severity, result.reasoning
-                );
             }
 
-            // Print ACI context alongside ticket
-            if let Some(ref aci_r) = aci_result {
-                let outliers = aci_r.outliers();
-                if !outliers.is_empty() {
-                    println!("    └─ ACI context: {} metrics outside interval:", outliers.len());
-                    for (name, ci) in &outliers {
-                        println!("       {} = {:.1} (interval [{:.1}, {:.1}], dev={:.2})",
-                            name, ci.value, ci.lower, ci.upper, ci.deviation_score);
+            if !json_summary {
+                let status_str = match result.status {
+                    VerificationStatus::Confirmed => "CONFIRMED",
+                    VerificationStatus::Rejected => "REJECTED ",
+                    _ => "UNCERTAIN",
+                };
+
+                println!(
+                    "  ▶ TICKET #{:<3} @ {:6.0} ft | {:?} {:?} | {} | {}",
+                    stats.tickets_generated,
+                    pkt.bit_depth,
+                    ticket.severity,
+                    ticket.category,
+                    status_str,
+                    ticket.description
+                );
+
+                if result.status == VerificationStatus::Confirmed {
+                    println!(
+                        "    └─ Severity: {:?} | {}",
+                        result.final_severity, result.reasoning
+                    );
+                    let advisory =
+                        template_advisory(ticket, &result.physics_report, Campaign::Production);
+                    println!("    └─ Advisory: {}", advisory.recommendation);
+                    if !advisory.expected_benefit.is_empty() {
+                        println!("    └─ Benefit:  {}", advisory.expected_benefit);
                     }
                 }
-            }
 
-            // Print CfC shadow context alongside ticket
-            if let Some(ref cfc_r) = tactical.cfc_result() {
-                if cfc_r.is_calibrated {
-                    println!("    └─ CfC shadow: fast={:.3} slow={:.3} combined={:.3}",
-                        cfc_r.fast.anomaly_score, cfc_r.slow.anomaly_score,
-                        cfc_r.anomaly_score);
-                    if !cfc_r.feature_surprises.is_empty() {
-                        let top: Vec<String> = cfc_r.feature_surprises.iter()
-                            .take(5)
-                            .map(|s| {
-                                let direction = if s.error > 0.0 { "↑" } else { "↓" };
-                                format!("{} {}{:.2}σ", s.name, direction, s.magnitude)
-                            })
-                            .collect();
-                        println!("       CfC surprised by: {}", top.join(", "));
+                if let Some(ref aci_r) = aci_result {
+                    let outliers = aci_r.outliers();
+                    if !outliers.is_empty() {
+                        println!(
+                            "    └─ ACI context: {} metrics outside interval:",
+                            outliers.len()
+                        );
+                        for (name, ci) in &outliers {
+                            println!(
+                                "       {} = {:.1} (interval [{:.1}, {:.1}], dev={:.2})",
+                                name, ci.value, ci.lower, ci.upper, ci.deviation_score
+                            );
+                        }
+                    }
+                }
+
+                if let Some(ref cfc_r) = tactical.cfc_result() {
+                    if cfc_r.is_calibrated {
+                        println!(
+                            "    └─ CfC shadow: fast={:.3} slow={:.3} combined={:.3}",
+                            cfc_r.fast.anomaly_score, cfc_r.slow.anomaly_score, cfc_r.anomaly_score
+                        );
+                        if !cfc_r.feature_surprises.is_empty() {
+                            let top: Vec<String> = cfc_r
+                                .feature_surprises
+                                .iter()
+                                .take(5)
+                                .map(|s| {
+                                    let direction = if s.error > 0.0 { "↑" } else { "↓" };
+                                    format!("{} {}{:.2}σ", s.name, direction, s.magnitude)
+                                })
+                                .collect();
+                            println!("       CfC surprised by: {}", top.join(", "));
+                        }
                     }
                 }
             }
@@ -404,17 +511,68 @@ fn main() {
     }
 
     // Flush any open ACI alert zone
-    if let Some(start_depth) = aci_alert_zone_start {
-        aci_alert_zones_total += 1;
-        println!(
-            "  ⚡ ACI ZONE #{} | {:.0}–end ft | {} packets | peak {} metrics outside interval",
-            aci_alert_zones_total, start_depth,
-            aci_alert_zone_packets, aci_alert_zone_peak_outliers
-        );
+    if !json_summary {
+        if let Some(start_depth) = aci_alert_zone_start {
+            aci_alert_zones_total += 1;
+            println!(
+                "  ⚡ ACI ZONE #{} | {:.0}–end ft | {} packets | peak {} metrics outside interval",
+                aci_alert_zones_total,
+                start_depth,
+                aci_alert_zone_packets,
+                aci_alert_zone_peak_outliers
+            );
+        }
     }
 
     // ========================================================================
-    // Final summary
+    // JSON summary (machine-readable output for regression tests)
+    // ========================================================================
+    if json_summary {
+        let confirmed_pct = if stats.tickets_generated > 0 {
+            stats.tickets_confirmed as f64 / stats.tickets_generated as f64 * 100.0
+        } else {
+            0.0
+        };
+        let rejected_pct = if stats.tickets_generated > 0 {
+            stats.tickets_rejected as f64 / stats.tickets_generated as f64 * 100.0
+        } else {
+            0.0
+        };
+        let sanitized_pct = if total > 0 {
+            stats.sanitized_rejected as f64 / total as f64 * 100.0
+        } else {
+            0.0
+        };
+
+        println!("{{");
+        println!("  \"total_packets\": {},", total);
+        println!("  \"sanitized_rejected\": {},", stats.sanitized_rejected);
+        println!("  \"sanitized_rejected_pct\": {:.1},", sanitized_pct);
+        println!("  \"depth_rejected\": {},", stats.depth_rejected);
+        println!("  \"drilling_packets\": {},", stats.drilling_packets);
+        println!("  \"tickets_generated\": {},", stats.tickets_generated);
+        println!("  \"tickets_confirmed\": {},", stats.tickets_confirmed);
+        println!("  \"tickets_rejected\": {},", stats.tickets_rejected);
+        println!("  \"tickets_uncertain\": {},", stats.tickets_uncertain);
+        println!("  \"confirmed_pct\": {:.1},", confirmed_pct);
+        println!("  \"rejected_pct\": {:.1},", rejected_pct);
+        println!("  \"well_control_events\": {},", stats.well_control_events);
+        println!("  \"efficiency_events\": {},", stats.efficiency_events);
+        println!("  \"mechanical_events\": {},", stats.mechanical_events);
+        println!("  \"hydraulics_events\": {},", stats.hydraulics_events);
+        println!("  \"formation_events\": {},", stats.formation_events);
+        println!("  \"avg_mse\": {:.1},", stats.avg_mse());
+        println!("  \"avg_rop\": {:.1},", stats.avg_rop());
+        println!(
+            "  \"baseline_locked\": {}",
+            stats.baseline_locked_at_packet.is_some()
+        );
+        println!("}}");
+        return;
+    }
+
+    // ========================================================================
+    // Human-readable summary
     // ========================================================================
     println!();
     println!("─────────────────────────────────────────────────────────────────");
@@ -424,10 +582,30 @@ fn main() {
 
     let tactical_stats = tactical.stats();
     println!("Pipeline Statistics:");
+    println!("  Packets total:        {}", total);
+    if stats.sanitized_rejected > 0 {
+        println!(
+            "  Sanitizer rejected:   {} ({:.1}%)",
+            stats.sanitized_rejected,
+            stats.sanitized_rejected as f64 / total as f64 * 100.0
+        );
+    }
+    if stats.depth_rejected > 0 {
+        println!(
+            "  Depth rejected:       {} ({:.1}%)",
+            stats.depth_rejected,
+            stats.depth_rejected as f64 / total as f64 * 100.0
+        );
+    }
     println!("  Packets processed:    {}", stats.total_packets);
-    println!("  Drilling packets:     {} ({:.1}%)",
+    println!(
+        "  Drilling packets:     {} ({:.1}%)",
         stats.drilling_packets,
-        stats.drilling_packets as f64 / stats.total_packets as f64 * 100.0
+        if stats.total_packets > 0 {
+            stats.drilling_packets as f64 / stats.total_packets as f64 * 100.0
+        } else {
+            0.0
+        }
     );
     println!("  Tactical agent:       {}", tactical_stats);
     println!();
@@ -440,15 +618,18 @@ fn main() {
 
     println!("Tickets Generated:      {}", stats.tickets_generated);
     if stats.tickets_generated > 0 {
-        println!("  Confirmed:            {} ({:.0}%)",
+        println!(
+            "  Confirmed:            {} ({:.0}%)",
             stats.tickets_confirmed,
             stats.tickets_confirmed as f64 / stats.tickets_generated as f64 * 100.0
         );
-        println!("  Rejected:             {} ({:.0}%)",
+        println!(
+            "  Rejected:             {} ({:.0}%)",
             stats.tickets_rejected,
             stats.tickets_rejected as f64 / stats.tickets_generated as f64 * 100.0
         );
-        println!("  Uncertain:            {} ({:.0}%)",
+        println!(
+            "  Uncertain:            {} ({:.0}%)",
             stats.tickets_uncertain,
             stats.tickets_uncertain as f64 / stats.tickets_generated as f64 * 100.0
         );
@@ -472,7 +653,8 @@ fn main() {
         }
         println!();
 
-        if let (Some(first), Some(last)) = (stats.depth_at_first_ticket, stats.depth_at_last_ticket) {
+        if let (Some(first), Some(last)) = (stats.depth_at_first_ticket, stats.depth_at_last_ticket)
+        {
             println!("  First ticket depth:   {:.0} ft", first);
             println!("  Last ticket depth:    {:.0} ft", last);
         }
@@ -481,12 +663,23 @@ fn main() {
     // ACI Summary
     println!();
     println!("[5/5] ACI Conformal Interval Summary:");
-    println!("  Drilling packets with outliers:      {} ({:.1}%)",
+    println!(
+        "  Drilling packets with outliers:      {} ({:.1}%)",
         stats.aci_outlier_packets,
-        if stats.drilling_packets > 0 { stats.aci_outlier_packets as f64 / stats.drilling_packets as f64 * 100.0 } else { 0.0 }
+        if stats.drilling_packets > 0 {
+            stats.aci_outlier_packets as f64 / stats.drilling_packets as f64 * 100.0
+        } else {
+            0.0
+        }
     );
-    println!("  Multi-outlier packets (3+ metrics):  {}", stats.aci_multi_outlier_packets);
-    println!("  Alert zones (consecutive clusters):  {}", aci_alert_zones_total);
+    println!(
+        "  Multi-outlier packets (3+ metrics):  {}",
+        stats.aci_multi_outlier_packets
+    );
+    println!(
+        "  Alert zones (consecutive clusters):  {}",
+        aci_alert_zones_total
+    );
 
     // Print final interval state for key metrics
     let key_metrics = [
@@ -506,7 +699,10 @@ fn main() {
         if let Some(ci) = aci_tracker.interval(id) {
             println!(
                 "    {:<8} [{:>8.1} — {:>8.1}] {} | coverage: {:.1}% | samples: {}",
-                name, ci.lower, ci.upper, unit,
+                name,
+                ci.lower,
+                ci.upper,
+                unit,
                 ci.coverage * 100.0,
                 aci_tracker.sample_count(id)
             );
@@ -519,20 +715,44 @@ fn main() {
     let cfc_dual = tactical.cfc_network();
     println!("  Fast network:");
     println!("    Parameters:         {}", cfc_dual.fast.num_params());
-    println!("    NCP connections:    {}", cfc_dual.fast.num_connections());
-    println!("    Packets processed:  {}", cfc_dual.fast.packets_processed());
+    println!(
+        "    NCP connections:    {}",
+        cfc_dual.fast.num_connections()
+    );
+    println!(
+        "    Packets processed:  {}",
+        cfc_dual.fast.packets_processed()
+    );
     println!("    Calibrated:         {}", cfc_dual.fast.is_calibrated());
     println!("    Average loss:       {:.6}", cfc_dual.fast.avg_loss());
-    println!("    Final LR:           {:.6}", cfc_dual.fast.learning_rate());
-    println!("    Final anomaly:      {:.4}", cfc_dual.fast.anomaly_score());
+    println!(
+        "    Final LR:           {:.6}",
+        cfc_dual.fast.learning_rate()
+    );
+    println!(
+        "    Final anomaly:      {:.4}",
+        cfc_dual.fast.anomaly_score()
+    );
     println!("  Slow network:");
     println!("    Parameters:         {}", cfc_dual.slow.num_params());
-    println!("    NCP connections:    {}", cfc_dual.slow.num_connections());
-    println!("    Packets processed:  {}", cfc_dual.slow.packets_processed());
+    println!(
+        "    NCP connections:    {}",
+        cfc_dual.slow.num_connections()
+    );
+    println!(
+        "    Packets processed:  {}",
+        cfc_dual.slow.packets_processed()
+    );
     println!("    Calibrated:         {}", cfc_dual.slow.is_calibrated());
     println!("    Average loss:       {:.6}", cfc_dual.slow.avg_loss());
-    println!("    Final LR:           {:.6}", cfc_dual.slow.learning_rate());
-    println!("    Final anomaly:      {:.4}", cfc_dual.slow.anomaly_score());
+    println!(
+        "    Final LR:           {:.6}",
+        cfc_dual.slow.learning_rate()
+    );
+    println!(
+        "    Final anomaly:      {:.4}",
+        cfc_dual.slow.anomaly_score()
+    );
 
     if let Some(locked_at) = stats.baseline_locked_at_packet {
         println!();

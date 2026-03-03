@@ -13,6 +13,8 @@ pub mod setup;
 pub mod v2_handlers;
 mod v2_routes;
 
+pub mod mesh_routes;
+
 pub use handlers::DashboardState;
 
 use axum::http::{header, Method, StatusCode, Uri};
@@ -55,7 +57,11 @@ async fn serve_asset(uri: Uri) -> Response {
     }
 
     // If dashboard was not built (CI without Node), return a plain message.
-    (StatusCode::OK, "SAIREN-OS is running. Dashboard not built (npm not available during compile).").into_response()
+    (
+        StatusCode::OK,
+        "SAIREN-OS is running. Dashboard not built (npm not available during compile).",
+    )
+        .into_response()
 }
 
 /// Build a CORS layer that is restrictive by default (same-origin only).

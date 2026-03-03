@@ -2,9 +2,8 @@
 
 use crate::knowledge_base::compressor;
 use crate::types::{
-    FieldGeology, FormationInterval, FormationPrognosis, GeologicalFormation,
-    KnowledgeBaseConfig, OffsetPerformanceOverride, PostWellFormationPerformance,
-    PreSpudFormation, PreSpudPrognosis,
+    FieldGeology, FormationInterval, FormationPrognosis, GeologicalFormation, KnowledgeBaseConfig,
+    OffsetPerformanceOverride, PostWellFormationPerformance, PreSpudFormation, PreSpudPrognosis,
 };
 use std::collections::HashMap;
 use std::io;
@@ -20,13 +19,20 @@ use tracing::info;
 pub fn migrate_flat_to_kb(flat_path: &Path, kb_root: &Path) -> io::Result<()> {
     let content = std::fs::read_to_string(flat_path)?;
     let prognosis: FormationPrognosis = toml::from_str(&content).map_err(|e| {
-        io::Error::new(io::ErrorKind::InvalidData, format!("Failed to parse prognosis: {}", e))
+        io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("Failed to parse prognosis: {}", e),
+        )
     })?;
 
     let field = &prognosis.well.field;
     let well = &prognosis.well.name;
 
-    info!(field = field, well = well, "Migrating flat prognosis to knowledge base");
+    info!(
+        field = field,
+        well = well,
+        "Migrating flat prognosis to knowledge base"
+    );
 
     let config = KnowledgeBaseConfig {
         root: kb_root.to_path_buf(),
@@ -39,17 +45,21 @@ pub fn migrate_flat_to_kb(flat_path: &Path, kb_root: &Path) -> io::Result<()> {
     // 1. Extract geology
     let geology = FieldGeology {
         field: field.clone(),
-        formations: prognosis.formations.iter().map(|f| GeologicalFormation {
-            name: f.name.clone(),
-            depth_top_ft: f.depth_top_ft,
-            depth_base_ft: f.depth_base_ft,
-            lithology: f.lithology.clone(),
-            hardness: f.hardness,
-            drillability: f.drillability.clone(),
-            pore_pressure_ppg: f.pore_pressure_ppg,
-            fracture_gradient_ppg: f.fracture_gradient_ppg,
-            hazards: f.hazards.clone(),
-        }).collect(),
+        formations: prognosis
+            .formations
+            .iter()
+            .map(|f| GeologicalFormation {
+                name: f.name.clone(),
+                depth_top_ft: f.depth_top_ft,
+                depth_base_ft: f.depth_base_ft,
+                lithology: f.lithology.clone(),
+                hardness: f.hardness,
+                drillability: f.drillability.clone(),
+                pore_pressure_ppg: f.pore_pressure_ppg,
+                fracture_gradient_ppg: f.fracture_gradient_ppg,
+                hazards: f.hazards.clone(),
+            })
+            .collect(),
     };
     compressor::write_toml(&config.geology_path(), &geology)?;
     info!(formations = geology.formations.len(), "Wrote geology.toml");
@@ -57,27 +67,31 @@ pub fn migrate_flat_to_kb(flat_path: &Path, kb_root: &Path) -> io::Result<()> {
     // 2. Extract pre-spud prognosis
     let pre_spud = PreSpudPrognosis {
         well: prognosis.well.clone(),
-        formations: prognosis.formations.iter().map(|f| {
-            let has_offset = !f.offset_performance.wells.is_empty();
-            PreSpudFormation {
-                name: f.name.clone(),
-                depth_top_ft: None, // same as geology
-                depth_base_ft: None,
-                parameters: f.parameters.clone(),
-                manual_offset: if has_offset {
-                    Some(OffsetPerformanceOverride {
-                        wells: f.offset_performance.wells.clone(),
-                        avg_rop_ft_hr: f.offset_performance.avg_rop_ft_hr,
-                        best_rop_ft_hr: f.offset_performance.best_rop_ft_hr,
-                        avg_mse_psi: f.offset_performance.avg_mse_psi,
-                        best_params: f.offset_performance.best_params.clone(),
-                        notes: f.offset_performance.notes.clone(),
-                    })
-                } else {
-                    None
-                },
-            }
-        }).collect(),
+        formations: prognosis
+            .formations
+            .iter()
+            .map(|f| {
+                let has_offset = !f.offset_performance.wells.is_empty();
+                PreSpudFormation {
+                    name: f.name.clone(),
+                    depth_top_ft: None, // same as geology
+                    depth_base_ft: None,
+                    parameters: f.parameters.clone(),
+                    manual_offset: if has_offset {
+                        Some(OffsetPerformanceOverride {
+                            wells: f.offset_performance.wells.clone(),
+                            avg_rop_ft_hr: f.offset_performance.avg_rop_ft_hr,
+                            best_rop_ft_hr: f.offset_performance.best_rop_ft_hr,
+                            avg_mse_psi: f.offset_performance.avg_mse_psi,
+                            best_params: f.offset_performance.best_params.clone(),
+                            notes: f.offset_performance.notes.clone(),
+                        })
+                    } else {
+                        None
+                    },
+                }
+            })
+            .collect(),
         casings: prognosis.casings.clone(),
     };
     compressor::write_toml(&config.pre_spud_path(well), &pre_spud)?;
@@ -122,12 +136,19 @@ pub fn migrate_flat_to_kb(flat_path: &Path, kb_root: &Path) -> io::Result<()> {
                 sustained_only: None,
             };
 
-            let safe_name = formation.name.replace(' ', "_").replace(['/', '\\', '(', ')'], "");
+            let safe_name = formation
+                .name
+                .replace(' ', "_")
+                .replace(['/', '\\', '(', ')'], "");
             let filename = format!("performance_{}.toml", safe_name);
             compressor::write_toml(&post_dir.join(&filename), &perf)?;
         }
 
-        info!(well = offset_well_name, formations = formation_refs.len(), "Wrote offset well performance files");
+        info!(
+            well = offset_well_name,
+            formations = formation_refs.len(),
+            "Wrote offset well performance files"
+        );
     }
 
     info!(
@@ -157,7 +178,10 @@ mod tests {
 
         // Verify structure was created
         assert!(tmp.path().join("Volve/geology.toml").exists());
-        assert!(tmp.path().join("Volve/wells/F-15B/pre-spud/prognosis.toml").exists());
+        assert!(tmp
+            .path()
+            .join("Volve/wells/F-15B/pre-spud/prognosis.toml")
+            .exists());
 
         // Verify offset wells were created
         assert!(tmp.path().join("Volve/wells/F-9A/post-well").exists());
@@ -178,7 +202,11 @@ mod tests {
         assert_eq!(assembled.well.field, "Volve");
 
         // Verify offset data was reconstituted
-        let nordland = assembled.formations.iter().find(|f| f.name == "Nordland Group").expect("Nordland");
+        let nordland = assembled
+            .formations
+            .iter()
+            .find(|f| f.name == "Nordland Group")
+            .expect("Nordland");
         assert!(!nordland.offset_performance.wells.is_empty());
         assert!(nordland.offset_performance.avg_rop_ft_hr > 0.0);
     }

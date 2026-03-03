@@ -206,8 +206,14 @@ mod tests {
         }
         assert!(detector.ready());
         let detected = detector.detect();
-        let mw = detected.normal_mud_weight_ppg.expect("should detect mud weight");
-        assert!((mw - 9.55).abs() < 0.1, "median should be ~9.55, got {}", mw);
+        let mw = detected
+            .normal_mud_weight_ppg
+            .expect("should detect mud weight");
+        assert!(
+            (mw - 9.55).abs() < 0.1,
+            "median should be ~9.55, got {}",
+            mw
+        );
     }
 
     #[test]
@@ -238,7 +244,9 @@ mod tests {
         }
         assert!(detector.ready());
         let detected = detector.detect();
-        let mw = detected.normal_mud_weight_ppg.expect("should detect from valid samples");
+        let mw = detected
+            .normal_mud_weight_ppg
+            .expect("should detect from valid samples");
         assert!((mw - 10.0).abs() < 0.01);
     }
 

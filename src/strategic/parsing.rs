@@ -160,8 +160,13 @@ fn strip_think_tags(text: &str) -> String {
 
     // Case 3: No <think> tags - look for conclusion markers
     let conclusion_markers = [
-        "therefore,", "so,", "in conclusion,", "the diagnosis is",
-        "this indicates", "this suggests", "based on this",
+        "therefore,",
+        "so,",
+        "in conclusion,",
+        "the diagnosis is",
+        "this indicates",
+        "this suggests",
+        "based on this",
     ];
 
     for marker in conclusion_markers {
@@ -170,7 +175,10 @@ fn strip_think_tags(text: &str) -> String {
             if let Some(end) = after_marker.find('.') {
                 let sentence = &after_marker[..end + 1];
                 if sentence.len() > 20 {
-                    return format!("DIAGNOSIS: {}\nACTION: Continue monitoring.", sentence.trim());
+                    return format!(
+                        "DIAGNOSIS: {}\nACTION: Continue monitoring.",
+                        sentence.trim()
+                    );
                 }
             }
         }
@@ -270,11 +278,7 @@ fn extract_health_score(text: &str, upper: &str) -> Result<f64> {
 fn extract_severity(text: &str, upper: &str) -> Result<String> {
     if let Some(pos) = upper.find("SEVERITY:") {
         let after = &text[pos + "SEVERITY:".len()..];
-        let line = after
-            .lines()
-            .next()
-            .unwrap_or("")
-            .trim();
+        let line = after.lines().next().unwrap_or("").trim();
 
         if !line.is_empty() {
             let severity_upper = line.to_uppercase();
@@ -308,9 +312,7 @@ fn extract_diagnosis(text: &str, upper: &str) -> Result<String> {
             .map(|p| p.saturating_sub("DIAGNOSIS:".len()))
             .unwrap_or(after.len());
 
-        let diagnosis = after[..end_pos.min(after.len())]
-            .trim()
-            .to_string();
+        let diagnosis = after[..end_pos.min(after.len())].trim().to_string();
 
         if !diagnosis.is_empty() {
             return Ok(diagnosis);
@@ -332,9 +334,7 @@ fn extract_action(text: &str, upper: &str) -> Result<String> {
                 .map(|p| p.saturating_sub(keyword.len()))
                 .unwrap_or(after.len());
 
-            let action = after[..end_pos.min(after.len())]
-                .trim()
-                .to_string();
+            let action = after[..end_pos.min(after.len())].trim().to_string();
 
             if !action.is_empty() {
                 return Ok(action);

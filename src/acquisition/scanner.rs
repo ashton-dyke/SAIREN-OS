@@ -74,9 +74,7 @@ async fn try_read_wits_header(mut stream: TcpStream) -> std::io::Result<bool> {
         Ok(Ok(n)) if n >= 4 => {
             // Look for && followed by \r\n anywhere in the first bytes
             let data = &buf[..n];
-            Ok(data
-                .windows(4)
-                .any(|w| w == b"&&\r\n"))
+            Ok(data.windows(4).any(|w| w == b"&&\r\n"))
         }
         Ok(Ok(n)) if n > 0 => {
             // Got some data but too short for a full WITS header
@@ -105,10 +103,7 @@ fn expand_port_ranges(ranges: &[(u16, u16)]) -> Vec<u16> {
 /// # Arguments
 /// * `port_ranges` — Port ranges to scan, e.g. `&[(5000, 5010), (10001, 10010)]`
 /// * `timeout_ms` — Per-connection timeout in milliseconds (default: 2000)
-pub async fn scan_subnet(
-    port_ranges: &[(u16, u16)],
-    timeout_ms: u64,
-) -> Vec<WitsDiscovery> {
+pub async fn scan_subnet(port_ranges: &[(u16, u16)], timeout_ms: u64) -> Vec<WitsDiscovery> {
     let local_ip = match detect_local_ip() {
         Some(ip) => ip,
         None => {

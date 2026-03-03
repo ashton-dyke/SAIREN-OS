@@ -87,12 +87,19 @@ pub struct DysfunctionBreakdown {
 
 impl DysfunctionBreakdown {
     pub fn total(&self) -> usize {
-        self.torque_instability + self.stick_slip + self.pack_off + self.founder + self.low_efficiency
+        self.torque_instability
+            + self.stick_slip
+            + self.pack_off
+            + self.founder
+            + self.low_efficiency
     }
 
     pub fn primary_reason(&self) -> Option<(DysfunctionReason, usize)> {
         let reasons = [
-            (DysfunctionReason::TorqueInstability, self.torque_instability),
+            (
+                DysfunctionReason::TorqueInstability,
+                self.torque_instability,
+            ),
             (DysfunctionReason::StickSlip, self.stick_slip),
             (DysfunctionReason::PackOff, self.pack_off),
             (DysfunctionReason::Founder, self.founder),
@@ -152,13 +159,8 @@ impl DysfunctionFilter {
             let metric = metrics[i];
 
             // Check each dysfunction type
-            let dysfunction = Self::check_dysfunction(
-                i,
-                packet,
-                metric,
-                &torque_cv,
-                &founder_flags,
-            );
+            let dysfunction =
+                Self::check_dysfunction(i, packet, metric, &torque_cv, &founder_flags);
 
             match dysfunction {
                 Some(DysfunctionReason::TorqueInstability) => breakdown.torque_instability += 1,
@@ -361,8 +363,7 @@ impl DysfunctionFilter {
 
         // Penalize high torque CV (approaching stick-slip)
         if torque_cv > TORQUE_CV_UNSTABLE * 0.5 {
-            let cv_factor = (torque_cv - TORQUE_CV_UNSTABLE * 0.5)
-                / (TORQUE_CV_UNSTABLE * 0.5);
+            let cv_factor = (torque_cv - TORQUE_CV_UNSTABLE * 0.5) / (TORQUE_CV_UNSTABLE * 0.5);
             score -= 0.3 * cv_factor.min(1.0);
         }
 
@@ -381,8 +382,8 @@ impl DysfunctionFilter {
 
         // Penalize elevated SPP delta
         if metric.spp_delta > SPP_DELTA_PACKOFF * 0.5 {
-            let spp_factor = (metric.spp_delta - SPP_DELTA_PACKOFF * 0.5)
-                / (SPP_DELTA_PACKOFF * 0.5);
+            let spp_factor =
+                (metric.spp_delta - SPP_DELTA_PACKOFF * 0.5) / (SPP_DELTA_PACKOFF * 0.5);
             score -= 0.15 * spp_factor.min(1.0);
         }
 
@@ -394,7 +395,6 @@ impl DysfunctionFilter {
 mod tests {
     use super::*;
     use crate::types::{AnomalyCategory, Operation, RigState};
-    use std::sync::Arc;
 
     fn make_packet(wob: f64, rpm: f64, rop: f64, torque: f64, spp: f64) -> WitsPacket {
         WitsPacket {
@@ -435,7 +435,8 @@ mod tests {
             spp_delta: 0.0,
             rig_state: RigState::Drilling,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     fn make_metric(
@@ -533,11 +534,14 @@ mod tests {
         let metric = make_metric(80.0, 0.02, 10.0, false);
 
         let score = DysfunctionFilter::calculate_stability_score(&packet, &metric, 0.05);
-        assert!(score > 0.9, "Stable sample should have high score: {}", score);
+        assert!(
+            score > 0.9,
+            "Stable sample should have high score: {}",
+            score
+        );
 
         // High torque CV should reduce score
-        let unstable_score =
-            DysfunctionFilter::calculate_stability_score(&packet, &metric, 0.15);
+        let unstable_score = DysfunctionFilter::calculate_stability_score(&packet, &metric, 0.15);
         assert!(
             unstable_score < score,
             "High CV should reduce score: {} vs {}",

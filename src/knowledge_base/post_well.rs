@@ -2,8 +2,8 @@
 
 use crate::knowledge_base::{compressor, mid_well};
 use crate::types::{
-    BestParams, KnowledgeBaseConfig, MidWellSnapshot, ParameterRange,
-    PostWellFormationPerformance, PostWellSummary, SustainedFormationStats,
+    BestParams, KnowledgeBaseConfig, MidWellSnapshot, ParameterRange, PostWellFormationPerformance,
+    PostWellSummary, SustainedFormationStats,
 };
 use std::collections::HashMap;
 use std::io;
@@ -41,21 +41,28 @@ pub fn generate_post_well(config: &KnowledgeBaseConfig) -> io::Result<PostWellSu
 
     for (name, group) in &by_formation {
         let perf = aggregate_formation(config, name, group);
-        total_bit_hours += group.iter().map(|s| s.bit_hours).sum::<f64>() / group.len().max(1) as f64;
+        total_bit_hours +=
+            group.iter().map(|s| s.bit_hours).sum::<f64>() / group.len().max(1) as f64;
         max_depth = max_depth.max(perf.depth_base_ft);
 
         // Write per-formation performance file
         let safe_name = name.replace(' ', "_").replace(['/', '\\', '(', ')'], "");
         let filename = format!("performance_{}.toml", safe_name);
         compressor::write_toml(&post_dir.join(&filename), &perf)?;
-        info!(formation = name, file = &filename, "Wrote post-well performance");
+        info!(
+            formation = name,
+            file = &filename,
+            "Wrote post-well performance"
+        );
 
         formations.push(perf);
     }
 
     // Sort formations by depth
     formations.sort_by(|a, b| {
-        a.depth_top_ft.partial_cmp(&b.depth_top_ft).unwrap_or(std::cmp::Ordering::Equal)
+        a.depth_top_ft
+            .partial_cmp(&b.depth_top_ft)
+            .unwrap_or(std::cmp::Ordering::Equal)
     });
 
     let summary = PostWellSummary {
@@ -110,58 +117,118 @@ fn aggregate_formation(
 ) -> PostWellFormationPerformance {
     let n = snapshots.len().max(1) as f64;
 
-    let avg_rop = snapshots.iter().map(|s| s.optimal_params.achieved_rop).sum::<f64>() / n;
-    let best_rop = snapshots.iter()
+    let avg_rop = snapshots
+        .iter()
+        .map(|s| s.optimal_params.achieved_rop)
+        .sum::<f64>()
+        / n;
+    let best_rop = snapshots
+        .iter()
         .map(|s| s.optimal_params.achieved_rop)
         .fold(0.0_f64, f64::max);
-    let avg_mse = snapshots.iter().map(|s| s.optimal_params.achieved_mse).sum::<f64>() / n;
+    let avg_mse = snapshots
+        .iter()
+        .map(|s| s.optimal_params.achieved_mse)
+        .sum::<f64>()
+        / n;
 
     // Best params from snapshot with highest achieved ROP
-    let best_snapshot = snapshots.iter()
-        .max_by(|a, b| {
-            a.optimal_params.achieved_rop
-                .partial_cmp(&b.optimal_params.achieved_rop)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+    let best_snapshot = snapshots.iter().max_by(|a, b| {
+        a.optimal_params
+            .achieved_rop
+            .partial_cmp(&b.optimal_params.achieved_rop)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
 
-    let best_params = best_snapshot.map(|s| BestParams {
-        wob_klbs: s.optimal_params.best_wob,
-        rpm: s.optimal_params.best_rpm,
-    }).unwrap_or(BestParams { wob_klbs: 0.0, rpm: 0.0 });
+    let best_params = best_snapshot
+        .map(|s| BestParams {
+            wob_klbs: s.optimal_params.best_wob,
+            rpm: s.optimal_params.best_rpm,
+        })
+        .unwrap_or(BestParams {
+            wob_klbs: 0.0,
+            rpm: 0.0,
+        });
 
     // Average ranges across snapshots
     let avg_wob_range = ParameterRange {
-        min: snapshots.iter().map(|s| s.optimal_params.wob_min).sum::<f64>() / n,
-        optimal: snapshots.iter().map(|s| s.optimal_params.best_wob).sum::<f64>() / n,
-        max: snapshots.iter().map(|s| s.optimal_params.wob_max).sum::<f64>() / n,
+        min: snapshots
+            .iter()
+            .map(|s| s.optimal_params.wob_min)
+            .sum::<f64>()
+            / n,
+        optimal: snapshots
+            .iter()
+            .map(|s| s.optimal_params.best_wob)
+            .sum::<f64>()
+            / n,
+        max: snapshots
+            .iter()
+            .map(|s| s.optimal_params.wob_max)
+            .sum::<f64>()
+            / n,
     };
     let avg_rpm_range = ParameterRange {
-        min: snapshots.iter().map(|s| s.optimal_params.rpm_min).sum::<f64>() / n,
-        optimal: snapshots.iter().map(|s| s.optimal_params.best_rpm).sum::<f64>() / n,
-        max: snapshots.iter().map(|s| s.optimal_params.rpm_max).sum::<f64>() / n,
+        min: snapshots
+            .iter()
+            .map(|s| s.optimal_params.rpm_min)
+            .sum::<f64>()
+            / n,
+        optimal: snapshots
+            .iter()
+            .map(|s| s.optimal_params.best_rpm)
+            .sum::<f64>()
+            / n,
+        max: snapshots
+            .iter()
+            .map(|s| s.optimal_params.rpm_max)
+            .sum::<f64>()
+            / n,
     };
     let avg_flow_range = ParameterRange {
-        min: snapshots.iter().map(|s| s.optimal_params.flow_min).sum::<f64>() / n,
-        optimal: snapshots.iter().map(|s| s.optimal_params.best_flow).sum::<f64>() / n,
-        max: snapshots.iter().map(|s| s.optimal_params.flow_max).sum::<f64>() / n,
+        min: snapshots
+            .iter()
+            .map(|s| s.optimal_params.flow_min)
+            .sum::<f64>()
+            / n,
+        optimal: snapshots
+            .iter()
+            .map(|s| s.optimal_params.best_flow)
+            .sum::<f64>()
+            / n,
+        max: snapshots
+            .iter()
+            .map(|s| s.optimal_params.flow_max)
+            .sum::<f64>()
+            / n,
     };
 
-    let avg_confidence = snapshots.iter()
+    let avg_confidence = snapshots
+        .iter()
         .map(|s| match s.confidence {
             crate::types::ConfidenceLevel::High => 1.0,
             crate::types::ConfidenceLevel::Medium => 0.7,
             crate::types::ConfidenceLevel::Low => 0.4,
             crate::types::ConfidenceLevel::Insufficient => 0.1,
         })
-        .sum::<f64>() / n;
+        .sum::<f64>()
+        / n;
 
-    let avg_stability = snapshots.iter()
+    let avg_stability = snapshots
+        .iter()
         .map(|s| s.optimal_params.stability_score)
-        .sum::<f64>() / n;
+        .sum::<f64>()
+        / n;
 
     // Depth range from snapshots
-    let depth_top = snapshots.iter().map(|s| s.depth_range.0).fold(f64::MAX, f64::min);
-    let depth_base = snapshots.iter().map(|s| s.depth_range.1).fold(0.0_f64, f64::max);
+    let depth_top = snapshots
+        .iter()
+        .map(|s| s.depth_range.0)
+        .fold(f64::MAX, f64::min);
+    let depth_base = snapshots
+        .iter()
+        .map(|s| s.depth_range.1)
+        .fold(0.0_f64, f64::max);
 
     let total_snapshots: usize = snapshots.iter().map(|s| s.sample_count).sum();
 
@@ -181,13 +248,25 @@ fn aggregate_formation(
         let total_sustained_samples: usize =
             sustained_snapshots.iter().map(|s| s.sample_count).sum();
         Some(SustainedFormationStats {
-            avg_rop_ft_hr: sustained_snapshots.iter().map(|s| s.avg_rop_ft_hr).sum::<f64>() / sn,
+            avg_rop_ft_hr: sustained_snapshots
+                .iter()
+                .map(|s| s.avg_rop_ft_hr)
+                .sum::<f64>()
+                / sn,
             best_rop_ft_hr: sustained_snapshots
                 .iter()
                 .map(|s| s.best_rop_ft_hr)
                 .fold(0.0_f64, f64::max),
-            avg_mse_psi: sustained_snapshots.iter().map(|s| s.avg_mse_psi).sum::<f64>() / sn,
-            avg_wob_klbs: sustained_snapshots.iter().map(|s| s.avg_wob_klbs).sum::<f64>() / sn,
+            avg_mse_psi: sustained_snapshots
+                .iter()
+                .map(|s| s.avg_mse_psi)
+                .sum::<f64>()
+                / sn,
+            avg_wob_klbs: sustained_snapshots
+                .iter()
+                .map(|s| s.avg_wob_klbs)
+                .sum::<f64>()
+                / sn,
             avg_rpm: sustained_snapshots.iter().map(|s| s.avg_rpm).sum::<f64>() / sn,
             total_sustained_samples,
             low_sample_count: total_sustained_samples < 30,
@@ -276,7 +355,11 @@ mod tests {
         assert_eq!(summary.field, "TestField");
 
         // Check the Shallow formation (avg of 100 and 120)
-        let shallow = summary.formations.iter().find(|f| f.formation_name == "Shallow").expect("shallow");
+        let shallow = summary
+            .formations
+            .iter()
+            .find(|f| f.formation_name == "Shallow")
+            .expect("shallow");
         assert!((shallow.avg_rop_ft_hr - 110.0).abs() < 0.01);
         assert!((shallow.best_rop_ft_hr - 120.0).abs() < 0.01);
 

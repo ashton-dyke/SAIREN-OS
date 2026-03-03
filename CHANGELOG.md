@@ -4,6 +4,64 @@ All notable changes to SAIREN-OS are documented here.
 
 ---
 
+## v5.0 - P2P Mesh Architecture & Codebase Cleanup
+
+Replaces the hub-and-spoke fleet topology with a fully decentralized P2P mesh gossip protocol. Removes the LLM system, fleet hub, and federation infrastructure. Every Pi node is identical — no central server, no special roles, no single point of failure.
+
+### P2P Gossip Module — NEW
+
+- **Gossip protocol** (`src/gossip/protocol.rs`) — `GossipEnvelope` with zstd-compressed JSON wire format, broadcast-all topology
+- **SQLite event store** (`src/gossip/store.rs`) — embedded `rusqlite` with WAL mode; indexed columns (formation, category, depth, timestamp, last_modified) with zstd-compressed `data` blob; formation-based precedent queries; retention enforcement (50k cap, 12-month age, 3-month false positive cleanup)
+- **Gossip client** (`src/gossip/client.rs`) — async broadcast loop contacting all peers concurrently each round; per-peer `last_modified` sync cursors so outcome updates on old events propagate
+- **Gossip server** (`src/gossip/server.rs`) — Axum handlers: `POST /api/mesh/gossip` (peer exchange), `GET /api/mesh/status` (node health), `GET /api/mesh/fleet` (server-side aggregation across all peers)
+- **Peer sync state** (`src/gossip/state.rs`) — sled-backed per-peer cursor tracking with exponential backoff on failure
+- **Config** — `MeshConfig`, `GossipConfig`, `PeerInfo`, `FormationTop` structs in `well_config.rs` with `#[serde(default)]` for backward compatibility
+- **New dependency**: `rusqlite = "0.31"` (bundled SQLite, no external process)
+- **New dependency**: `reqwest = "0.12"` (HTTP client for peer gossip)
+- **New dependency**: `zstd = "0.13"` (gossip envelope compression)
+
+### Codebase Cleanup — ~8,000 LOC Removed
+
+**Removed modules:**
+- `src/hub/` (~4,950 LOC) — fleet hub server, PostgreSQL backend, curator, auth middleware, pairing, knowledge graph, intelligence workers
+- `src/llm/` (~1,200 LOC) — mistralrs backend, strategic/tactical LLM, scheduler, CUDA detection
+- `src/fleet/client.rs`, `queue.rs`, `uploader.rs`, `sync.rs`, `federation.rs` — hub-and-spoke client infrastructure
+- `src/bin/fleet_hub.rs` — standalone fleet hub binary
+- `src/strategic/actor.rs` — LLM-dependent strategic actor
+- `src/knowledge_base/fleet_bridge.rs` — hub-dependent fleet performance sharing
+
+**Removed from main.rs:**
+- `pair` and `enroll` CLI subcommands (~450 LOC)
+- Fleet task spawning (`FleetUploader`, `FleetLibrarySync`, `FleetIntelligenceSync`, `FederationUpload`, `FederationPull`)
+- LLM/CUDA hardware detection — replaced with `"Hardware: CfC neural networks (pure Rust, no GPU required)"`
+
+**Removed from processing_loop.rs:**
+- `FleetContext` and `FederationContext` structs
+- Fleet advisory enqueue and federation checkpoint publish/pull code
+
+**Removed from config:**
+- `FederationConfig` struct and `FederationInitPolicy` enum
+- All federation known config keys from validation
+- GPU/LLM timing constants, fleet client constants, pairing constants
+
+**Removed dependencies:**
+- All feature flags (`llm`, `cuda`, `tactical_llm`, `fleet-hub`) — no feature gates remain
+- PostgreSQL (`sqlx`), mistralrs, candle-core dependencies
+
+**Pipeline simplification:**
+- 9-phase pipeline (removed "Phase 7: LLM Explainer")
+- Local `CYCLE_TARGET_MS = 100` constant replaces removed GPU/CPU cycle time constants
+- Federation checkpoint/restore methods removed from coordinator
+
+### Verification
+
+- `cargo check` — zero errors
+- `cargo test` — 859 tests pass, 0 failures
+- `cargo clippy` — zero errors
+- `cargo run --bin sairen-os -- --speed 0` — 85 packets processed, 6 advisories generated, clean shutdown
+
+---
+
 ## v4.0-dev - Features 1-6 Complete
 
 Nine-feature roadmap execution: hot config reload, operator feedback loop, predictive lookahead advisor, stick-slip active damping, federated CfC weight sharing, and RigWatch v2 CfC integration — all with backend, API, and dashboard (where applicable) complete.

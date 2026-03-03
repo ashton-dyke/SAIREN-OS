@@ -38,12 +38,12 @@
 //! }
 //! ```
 
-mod well_config;
-mod formation;
-pub mod defaults;
-pub mod validation;
 pub mod auto_detect;
+pub mod defaults;
+mod formation;
+pub mod validation;
 pub mod watcher;
+mod well_config;
 
 pub use well_config::*;
 
@@ -150,12 +150,7 @@ pub struct ConfigChange {
 }
 
 /// Fields that require a restart to take effect.
-const NON_RELOADABLE_PREFIXES: &[&str] = &[
-    "server.addr",
-    "well.name",
-    "well.field",
-    "well.rig",
-];
+const NON_RELOADABLE_PREFIXES: &[&str] = &["server.addr", "well.name", "well.field", "well.rig"];
 
 /// Reload the config from the recorded file path.
 ///
@@ -171,14 +166,13 @@ const NON_RELOADABLE_PREFIXES: &[&str] = &[
 pub fn reload() -> Result<Vec<ConfigChange>, ConfigError> {
     let path = config_path().ok_or_else(|| {
         ConfigError::Validation(vec![
-            "No config file path recorded — cannot reload".to_string(),
+            "No config file path recorded — cannot reload".to_string()
         ])
     })?;
 
     tracing::info!(path = %path.display(), "Reloading config from disk");
 
-    let (new_config, new_provenance) =
-        WellConfig::load_from_file_with_provenance(path)?;
+    let (new_config, new_provenance) = WellConfig::load_from_file_with_provenance(path)?;
 
     let old_config = get_arc();
     let changes = diff(&old_config, &new_config);
@@ -215,10 +209,7 @@ pub fn reload() -> Result<Vec<ConfigChange>, ConfigError> {
         .expect("reload called before init")
         .store(Arc::new(new_provenance));
 
-    tracing::info!(
-        count = changes.len(),
-        "Config hot-reloaded successfully"
-    );
+    tracing::info!(count = changes.len(), "Config hot-reloaded successfully");
 
     Ok(changes)
 }
@@ -337,7 +328,10 @@ mod tests {
         let a = WellConfig::default();
         let b = WellConfig::default();
         let changes = diff(&a, &b);
-        assert!(changes.is_empty(), "Identical configs should produce no diff");
+        assert!(
+            changes.is_empty(),
+            "Identical configs should produce no diff"
+        );
     }
 
     #[test]
@@ -406,6 +400,9 @@ mod tests {
             new_value: "65.0".to_string(),
         }];
         let warnings = check_non_reloadable(&changes);
-        assert!(warnings.is_empty(), "Threshold changes should be reloadable");
+        assert!(
+            warnings.is_empty(),
+            "Threshold changes should be reloadable"
+        );
     }
 }

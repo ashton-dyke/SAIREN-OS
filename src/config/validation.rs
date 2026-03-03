@@ -60,6 +60,7 @@ pub fn known_config_keys() -> HashSet<&'static str> {
         "thresholds.well_control.gas_units_critical",
         "thresholds.well_control.h2s_warning_ppm",
         "thresholds.well_control.h2s_critical_ppm",
+        "thresholds.well_control.pit_rate_debounce_packets",
         // [thresholds.mse]
         "thresholds.mse",
         "thresholds.mse.efficiency_warning_percent",
@@ -188,6 +189,17 @@ pub fn known_config_keys() -> HashSet<&'static str> {
         "damping.success_cv_reduction_pct",
         "damping.retract_cv_increase_pct",
         "damping.max_recipes_per_formation",
+        // [mesh]
+        "mesh",
+        "mesh.enabled",
+        "mesh.peers",
+        // [gossip]
+        "gossip",
+        "gossip.interval_secs",
+        "gossip.max_events_per_exchange",
+        "gossip.timeout_secs",
+        // formation_tops (array of tables)
+        "formation_tops",
     ];
     keys.iter().copied().collect()
 }
@@ -240,9 +252,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
         curr[0] = i + 1;
         for (j, cb) in b.chars().enumerate() {
             let cost = if ca == cb { 0 } else { 1 };
-            curr[j + 1] = (prev[j + 1] + 1)
-                .min(curr[j] + 1)
-                .min(prev[j] + cost);
+            curr[j + 1] = (prev[j + 1] + 1).min(curr[j] + 1).min(prev[j] + cost);
         }
         std::mem::swap(&mut prev, &mut curr);
     }
@@ -554,9 +564,7 @@ some_field = 42
             !warnings.is_empty(),
             "Expected warnings for unknown section"
         );
-        assert!(warnings
-            .iter()
-            .any(|w| w.field.contains("typo_section")));
+        assert!(warnings.iter().any(|w| w.field.contains("typo_section")));
     }
 
     #[test]
@@ -683,41 +691,59 @@ some_field = 42
         let config = crate::config::WellConfig::default();
         let (errors, _) = validate_physical_ranges(&config);
         let damping_errors: Vec<_> = errors.iter().filter(|e| e.contains("damping.")).collect();
-        assert!(damping_errors.is_empty(), "Defaults should have no damping errors: {:?}", damping_errors);
+        assert!(
+            damping_errors.is_empty(),
+            "Defaults should have no damping errors: {:?}",
+            damping_errors
+        );
 
         // monitor_window_secs out of range (too low)
         let mut cfg = crate::config::WellConfig::default();
         cfg.damping.monitor_window_secs = 10; // min is 30
         let (errors, _) = validate_physical_ranges(&cfg);
-        assert!(errors.iter().any(|e| e.contains("monitor_window_secs")),
-            "monitor_window_secs=10 should error");
+        assert!(
+            errors.iter().any(|e| e.contains("monitor_window_secs")),
+            "monitor_window_secs=10 should error"
+        );
 
         // monitor_window_secs out of range (too high)
         cfg.damping.monitor_window_secs = 999;
         let (errors, _) = validate_physical_ranges(&cfg);
-        assert!(errors.iter().any(|e| e.contains("monitor_window_secs")),
-            "monitor_window_secs=999 should error");
+        assert!(
+            errors.iter().any(|e| e.contains("monitor_window_secs")),
+            "monitor_window_secs=999 should error"
+        );
 
         // success_cv_reduction_pct out of range
         let mut cfg = crate::config::WellConfig::default();
         cfg.damping.success_cv_reduction_pct = 2.0; // min is 5.0
         let (errors, _) = validate_physical_ranges(&cfg);
-        assert!(errors.iter().any(|e| e.contains("success_cv_reduction_pct")),
-            "success_cv_reduction_pct=2.0 should error");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("success_cv_reduction_pct")),
+            "success_cv_reduction_pct=2.0 should error"
+        );
 
         // retract_cv_increase_pct out of range
         let mut cfg = crate::config::WellConfig::default();
         cfg.damping.retract_cv_increase_pct = 60.0; // max is 50.0
         let (errors, _) = validate_physical_ranges(&cfg);
-        assert!(errors.iter().any(|e| e.contains("retract_cv_increase_pct")),
-            "retract_cv_increase_pct=60.0 should error");
+        assert!(
+            errors.iter().any(|e| e.contains("retract_cv_increase_pct")),
+            "retract_cv_increase_pct=60.0 should error"
+        );
 
         // max_recipes_per_formation out of range
         let mut cfg = crate::config::WellConfig::default();
         cfg.damping.max_recipes_per_formation = 0; // min is 1
         let (errors, _) = validate_physical_ranges(&cfg);
-        assert!(errors.iter().any(|e| e.contains("max_recipes_per_formation")),
-            "max_recipes_per_formation=0 should error");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.contains("max_recipes_per_formation")),
+            "max_recipes_per_formation=0 should error"
+        );
 
         // Valid monitoring config at boundary values
         let mut cfg = crate::config::WellConfig::default();
@@ -727,7 +753,11 @@ some_field = 42
         cfg.damping.max_recipes_per_formation = 100;
         let (errors, _) = validate_physical_ranges(&cfg);
         let damping_errors: Vec<_> = errors.iter().filter(|e| e.contains("damping.")).collect();
-        assert!(damping_errors.is_empty(), "Boundary values should be valid: {:?}", damping_errors);
+        assert!(
+            damping_errors.is_empty(),
+            "Boundary values should be valid: {:?}",
+            damping_errors
+        );
 
         // Verify new keys are recognized (not flagged as unknown)
         let toml_str = r#"
@@ -738,13 +768,19 @@ retract_cv_increase_pct = 15.0
 max_recipes_per_formation = 20
 "#;
         let warnings = validate_unknown_keys(toml_str);
-        let damping_warnings: Vec<_> = warnings.iter()
-            .filter(|w| w.field.contains("damping.monitor")
-                || w.field.contains("damping.success")
-                || w.field.contains("damping.retract")
-                || w.field.contains("damping.max_recipes"))
+        let damping_warnings: Vec<_> = warnings
+            .iter()
+            .filter(|w| {
+                w.field.contains("damping.monitor")
+                    || w.field.contains("damping.success")
+                    || w.field.contains("damping.retract")
+                    || w.field.contains("damping.max_recipes")
+            })
             .collect();
-        assert!(damping_warnings.is_empty(),
-            "New damping keys should be known: {:?}", damping_warnings);
+        assert!(
+            damping_warnings.is_empty(),
+            "New damping keys should be known: {:?}",
+            damping_warnings
+        );
     }
 }

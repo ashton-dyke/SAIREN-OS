@@ -1,8 +1,8 @@
 //! Template-based conversion from OptimizationAdvisory → StrategicAdvisory
 
 use crate::types::{
-    AnomalyCategory, DrillingPhysicsReport, FinalSeverity, LookAheadAdvisory,
-    OptimizationAdvisory, RiskLevel, StrategicAdvisory,
+    AnomalyCategory, DrillingPhysicsReport, FinalSeverity, LookAheadAdvisory, OptimizationAdvisory,
+    RiskLevel, StrategicAdvisory,
 };
 
 /// Convert an `OptimizationAdvisory` into a `StrategicAdvisory` for pipeline output.
@@ -35,12 +35,7 @@ pub fn format_optimization_advisory(
         };
         recommendation_parts.push(format!(
             "Recommended: {}: {:.1} → {:.1} ({} by {:.1}) — Basis: {}",
-            rec.parameter,
-            rec.current_value,
-            rec.recommended_value,
-            direction,
-            delta,
-            rec.evidence,
+            rec.parameter, rec.current_value, rec.recommended_value, direction, delta, rec.evidence,
         ));
     }
 
@@ -162,10 +157,7 @@ pub fn format_lookahead_advisory(
     let reasoning = format!(
         "Formation lookahead at {:.0} ft (ROP {:.0} ft/hr). \
          Next formation: {} at {:.0} ft remaining. Source: formation_prognosis",
-        current_depth_ft,
-        current_rop,
-        look_ahead.formation_name,
-        look_ahead.depth_remaining_ft,
+        current_depth_ft, current_rop, look_ahead.formation_name, look_ahead.depth_remaining_ft,
     );
 
     StrategicAdvisory {

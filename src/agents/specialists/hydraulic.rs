@@ -18,7 +18,11 @@ impl Specialist for HydraulicSpecialist {
     ) -> SpecialistVote {
         let metrics = &ticket.current_metrics;
         let ecd_margin = metrics.ecd_margin;
-        let spp_delta = if metrics.spp_delta.is_finite() { metrics.spp_delta.abs() } else { 0.0 };
+        let spp_delta = if metrics.spp_delta.is_finite() {
+            metrics.spp_delta.abs()
+        } else {
+            0.0
+        };
 
         let cfg = crate::config::get();
 

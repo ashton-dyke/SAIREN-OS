@@ -1,25 +1,20 @@
 //! SAIREN-OS - Strategic AI Rig ENgine
 //!
-//! Real-time AI-powered drilling operational intelligence system for
+//! Real-time drilling operational intelligence system for
 //! WITS Level 0 data processing.
 //!
 //! # Usage
 //!
 //! ```bash
-//! # Run with synthetic test data (LLM compiled by default, CUDA detected at runtime)
+//! # Run with synthetic test data
 //! cargo run --release
 //!
 //! # Run with simulation input from stdin
 //! python wits_simulator.py | ./sairen-os --stdin
-//!
-//! # Run with GPU acceleration (requires CUDA toolkit)
-//! cargo run --release --features cuda
 //! ```
 //!
 //! # Environment Variables
 //!
-//! - `STRATEGIC_MODEL_PATH`: Path to strategic LLM (default: Qwen 7B GPU / 4B CPU)
-//! - `TACTICAL_MODEL_PATH`: Path to tactical LLM (only with `tactical_llm` feature)
 //! - `RUST_LOG`: Logging level (default: info)
 //! - `RESET_DB`: Set to "true" to wipe all persistent data on startup (for testing)
 
@@ -33,35 +28,35 @@ use tracing::{error, info, warn};
 
 mod acquisition;
 mod api;
-mod llm;
+mod gossip;
 mod ml_engine;
 mod pipeline;
 mod storage;
 mod strategic;
 
 // Multi-agent architecture modules
-pub mod config;
-pub mod types;
-pub mod agents;
-pub mod physics_engine;
-pub mod context;
-pub mod sensors;
-pub mod baseline;
 pub mod aci;
+pub mod agents;
+pub mod background;
+pub mod baseline;
+pub mod causal;
 pub mod cfc;
+pub mod config;
+pub mod context;
+pub mod debrief;
 pub mod fleet;
 pub mod knowledge_base;
-pub mod debrief;
-pub mod background;
 pub mod optimization;
-pub mod causal;
+pub mod physics_engine;
+pub mod sensors;
+pub mod types;
 pub mod volve;
 
-use axum::Router;
 use api::{create_app, DashboardState};
-use pipeline::{AppState, PipelineCoordinator};
-use pipeline::source::{PacketSource, CsvSource, StdinSource, TcpSource};
+use axum::Router;
 use pipeline::processing_loop::{PostProcessHooks, ProcessingLoop};
+use pipeline::source::{CsvSource, PacketSource, StdinSource, TcpSource};
+use pipeline::{AppState, PipelineCoordinator};
 
 // ============================================================================
 // CLI Arguments
@@ -131,51 +126,7 @@ enum SubCommand {
         #[arg(long, default_value = "/etc/sairen-os")]
         config_dir: String,
     },
-
-    /// Pair this rig with a Fleet Hub using a 6-digit code (no passphrase needed)
-    Pair {
-        /// Fleet Hub URL (e.g. http://hub:8080)
-        #[arg(long)]
-        hub: String,
-        /// Rig identifier
-        #[arg(long)]
-        rig_id: String,
-        /// Well identifier
-        #[arg(long)]
-        well_id: String,
-        /// Field name
-        #[arg(long)]
-        field: String,
-        /// Config directory (default: /etc/sairen-os)
-        #[arg(long, default_value = "/etc/sairen-os")]
-        config_dir: String,
-    },
-
-    /// [Deprecated] Enroll this rig with a Fleet Hub using the shared passphrase.
-    /// Use 'sairen-os setup' or 'sairen-os pair' instead.
-    #[command(hide = true)]
-    Enroll {
-        /// Fleet Hub URL (e.g. http://hub:8080)
-        #[arg(long)]
-        hub: String,
-        /// Shared fleet passphrase
-        #[arg(long)]
-        passphrase: String,
-        /// Rig identifier
-        #[arg(long)]
-        rig_id: String,
-        /// Well identifier
-        #[arg(long)]
-        well_id: String,
-        /// Field name
-        #[arg(long)]
-        field: String,
-        /// Config directory (default: /etc/sairen-os)
-        #[arg(long, default_value = "/etc/sairen-os")]
-        config_dir: String,
-    },
 }
-
 
 // ============================================================================
 // Database Reset
@@ -242,12 +193,8 @@ enum TaskName {
     HttpServer,
     PacketProcessor,
     MLScheduler,
-    FleetUploader,
-    FleetLibrarySync,
-    FleetIntelligenceSync,
-    FederationUpload,
-    FederationPull,
     ConfigWatcher,
+    GossipBroadcast,
 }
 
 impl std::fmt::Display for TaskName {
@@ -256,12 +203,8 @@ impl std::fmt::Display for TaskName {
             TaskName::HttpServer => write!(f, "HttpServer"),
             TaskName::PacketProcessor => write!(f, "PacketProcessor"),
             TaskName::MLScheduler => write!(f, "MLScheduler"),
-            TaskName::FleetUploader => write!(f, "FleetUploader"),
-            TaskName::FleetLibrarySync => write!(f, "FleetLibrarySync"),
-            TaskName::FleetIntelligenceSync => write!(f, "FleetIntelligenceSync"),
-            TaskName::FederationUpload => write!(f, "FederationUpload"),
-            TaskName::FederationPull => write!(f, "FederationPull"),
             TaskName::ConfigWatcher => write!(f, "ConfigWatcher"),
+            TaskName::GossipBroadcast => write!(f, "GossipBroadcast"),
         }
     }
 }
@@ -279,6 +222,10 @@ struct PipelineCore {
     listener: tokio::net::TcpListener,
     app: Router,
     equipment_id: String,
+    /// Gossip event store (shared with server handlers and client loop).
+    gossip_store: Option<Arc<tokio::sync::Mutex<gossip::store::EventStore>>>,
+    /// Mesh peer sync state (shared with server handlers and client loop).
+    mesh_state: Option<Arc<gossip::state::MeshState>>,
 }
 
 /// Initialize the shared pipeline: AppState, storage, thresholds, coordinator,
@@ -291,8 +238,8 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
     info!("✓ Application state initialized");
 
     info!("🔒 Acquiring process lock...");
-    let _process_lock = storage::ProcessLock::acquire("./data")
-        .context("Failed to acquire process lock")?;
+    let _process_lock =
+        storage::ProcessLock::acquire("./data").context("Failed to acquire process lock")?;
     info!("✓ Process lock acquired");
 
     info!("💾 Initializing strategic history storage...");
@@ -385,8 +332,6 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
         }
     };
 
-    // LLM inference runs exclusively on the fleet hub (CUDA GPU, embedded mistralrs).
-    // The edge pipeline always uses deterministic template advisories.
     let coordinator = PipelineCoordinator::new_with_thresholds(
         threshold_manager.clone(),
         equipment_id.to_string(),
@@ -422,7 +367,49 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
         Err(e) => warn!("Failed to open ML insights storage for dashboard: {}", e),
     }
 
-    let app = create_app(dashboard_state);
+    let mut app = create_app(dashboard_state);
+
+    // Initialize gossip store and mesh routes if mesh is enabled
+    let mesh_cfg = &config::get().mesh;
+    let (gossip_store, mesh_state) = if mesh_cfg.enabled {
+        info!("🔗 Initializing P2P mesh gossip...");
+        std::fs::create_dir_all("./data").ok();
+        let store_path = std::path::Path::new("./data/gossip_events.db");
+        match gossip::store::EventStore::open(store_path) {
+            Ok(store) => {
+                let store = Arc::new(tokio::sync::Mutex::new(store));
+                let sled_db =
+                    sled::open("./data/mesh_state").context("Failed to open mesh state sled DB")?;
+                let mesh_st = Arc::new(
+                    gossip::state::MeshState::new(&sled_db)
+                        .map_err(|e| anyhow::anyhow!("Failed to init mesh state: {}", e))?,
+                );
+
+                let handler_state = gossip::server::MeshHandlerState {
+                    node_id: equipment_id.to_string(),
+                    store: Arc::clone(&store),
+                    mesh_state: Arc::clone(&mesh_st),
+                };
+                app = app.nest(
+                    "/api/mesh",
+                    api::mesh_routes::mesh_api_routes(handler_state),
+                );
+
+                info!(
+                    "✓ Mesh gossip initialized ({} peers configured)",
+                    mesh_cfg.peers.len()
+                );
+                (Some(store), Some(mesh_st))
+            }
+            Err(e) => {
+                warn!("Failed to open gossip event store: {} — mesh disabled", e);
+                (None, None)
+            }
+        }
+    } else {
+        info!("[Mesh] Disabled (mesh.enabled = false)");
+        (None, None)
+    };
 
     let listener = tokio::net::TcpListener::bind(server_addr)
         .await
@@ -440,6 +427,8 @@ async fn init_pipeline(equipment_id: &str, server_addr: &str) -> Result<Pipeline
         listener,
         app,
         equipment_id: equipment_id.to_string(),
+        gossip_store,
+        mesh_state,
     })
 }
 
@@ -471,157 +460,6 @@ fn spawn_http_server(
             }
         }
     });
-}
-
-/// Fleet + federation task return type.
-struct FleetTasksResult {
-    fleet_ctx: pipeline::processing_loop::FleetContext,
-    federation_ctx: Option<pipeline::processing_loop::FederationContext>,
-}
-
-/// Spawn fleet client background tasks (uploader + library sync + federation).
-///
-/// Returns a `FleetContext` with the shared queue so the packet processor
-/// can enqueue events directly, plus an optional `FederationContext` if
-/// federated weight sharing is enabled.
-fn spawn_fleet_tasks(
-    task_set: &mut JoinSet<Result<TaskName>>,
-) -> Option<FleetTasksResult> {
-    use fleet::{FleetClient, UploadQueue};
-    use fleet::uploader::run_uploader;
-    use fleet::sync::run_library_sync;
-    use context::RAMRecall;
-
-    let hub_url = match std::env::var("FLEET_HUB_URL") {
-        Ok(v) if !v.is_empty() => v,
-        _ => {
-            info!("Fleet client disabled (FLEET_HUB_URL not set)");
-            return None;
-        }
-    };
-    let passphrase = match std::env::var("FLEET_PASSPHRASE") {
-        Ok(v) if !v.is_empty() => v,
-        _ => {
-            warn!("Fleet client disabled (FLEET_PASSPHRASE not set)");
-            return None;
-        }
-    };
-    let rig_id = std::env::var("FLEET_RIG_ID").unwrap_or_else(|_| "UNKNOWN".to_string());
-    let well_id = std::env::var("WELL_ID")
-        .unwrap_or_else(|_| config::get().well.name.clone());
-
-    let client = FleetClient::new(&hub_url, &passphrase, &rig_id);
-    info!("Fleet client initialized — hub: {}, rig: {}", hub_url, rig_id);
-
-    let queue = match UploadQueue::open("./data/fleet_queue") {
-        Ok(q) => Arc::new(q),
-        Err(e) => {
-            error!("Failed to open fleet upload queue: {} — fleet disabled", e);
-            return None;
-        }
-    };
-
-    let ram_recall = Arc::new(RAMRecall::new());
-
-    // Task: Fleet Uploader (drain queue -> hub every 60s)
-    let uploader_client = client.clone();
-    let uploader_queue = Arc::clone(&queue);
-    task_set.spawn(async move {
-        info!("[FleetUploader] Task starting");
-        run_uploader(uploader_queue, uploader_client, config::defaults::FLEET_UPLOADER_INTERVAL_SECS).await;
-        Ok(TaskName::FleetUploader)
-    });
-
-    // Task: Fleet Library Sync (pull precedents every 6h, jitter +/-30min)
-    let library_client = client.clone();
-    task_set.spawn(async move {
-        info!("[FleetLibrarySync] Task starting");
-        run_library_sync(library_client, ram_recall, config::defaults::FLEET_LIBRARY_SYNC_INTERVAL_SECS, config::defaults::FLEET_LIBRARY_SYNC_JITTER_SECS).await;
-        Ok(TaskName::FleetLibrarySync)
-    });
-
-    // Task: Fleet Intelligence Sync (pull hub LLM outputs every 4h, jitter +/-30min)
-    let intel_client = client.clone();
-    let intel_cache_path = std::path::PathBuf::from("./data/fleet_intelligence.json");
-    task_set.spawn(async move {
-        info!("[FleetIntelligenceSync] Task starting");
-        fleet::sync::run_intelligence_sync(
-            intel_client,
-            intel_cache_path,
-            config::defaults::FLEET_INTELLIGENCE_SYNC_INTERVAL_SECS,
-            config::defaults::FLEET_INTELLIGENCE_SYNC_JITTER_SECS,
-        ).await;
-        Ok(TaskName::FleetIntelligenceSync)
-    });
-
-    // Federation tasks (opt-in via config)
-    let fed_config = &config::get().federation;
-    let federation_ctx = if fed_config.enable {
-        info!(
-            "[Federation] Enabled — upload every {}s, pull every {}s, policy: {:?}",
-            fed_config.checkpoint_interval_secs,
-            fed_config.pull_interval_secs,
-            fed_config.init_policy,
-        );
-
-        // Watch channels: processing loop <-> federation tasks
-        let (checkpoint_tx, checkpoint_rx) =
-            tokio::sync::watch::channel::<Option<crate::cfc::checkpoint::DualCfcCheckpoint>>(None);
-        let (fed_model_tx, fed_model_rx) =
-            tokio::sync::watch::channel::<Option<crate::cfc::checkpoint::DualCfcCheckpoint>>(None);
-        let (local_packets_tx, local_packets_rx) =
-            tokio::sync::watch::channel::<u64>(0);
-
-        // Task: Federation Upload
-        let upload_client = client.clone();
-        let checkpoint_path = fed_config.checkpoint_path.clone();
-        let upload_interval = fed_config.checkpoint_interval_secs;
-        let min_packets = fed_config.min_packets_for_upload;
-        task_set.spawn(async move {
-            info!("[FederationUpload] Task starting");
-            fleet::federation::run_checkpoint_upload(
-                upload_client,
-                checkpoint_rx,
-                checkpoint_path,
-                upload_interval,
-                min_packets,
-            ).await;
-            Ok(TaskName::FederationUpload)
-        });
-
-        // Task: Federation Pull
-        let pull_client = client.clone();
-        let pull_interval = fed_config.pull_interval_secs;
-        let policy = fed_config.init_policy.clone();
-        task_set.spawn(async move {
-            info!("[FederationPull] Task starting");
-            fleet::federation::run_federation_pull(
-                pull_client,
-                fed_model_tx,
-                policy,
-                pull_interval,
-                local_packets_rx,
-            ).await;
-            Ok(TaskName::FederationPull)
-        });
-
-        Some(pipeline::processing_loop::FederationContext {
-            checkpoint_tx,
-            federation_model_rx: fed_model_rx,
-            local_packets_tx,
-            rig_id: rig_id.clone(),
-            well_id: well_id.clone(),
-            checkpoint_interval_packets: fed_config.min_packets_for_upload,
-        })
-    } else {
-        info!("[Federation] Disabled (federation.enable = false)");
-        None
-    };
-
-    Some(FleetTasksResult {
-        fleet_ctx: pipeline::processing_loop::FleetContext { queue, rig_id, well_id },
-        federation_ctx,
-    })
 }
 
 /// Spawn the ML Engine Scheduler task.
@@ -755,10 +593,7 @@ fn spawn_ml_scheduler(
 ///
 /// Only starts if a config file path was recorded at startup. The watcher
 /// polls the file's mtime and triggers `config::reload()` on changes.
-fn spawn_config_watcher(
-    task_set: &mut JoinSet<Result<TaskName>>,
-    cancel_token: CancellationToken,
-) {
+fn spawn_config_watcher(task_set: &mut JoinSet<Result<TaskName>>, cancel_token: CancellationToken) {
     let Some(path) = config::config_path().cloned() else {
         info!("[ConfigWatcher] No config file path recorded — watcher disabled");
         return;
@@ -768,7 +603,10 @@ fn spawn_config_watcher(
 
     // Spawn the polling loop
     task_set.spawn(async move {
-        info!("[ConfigWatcher] Task starting — watching {}", path.display());
+        info!(
+            "[ConfigWatcher] Task starting — watching {}",
+            path.display()
+        );
 
         tokio::select! {
             _ = cancel_token.cancelled() => {
@@ -869,10 +707,9 @@ async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
     info!("   Phase 4: History Buffer (60 packets)");
     info!("   Phase 5: Strategic Agent -> verify_ticket()");
     info!("   Phase 6: Context Lookup");
-    info!("   Phase 7: LLM Explainer");
-    info!("   Phase 8: Orchestrator Voting (4 Specialists)");
-    info!("   Phase 9: Storage");
-    info!("   Phase 10: Dashboard API");
+    info!("   Phase 7: Orchestrator Voting (4 Specialists)");
+    info!("   Phase 8: Storage");
+    info!("   Phase 9: Dashboard API");
     info!("");
 
     let core = init_pipeline(equipment_id, &server_addr).await?;
@@ -884,37 +721,13 @@ async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
     // Task 1: HTTP Server
     spawn_http_server(&mut task_set, core.listener, core.app, cancel_token.clone());
 
-    // Fleet client background tasks (+ optional federation)
-    let fleet_result = spawn_fleet_tasks(&mut task_set);
-    let (proc_fleet, proc_federation) = match fleet_result {
-        Some(r) => (Some(r.fleet_ctx), r.federation_ctx),
-        None => (None, None),
-    };
-
     // Task 2: Packet Processor (unified processing loop)
     let proc_cancel = cancel_token.clone();
     let proc_state = Arc::clone(&app_state);
     task_set.spawn(async move {
         info!("[PacketProcessor] Task starting");
 
-        let processing_loop = ProcessingLoop::new(
-            core.coordinator,
-            proc_state,
-            hooks,
-            proc_cancel,
-        );
-
-        let processing_loop = if let Some(ctx) = proc_fleet {
-            processing_loop.with_fleet(ctx)
-        } else {
-            processing_loop
-        };
-
-        let processing_loop = if let Some(ctx) = proc_federation {
-            processing_loop.with_federation(ctx)
-        } else {
-            processing_loop
-        };
+        let processing_loop = ProcessingLoop::new(core.coordinator, proc_state, hooks, proc_cancel);
 
         let _stats = processing_loop.run(&mut source).await;
         Ok(TaskName::PacketProcessor)
@@ -927,6 +740,25 @@ async fn run_pipeline<S: PacketSource, H: PostProcessHooks>(
 
     // Task 4: Config File Watcher (hot-reload on file changes)
     spawn_config_watcher(&mut task_set, cancel_token.clone());
+
+    // Task 5: Gossip Broadcast (if mesh is enabled)
+    if let (Some(gossip_store), Some(mesh_state)) = (core.gossip_store, core.mesh_state) {
+        let gossip_cfg = config::get().gossip.clone();
+        let mesh_cfg = config::get().mesh.clone();
+        let node_id = core.equipment_id.clone();
+        task_set.spawn(async move {
+            info!("[GossipBroadcast] Task starting");
+            gossip::client::run_gossip_loop(
+                node_id,
+                mesh_cfg.peers,
+                gossip_store,
+                mesh_state,
+                gossip_cfg,
+            )
+            .await;
+            Ok(TaskName::GossipBroadcast)
+        });
+    }
 
     run_supervisor(&mut task_set, cancel_token).await
 }
@@ -963,183 +795,6 @@ fn load_packets(csv_path: Option<String>) -> Result<Vec<types::WitsPacket>> {
         info!("   Generated {} packets", data.len());
         Ok(data)
     }
-}
-
-// ============================================================================
-// Enrollment
-// ============================================================================
-
-/// Update or insert an environment variable in a shell env file.
-///
-/// If the variable exists (commented or not), update its value.
-/// Otherwise, append it at the end.
-fn update_env_var(contents: &str, key: &str, value: &str) -> String {
-    let mut found = false;
-    let mut lines: Vec<String> = contents
-        .lines()
-        .map(|line| {
-            let trimmed = line.trim();
-            // Match both "KEY=..." and "# KEY=..."
-            if trimmed.starts_with(&format!("{}=", key))
-                || trimmed.starts_with(&format!("# {}=", key))
-            {
-                found = true;
-                format!("{}={}", key, value)
-            } else {
-                line.to_string()
-            }
-        })
-        .collect();
-
-    if !found {
-        lines.push(format!("{}={}", key, value));
-    }
-
-    let mut result = lines.join("\n");
-    if !result.ends_with('\n') {
-        result.push('\n');
-    }
-    result
-}
-
-/// Enroll this rig with a Fleet Hub using the shared passphrase.
-///
-/// 1. POST /api/fleet/enroll with passphrase auth + rig identity
-/// 2. Write env vars to config_dir/env
-/// 3. Update well_config.toml
-/// 4. Verify hub connectivity
-/// 5. Verify passphrase authentication
-async fn run_enroll(hub_url: &str, passphrase: &str, rig_id: &str, well_id: &str, field: &str, config_dir: &str) -> Result<()> {
-    use std::path::Path;
-
-    let hub_url = hub_url.trim_end_matches('/');
-    let config_path = Path::new(config_dir);
-
-    println!("Enrolling with Fleet Hub: {}", hub_url);
-    println!();
-
-    // Step 1: Enroll rig with passphrase auth
-    println!("  [1/5] Enrolling rig {}...", rig_id);
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(30))
-        .build()
-        .context("Failed to build HTTP client")?;
-
-    let body = serde_json::json!({
-        "rig_id": rig_id,
-        "well_id": well_id,
-        "field": field,
-    });
-    let resp = http
-        .post(format!("{}/api/fleet/enroll", hub_url))
-        .header("Authorization", format!("Bearer {}", passphrase))
-        .json(&body)
-        .send()
-        .await
-        .context("Failed to connect to Fleet Hub")?;
-
-    if !resp.status().is_success() {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(anyhow::anyhow!(
-            "Enrollment failed (HTTP {}): {}",
-            status,
-            text
-        ));
-    }
-
-    #[derive(serde::Deserialize)]
-    struct EnrollResponse {
-        rig_id: String,
-        well_id: String,
-        field: String,
-    }
-
-    let enrollment: EnrollResponse = resp.json().await.context("Invalid enrollment response")?;
-    println!("        Rig:   {}", enrollment.rig_id);
-    println!("        Well:  {}", enrollment.well_id);
-    println!("        Field: {}", enrollment.field);
-
-    // Step 2: Write env file
-    println!("  [2/5] Writing environment to {}/env...", config_dir);
-    let env_path = config_path.join("env");
-    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
-    let mut updated = existing;
-    updated = update_env_var(&updated, "FLEET_HUB_URL", hub_url);
-    updated = update_env_var(&updated, "FLEET_PASSPHRASE", passphrase);
-    updated = update_env_var(&updated, "FLEET_RIG_ID", &enrollment.rig_id);
-    updated = update_env_var(&updated, "WELL_ID", &enrollment.well_id);
-    std::fs::write(&env_path, &updated)
-        .with_context(|| format!("Failed to write {}", env_path.display()))?;
-
-    // Step 3: Update well_config.toml
-    println!("  [3/5] Updating {}/well_config.toml...", config_dir);
-    let well_config_path = config_path.join("well_config.toml");
-    let mut well_config = if well_config_path.exists() {
-        config::WellConfig::load_from_file(&well_config_path)
-            .unwrap_or_else(|_| config::WellConfig::default())
-    } else {
-        config::WellConfig::default()
-    };
-    well_config.well.name = enrollment.well_id.clone();
-    well_config.well.field = enrollment.field.clone();
-    well_config.well.rig = enrollment.rig_id.clone();
-    well_config
-        .save_to_file(&well_config_path)
-        .with_context(|| format!("Failed to write {}", well_config_path.display()))?;
-
-    // Step 4: Verify hub reachability
-    println!("  [4/5] Verifying hub connectivity...");
-    let health_resp = http
-        .get(format!("{}/api/fleet/health", hub_url))
-        .send()
-        .await;
-    match health_resp {
-        Ok(r) if r.status().is_success() => {
-            println!("        Hub is healthy");
-        }
-        Ok(r) => {
-            warn!("Hub health check returned {}", r.status());
-            println!("        WARNING: Hub returned {}", r.status());
-        }
-        Err(e) => {
-            warn!("Hub health check failed: {}", e);
-            println!("        WARNING: Hub unreachable ({})", e);
-        }
-    }
-
-    // Step 5: Verify passphrase auth
-    println!("  [5/5] Verifying passphrase authentication...");
-    let lib_resp = http
-        .get(format!("{}/api/fleet/library", hub_url))
-        .header("Authorization", format!("Bearer {}", passphrase))
-        .header("X-Rig-ID", rig_id)
-        .send()
-        .await;
-    match lib_resp {
-        Ok(r) if r.status().is_success() || r.status() == reqwest::StatusCode::NOT_MODIFIED => {
-            println!("        Authentication verified");
-        }
-        Ok(r) => {
-            let status = r.status();
-            return Err(anyhow::anyhow!(
-                "Passphrase verification failed (HTTP {})",
-                status
-            ));
-        }
-        Err(e) => {
-            return Err(anyhow::anyhow!("Passphrase verification failed: {}", e));
-        }
-    }
-
-    println!();
-    println!("  Enrollment complete!");
-    println!();
-    println!("  Next step:");
-    println!("    sudo systemctl restart sairen-os");
-    println!();
-
-    Ok(())
 }
 
 // ============================================================================
@@ -1285,138 +940,6 @@ async fn run_setup(ports: Option<String>, addr: &str, config_dir: &str) -> Resul
 }
 
 // ============================================================================
-// CLI Pairing (headless)
-// ============================================================================
-
-/// Pair with a Fleet Hub using a 6-digit code (headless CLI flow).
-async fn run_pair(hub_url: &str, rig_id: &str, well_id: &str, field: &str, config_dir: &str) -> Result<()> {
-    use rand::Rng;
-    use std::path::Path;
-
-    let hub_url = hub_url.trim_end_matches('/');
-    let code: String = {
-        let mut rng = rand::thread_rng();
-        format!("{:06}", rng.gen_range(0..1_000_000u32))
-    };
-
-    println!("Pairing with Fleet Hub: {}", hub_url);
-    println!();
-
-    // Step 1: Send pairing request
-    let http = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()
-        .context("Failed to build HTTP client")?;
-
-    let body = serde_json::json!({
-        "rig_id": rig_id,
-        "well_id": well_id,
-        "field": field,
-        "code": code,
-    });
-
-    let resp = http
-        .post(format!("{}/api/fleet/pair/request", hub_url))
-        .json(&body)
-        .send()
-        .await
-        .context("Failed to send pairing request to hub")?;
-
-    if !resp.status().is_success() && resp.status().as_u16() != 202 {
-        let status = resp.status();
-        let text = resp.text().await.unwrap_or_default();
-        return Err(anyhow::anyhow!("Hub rejected pairing request (HTTP {}): {}", status, text));
-    }
-
-    println!("  Pairing code: {}", code);
-    println!();
-    println!("  Approve this code on the Fleet Hub dashboard.");
-    println!("  Waiting for approval...");
-
-    // Step 2: Poll for approval
-    let poll_interval = std::time::Duration::from_secs(3);
-    let max_wait = std::time::Duration::from_secs(600); // 10 minutes
-    let start = std::time::Instant::now();
-
-    let passphrase = loop {
-        if start.elapsed() > max_wait {
-            return Err(anyhow::anyhow!("Pairing code expired (10 minute timeout)"));
-        }
-
-        tokio::time::sleep(poll_interval).await;
-
-        let status_resp = http
-            .get(format!("{}/api/fleet/pair/status?code={}", hub_url, code))
-            .send()
-            .await;
-
-        match status_resp {
-            Ok(r) if r.status().is_success() => {
-                #[derive(serde::Deserialize)]
-                struct PairStatus {
-                    status: String,
-                    passphrase: Option<String>,
-                }
-
-                if let Ok(s) = r.json::<PairStatus>().await {
-                    match s.status.as_str() {
-                        "approved" => {
-                            if let Some(pass) = s.passphrase {
-                                break pass;
-                            }
-                            return Err(anyhow::anyhow!("Approved but no passphrase returned"));
-                        }
-                        "expired" => {
-                            return Err(anyhow::anyhow!("Pairing code expired"));
-                        }
-                        _ => {
-                            // Still pending, keep polling
-                            print!(".");
-                            use std::io::Write;
-                            std::io::stdout().flush().ok();
-                        }
-                    }
-                }
-            }
-            _ => {
-                // Network error, retry
-                print!("!");
-                use std::io::Write;
-                std::io::stdout().flush().ok();
-            }
-        }
-    };
-
-    println!();
-    println!();
-    println!("  Paired successfully!");
-
-    // Step 3: Write env file
-    let config_path = Path::new(config_dir);
-    if let Err(e) = std::fs::create_dir_all(config_path) {
-        warn!("Failed to create config directory: {}", e);
-    }
-
-    let env_path = config_path.join("env");
-    let existing = std::fs::read_to_string(&env_path).unwrap_or_default();
-    let mut updated = existing;
-    updated = update_env_var(&updated, "FLEET_HUB_URL", hub_url);
-    updated = update_env_var(&updated, "FLEET_PASSPHRASE", &passphrase);
-    updated = update_env_var(&updated, "FLEET_RIG_ID", rig_id);
-    updated = update_env_var(&updated, "WELL_ID", well_id);
-    std::fs::write(&env_path, &updated)
-        .with_context(|| format!("Failed to write {}", env_path.display()))?;
-
-    println!("  Fleet env written to {}", env_path.display());
-    println!();
-    println!("  Next step:");
-    println!("    sudo systemctl restart sairen-os");
-    println!();
-
-    Ok(())
-}
-
-// ============================================================================
 // Main Entry Point
 // ============================================================================
 
@@ -1464,34 +987,6 @@ async fn main() -> Result<()> {
     {
         let bind_addr = addr.as_deref().unwrap_or("0.0.0.0:8080");
         return run_setup(ports.clone(), bind_addr, config_dir).await;
-    }
-
-    if let Some(SubCommand::Pair {
-        hub,
-        rig_id,
-        well_id,
-        field,
-        config_dir,
-    }) = &args.command
-    {
-        return run_pair(hub, rig_id, well_id, field, config_dir).await;
-    }
-
-    if let Some(SubCommand::Enroll {
-        hub,
-        passphrase,
-        rig_id,
-        well_id,
-        field,
-        config_dir,
-    }) = &args.command
-    {
-        warn!("'sairen-os enroll' is deprecated — use 'sairen-os setup' or 'sairen-os pair' instead");
-        eprintln!("WARNING: 'sairen-os enroll' is deprecated.");
-        eprintln!("  Use 'sairen-os setup' for the web-based wizard, or");
-        eprintln!("  Use 'sairen-os pair' for headless pairing with a 6-digit code.");
-        eprintln!();
-        return run_enroll(hub, passphrase, rig_id, well_id, field, config_dir).await;
     }
 
     // Reset DB check — BEFORE any storage initialization
@@ -1544,7 +1039,10 @@ async fn main() -> Result<()> {
         if let Some(cached) = config::auto_detect::AutoDetectedValues::load_cached() {
             if let Some(mw) = cached.normal_mud_weight_ppg {
                 if !provenance.is_user_set("thresholds.hydraulics.normal_mud_weight_ppg") {
-                    info!("Restored auto-detected mud weight: {:.1} ppg (from cache)", mw);
+                    info!(
+                        "Restored auto-detected mud weight: {:.1} ppg (from cache)",
+                        mw
+                    );
                     well_config.thresholds.hydraulics.normal_mud_weight_ppg = mw;
                 }
             }
@@ -1574,7 +1072,6 @@ async fn main() -> Result<()> {
         ("WELL_ID", "well.name"),
         ("FIELD_NAME", "well.field"),
         ("SAIREN_SERVER_ADDR", "server.addr"),
-        ("ML_INTERVAL_SECS", "ml.interval_secs"),
     ] {
         if std::env::var(env_var).is_ok() {
             warn!(
@@ -1594,16 +1091,26 @@ async fn main() -> Result<()> {
             .filter(|p| p.exists())
             .or_else(|| {
                 let local = std::path::PathBuf::from("well_config.toml");
-                if local.exists() { Some(local) } else { None }
+                if local.exists() {
+                    Some(local)
+                } else {
+                    None
+                }
             });
         if let Some(path) = config_file {
             match path.canonicalize() {
                 Ok(abs) => {
-                    info!("Config file path recorded for hot-reload: {}", abs.display());
+                    info!(
+                        "Config file path recorded for hot-reload: {}",
+                        abs.display()
+                    );
                     config::set_config_path(abs);
                 }
                 Err(_) => {
-                    info!("Config file path recorded for hot-reload: {}", path.display());
+                    info!(
+                        "Config file path recorded for hot-reload: {}",
+                        path.display()
+                    );
                     config::set_config_path(path);
                 }
             }
@@ -1611,7 +1118,8 @@ async fn main() -> Result<()> {
     }
 
     // Server address: CLI > env > TOML > default
-    let server_addr = args.addr
+    let server_addr = args
+        .addr
         .or_else(|| std::env::var("SAIREN_SERVER_ADDR").ok())
         .unwrap_or_else(|| config::get().server.addr.clone());
 
@@ -1621,15 +1129,7 @@ async fn main() -> Result<()> {
     info!("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━");
     info!("");
 
-    #[cfg(feature = "llm")]
-    let cuda_available = llm::is_cuda_available();
-    #[cfg(not(feature = "llm"))]
-    let cuda_available = false;
-    if cuda_available {
-        info!("Hardware: CUDA detected - LLM inference will use GPU");
-    } else {
-        info!("Hardware: No CUDA GPU - LLM disabled (template-based advisories)");
-    }
+    info!("Hardware: CfC neural networks (pure Rust, no GPU required)");
     info!("");
 
     // Graceful shutdown via Ctrl+C
@@ -1659,7 +1159,15 @@ async fn main() -> Result<()> {
     } else if args.stdin {
         // --- Stdin mode ---
         info!("📥 Input: stdin (JSON WITS packets from simulation)");
-        run_pipeline(StdinSource::new(), (), "WITS", server_addr, false, cancel_token).await?;
+        run_pipeline(
+            StdinSource::new(),
+            (),
+            "WITS",
+            server_addr,
+            false,
+            cancel_token,
+        )
+        .await?;
     } else {
         // --- CSV / synthetic mode ---
         // Reuse preloaded packets from auto-detection if available, otherwise load fresh

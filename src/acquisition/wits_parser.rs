@@ -234,7 +234,10 @@ impl WitsClient {
     pub async fn read_packet(&mut self) -> Result<WitsPacket, WitsError> {
         // Check for stale connection
         let now = current_unix_secs();
-        if self.connected && self.last_data_time > 0 && (now - self.last_data_time) > STALE_CONNECTION_SECS {
+        if self.connected
+            && self.last_data_time > 0
+            && (now - self.last_data_time) > STALE_CONNECTION_SECS
+        {
             tracing::warn!(
                 silent_secs = now - self.last_data_time,
                 threshold = STALE_CONNECTION_SECS,
@@ -277,7 +280,9 @@ impl WitsClient {
 
     /// Inner packet read with timeout — does NOT auto-reconnect.
     async fn read_packet_inner(&mut self) -> Result<WitsPacket, WitsError> {
-        let reader = self.stream.as_mut()
+        let reader = self
+            .stream
+            .as_mut()
             .ok_or(WitsError::ConnectionFailed("Not connected".to_string()))?;
 
         let mut items: HashMap<String, f64> = HashMap::new();
@@ -287,11 +292,8 @@ impl WitsClient {
         loop {
             self.line_buffer.clear();
 
-            let read_result = tokio::time::timeout(
-                read_timeout,
-                reader.read_line(&mut self.line_buffer),
-            )
-            .await;
+            let read_result =
+                tokio::time::timeout(read_timeout, reader.read_line(&mut self.line_buffer)).await;
 
             let bytes = match read_result {
                 Ok(Ok(b)) => b,
@@ -372,15 +374,24 @@ impl WitsClient {
         let flow_out = items.get(wits_items::FLOW_OUT).copied().unwrap_or(0.0);
         let pit_volume = items.get(wits_items::PIT_VOLUME).copied().unwrap_or(0.0);
         let mud_weight_in = items.get(wits_items::MUD_WEIGHT_IN).copied().unwrap_or(0.0);
-        let mud_weight_out = items.get(wits_items::MUD_WEIGHT_OUT).copied().unwrap_or(0.0);
+        let mud_weight_out = items
+            .get(wits_items::MUD_WEIGHT_OUT)
+            .copied()
+            .unwrap_or(0.0);
         let mud_temp_in = items.get(wits_items::MUD_TEMP_IN).copied().unwrap_or(0.0);
         let mud_temp_out = items.get(wits_items::MUD_TEMP_OUT).copied().unwrap_or(0.0);
-        let casing_pressure = items.get(wits_items::CASING_PRESSURE).copied().unwrap_or(0.0);
+        let casing_pressure = items
+            .get(wits_items::CASING_PRESSURE)
+            .copied()
+            .unwrap_or(0.0);
         let gas_units = items.get(wits_items::GAS_UNITS).copied().unwrap_or(0.0);
         let h2s = items.get(wits_items::H2S).copied().unwrap_or(0.0);
         let co2 = items.get(wits_items::CO2).copied().unwrap_or(0.0);
         let ecd = items.get(wits_items::ECD).copied().unwrap_or(0.0);
-        let block_position = items.get(wits_items::BLOCK_POSITION).copied().unwrap_or(0.0);
+        let block_position = items
+            .get(wits_items::BLOCK_POSITION)
+            .copied()
+            .unwrap_or(0.0);
 
         // Classify rig state based on parameters
         let rig_state = classify_rig_state(rpm, wob, hook_load, rop, block_position);
@@ -434,7 +445,8 @@ impl WitsClient {
             // State
             rig_state,
             regime_id: 0,
-            seconds_since_param_change: 0,        }
+            seconds_since_param_change: 0,
+        }
     }
 
     /// Check if connected
@@ -445,7 +457,13 @@ impl WitsClient {
 }
 
 /// Classify rig state from drilling parameters
-fn classify_rig_state(rpm: f64, wob: f64, hook_load: f64, rop: f64, block_position: f64) -> RigState {
+fn classify_rig_state(
+    rpm: f64,
+    wob: f64,
+    hook_load: f64,
+    rop: f64,
+    block_position: f64,
+) -> RigState {
     // Minimum ROP threshold to prevent sensor noise flip-flop (matches config default)
     const ROP_MIN: f64 = 2.0;
 
@@ -575,10 +593,8 @@ pub fn validate_packet_quality(packet: &WitsPacket) -> DataQualityReport {
     }
 
     // ---- Zero-value critical field checks ----
-    let critical_fields: &[(&str, f64)] = &[
-        ("bit_depth", packet.bit_depth),
-        ("flow_in", packet.flow_in),
-    ];
+    let critical_fields: &[(&str, f64)] =
+        &[("bit_depth", packet.bit_depth), ("flow_in", packet.flow_in)];
     for &(name, value) in critical_fields {
         if value.abs() < f64::EPSILON {
             zero_critical += 1;
@@ -639,6 +655,25 @@ pub fn validate_packet_quality(packet: &WitsPacket) -> DataQualityReport {
             message: format!("RPM > 500: {:.1} — sensor spike", packet.rpm),
         });
     }
+    if packet.torque < -50.0 {
+        impossible += 1;
+        issues.push(DataQualityIssue {
+            field: "torque".to_string(),
+            severity: QualitySeverity::Critical,
+            message: format!("Torque < -50 kft-lb: {:.1} — sensor failure", packet.torque),
+        });
+    }
+    if packet.torque > 100.0 {
+        impossible += 1;
+        issues.push(DataQualityIssue {
+            field: "torque".to_string(),
+            severity: QualitySeverity::Critical,
+            message: format!(
+                "Torque > 100 kft-lb: {:.1} — exceeds rig capacity",
+                packet.torque
+            ),
+        });
+    }
     if packet.spp < 0.0 {
         impossible += 1;
         issues.push(DataQualityIssue {
@@ -652,7 +687,34 @@ pub fn validate_packet_quality(packet: &WitsPacket) -> DataQualityReport {
         issues.push(DataQualityIssue {
             field: "spp".to_string(),
             severity: QualitySeverity::Critical,
-            message: format!("SPP > 10000 psi: {:.1}", packet.spp),
+            message: format!("SPP > 10000 psi: {:.1} — sensor spike", packet.spp),
+        });
+    }
+    if packet.hook_load < 0.0 {
+        impossible += 1;
+        issues.push(DataQualityIssue {
+            field: "hook_load".to_string(),
+            severity: QualitySeverity::Critical,
+            message: format!("Negative hookload: {:.1} klbs", packet.hook_load),
+        });
+    }
+    if packet.hook_load > 1000.0 {
+        impossible += 1;
+        issues.push(DataQualityIssue {
+            field: "hook_load".to_string(),
+            severity: QualitySeverity::Critical,
+            message: format!(
+                "Hookload > 1000 klbs: {:.1} — exceeds rig capacity",
+                packet.hook_load
+            ),
+        });
+    }
+    if packet.ecd != 0.0 && (packet.ecd < 5.0 || packet.ecd > 25.0) {
+        impossible += 1;
+        issues.push(DataQualityIssue {
+            field: "ecd".to_string(),
+            severity: QualitySeverity::Critical,
+            message: format!("ECD out of range: {:.2} ppg (valid: 5-25)", packet.ecd),
         });
     }
     if packet.mud_weight_in != 0.0 && (packet.mud_weight_in < 0.0 || packet.mud_weight_in > 25.0) {
@@ -660,7 +722,10 @@ pub fn validate_packet_quality(packet: &WitsPacket) -> DataQualityReport {
         issues.push(DataQualityIssue {
             field: "mud_weight_in".to_string(),
             severity: QualitySeverity::Critical,
-            message: format!("Mud weight out of range: {:.2} ppg (valid: 0-25)", packet.mud_weight_in),
+            message: format!(
+                "Mud weight out of range: {:.2} ppg (valid: 0-25)",
+                packet.mud_weight_in
+            ),
         });
     }
     if packet.h2s < 0.0 {
@@ -680,7 +745,10 @@ pub fn validate_packet_quality(packet: &WitsPacket) -> DataQualityReport {
             message: format!("Flow out ({:.0} gpm) without flow in", packet.flow_out),
         });
     }
-    if packet.bit_depth > 0.0 && packet.hole_depth > 0.0 && packet.bit_depth > packet.hole_depth + 10.0 {
+    if packet.bit_depth > 0.0
+        && packet.hole_depth > 0.0
+        && packet.bit_depth > packet.hole_depth + 10.0
+    {
         issues.push(DataQualityIssue {
             field: "bit_depth".to_string(),
             severity: QualitySeverity::Warning,
@@ -698,7 +766,9 @@ pub fn validate_packet_quality(packet: &WitsPacket) -> DataQualityReport {
         });
     }
 
-    let has_critical = issues.iter().any(|i| i.severity == QualitySeverity::Critical);
+    let has_critical = issues
+        .iter()
+        .any(|i| i.severity == QualitySeverity::Critical);
 
     DataQualityReport {
         usable: !has_critical,
@@ -708,17 +778,45 @@ pub fn validate_packet_quality(packet: &WitsPacket) -> DataQualityReport {
     }
 }
 
-/// Sanitize a WITS packet by clamping physically impossible values.
-/// Returns a DataQualityReport for logging (reuses existing validation).
+/// Sanitize a WITS packet using two-pass validation.
+///
+/// **Pass 1 — Hard gate:** Check raw values before any clamping. Physically
+/// impossible readings (e.g. Torque = -736 kft-lb, WOB = 565 klbs) trigger
+/// Critical rejection. This prevents clamping from hiding garbage data.
+///
+/// **Pass 2 — Soft clamp:** For packets that survive the hard gate, clamp
+/// mild negatives and replace NaN/Inf so downstream physics/ACI/CfC get
+/// clean inputs.
 pub fn sanitize_packet(packet: &mut WitsPacket) -> DataQualityReport {
+    // ── Pass 1: Hard gate on raw values ──────────────────────────────
+    let hard_report = validate_packet_quality(packet);
+    if !hard_report.usable {
+        return hard_report;
+    }
+
+    // ── Pass 2: Soft clamp for mild issues ───────────────────────────
     // Clamp negative values that should never be negative
-    if packet.wob < 0.0 { packet.wob = 0.0; }
-    if packet.torque < 0.0 { packet.torque = 0.0; }
-    if packet.rpm < 0.0 { packet.rpm = 0.0; }
-    if packet.rop < 0.0 { packet.rop = 0.0; }
-    if packet.flow_in < 0.0 { packet.flow_in = 0.0; }
-    if packet.flow_out < 0.0 { packet.flow_out = 0.0; }
-    if packet.spp < 0.0 { packet.spp = 0.0; }
+    if packet.wob < 0.0 {
+        packet.wob = 0.0;
+    }
+    if packet.torque < 0.0 {
+        packet.torque = 0.0;
+    }
+    if packet.rpm < 0.0 {
+        packet.rpm = 0.0;
+    }
+    if packet.rop < 0.0 {
+        packet.rop = 0.0;
+    }
+    if packet.flow_in < 0.0 {
+        packet.flow_in = 0.0;
+    }
+    if packet.flow_out < 0.0 {
+        packet.flow_out = 0.0;
+    }
+    if packet.spp < 0.0 {
+        packet.spp = 0.0;
+    }
 
     // Replace NaN/Inf with 0.0 for all f64 fields
     macro_rules! sanitize_nan {
@@ -726,19 +824,150 @@ pub fn sanitize_packet(packet: &mut WitsPacket) -> DataQualityReport {
             $(if !packet.$field.is_finite() { packet.$field = 0.0; })*
         }
     }
-    sanitize_nan!(bit_depth, hole_depth, rop, wob, rpm, torque, spp,
-                  flow_in, flow_out, pit_volume, mud_weight_in, mud_weight_out,
-                  ecd, gas_units, mud_temp_in, mud_temp_out);
+    sanitize_nan!(
+        bit_depth,
+        hole_depth,
+        rop,
+        wob,
+        rpm,
+        torque,
+        spp,
+        flow_in,
+        flow_out,
+        pit_volume,
+        mud_weight_in,
+        mud_weight_out,
+        ecd,
+        gas_units,
+        mud_temp_in,
+        mud_temp_out
+    );
 
-    // Run existing validation for reporting
-    validate_packet_quality(packet)
+    hard_report
+}
+
+// ============================================================================
+// Depth Continuity Tracking
+// ============================================================================
+
+/// Stateful depth validator that rejects packets with physically impossible
+/// depth changes between consecutive readings.
+///
+/// Individual packet validation (`validate_packet_quality`) catches negative
+/// depth or extreme values, but cannot detect impossible *sequences* like
+/// 10,000 ft → 0 ft → 10,001 ft. This tracker fills that gap.
+///
+/// Used by both the pipeline coordinator (live WITS) and volve_replay (CSV).
+pub struct DepthContinuityTracker {
+    /// Previous packet's bit_depth (None until first packet seen)
+    prev_depth: Option<f64>,
+    /// Previous packet's timestamp
+    prev_timestamp: Option<u64>,
+    /// Maximum plausible drilling rate (ft/hr) — depth changes faster than
+    /// this are rejected. Default: 500 ft/hr (generous upper bound; most
+    /// drilling is < 200 ft/hr, but tripping can move faster).
+    max_rate_ft_hr: f64,
+    /// Maximum allowed depth reversal during drilling state (ft).
+    /// Small reversals (< 5 ft) happen from sensor noise / tool rebound.
+    /// Large reversals during Drilling state indicate bad data.
+    max_drilling_reversal_ft: f64,
+    /// Packets rejected by this tracker (for diagnostics)
+    pub rejected_count: u64,
+}
+
+impl DepthContinuityTracker {
+    pub fn new() -> Self {
+        Self {
+            prev_depth: None,
+            prev_timestamp: None,
+            max_rate_ft_hr: 500.0,
+            max_drilling_reversal_ft: 50.0,
+            rejected_count: 0,
+        }
+    }
+
+    /// Check a packet for depth continuity violations.
+    ///
+    /// Returns `None` if the packet is acceptable, or `Some(reason)` if it
+    /// should be rejected. Either way, updates internal state for the next
+    /// call.
+    ///
+    /// Packets at depth 0.0 are skipped (no previous depth established) since
+    /// many idle/connection packets legitimately report zero depth.
+    pub fn check(&mut self, packet: &WitsPacket) -> Option<String> {
+        let depth = packet.bit_depth;
+        let ts = packet.timestamp;
+
+        // Skip depth-zero packets (idle/connection) — don't update state
+        if depth < f64::EPSILON {
+            return None;
+        }
+
+        let result = match (self.prev_depth, self.prev_timestamp) {
+            (Some(prev_d), Some(prev_ts)) if prev_d > f64::EPSILON => {
+                let depth_delta = depth - prev_d;
+                let time_delta_secs = ts.saturating_sub(prev_ts).max(1) as f64;
+                let time_delta_hrs = time_delta_secs / 3600.0;
+
+                // Maximum plausible depth change for this time interval
+                let max_delta = self.max_rate_ft_hr * time_delta_hrs;
+
+                // Check 1: Absolute depth change exceeds physical limit
+                if depth_delta.abs() > max_delta && max_delta > 1.0 {
+                    let reason = format!(
+                        "Depth jump {:.0} ft in {:.0}s ({:.0} ft/hr) exceeds max {:.0} ft/hr — prev {:.0}, cur {:.0}",
+                        depth_delta, time_delta_secs,
+                        depth_delta.abs() / time_delta_hrs,
+                        self.max_rate_ft_hr, prev_d, depth
+                    );
+                    self.rejected_count += 1;
+                    Some(reason)
+                }
+                // Check 2: Large depth reversal during drilling
+                else if depth_delta < -self.max_drilling_reversal_ft
+                    && packet.rig_state == crate::types::RigState::Drilling
+                {
+                    let reason = format!(
+                        "Depth reversal {:.0} ft during Drilling state — prev {:.0}, cur {:.0}",
+                        depth_delta, prev_d, depth
+                    );
+                    self.rejected_count += 1;
+                    Some(reason)
+                } else {
+                    None
+                }
+            }
+            _ => None, // First packet with nonzero depth — establish baseline
+        };
+
+        // Update state (only for accepted packets, so rejected ones don't
+        // poison the reference point)
+        if result.is_none() {
+            self.prev_depth = Some(depth);
+            self.prev_timestamp = Some(ts);
+        }
+
+        result
+    }
+
+    /// Reset the tracker (e.g., after a known trip-in/trip-out phase).
+    #[allow(dead_code)]
+    pub fn reset(&mut self) {
+        self.prev_depth = None;
+        self.prev_timestamp = None;
+    }
+}
+
+impl Default for DepthContinuityTracker {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Parse WITS JSON format (for testing with wits_simulator.py)
 #[allow(dead_code)]
 pub fn parse_wits_json(json_str: &str) -> Result<WitsPacket> {
-    let packet: WitsPacket = serde_json::from_str(json_str)
-        .context("Failed to parse WITS JSON")?;
+    let packet: WitsPacket = serde_json::from_str(json_str).context("Failed to parse WITS JSON")?;
     Ok(packet)
 }
 
@@ -805,13 +1034,22 @@ mod tests {
     #[test]
     fn test_rig_state_classification() {
         // Drilling
-        assert_eq!(classify_rig_state(120.0, 25.0, 200.0, 50.0, 50.0), RigState::Drilling);
+        assert_eq!(
+            classify_rig_state(120.0, 25.0, 200.0, 50.0, 50.0),
+            RigState::Drilling
+        );
 
         // Reaming
-        assert_eq!(classify_rig_state(80.0, 10.0, 180.0, 0.0, 60.0), RigState::Reaming);
+        assert_eq!(
+            classify_rig_state(80.0, 10.0, 180.0, 0.0, 60.0),
+            RigState::Reaming
+        );
 
         // Circulating
-        assert_eq!(classify_rig_state(50.0, 2.0, 150.0, 0.0, 50.0), RigState::Circulating);
+        assert_eq!(
+            classify_rig_state(50.0, 2.0, 150.0, 0.0, 50.0),
+            RigState::Circulating
+        );
 
         // Idle
         assert_eq!(classify_rig_state(0.0, 0.0, 30.0, 0.0, 0.0), RigState::Idle);
@@ -869,5 +1107,104 @@ mod tests {
         assert_eq!(packet.bit_depth, 10000.0);
         assert_eq!(packet.rop, 50.0);
         assert_eq!(packet.rig_state, RigState::Drilling);
+    }
+
+    // ── DepthContinuityTracker tests ──────────────────────────────
+
+    fn make_packet(depth: f64, timestamp: u64, rig_state: RigState) -> WitsPacket {
+        WitsPacket {
+            timestamp,
+            bit_depth: depth,
+            rig_state,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn depth_tracker_accepts_normal_drilling() {
+        let mut tracker = DepthContinuityTracker::new();
+        // 10 ft/hr at 1-second intervals = 0.0028 ft per packet
+        let p1 = make_packet(10000.0, 1000, RigState::Drilling);
+        let p2 = make_packet(10001.0, 4600, RigState::Drilling); // +1 ft in 1 hr
+        assert!(tracker.check(&p1).is_none());
+        assert!(tracker.check(&p2).is_none());
+        assert_eq!(tracker.rejected_count, 0);
+    }
+
+    #[test]
+    fn depth_tracker_rejects_impossible_jump() {
+        let mut tracker = DepthContinuityTracker::new();
+        let p1 = make_packet(10000.0, 1000, RigState::Drilling);
+        let p2 = make_packet(0.0, 1010, RigState::Idle); // depth 0 = skip
+        let p3 = make_packet(5000.0, 1020, RigState::Drilling); // -5000 ft in 20s
+        assert!(tracker.check(&p1).is_none());
+        assert!(tracker.check(&p2).is_none()); // zero depth skipped
+        let result = tracker.check(&p3);
+        assert!(result.is_some(), "Should reject 5000 ft drop in 20s");
+        assert_eq!(tracker.rejected_count, 1);
+    }
+
+    #[test]
+    fn depth_tracker_rejects_large_drilling_reversal() {
+        let mut tracker = DepthContinuityTracker::new();
+        // Establish baseline at 10000 ft, then reverse 100 ft while "Drilling"
+        let p1 = make_packet(10000.0, 1000, RigState::Drilling);
+        let p2 = make_packet(9900.0, 2000, RigState::Drilling); // -100 ft in 1000s
+        assert!(tracker.check(&p1).is_none());
+        // 100 ft reversal > 50 ft threshold during drilling
+        let result = tracker.check(&p2);
+        assert!(
+            result.is_some(),
+            "Should reject 100 ft reversal during drilling"
+        );
+    }
+
+    #[test]
+    fn depth_tracker_allows_small_drilling_reversal() {
+        let mut tracker = DepthContinuityTracker::new();
+        // Small sensor noise reversal (< 50 ft) during drilling is ok
+        let p1 = make_packet(10000.0, 1000, RigState::Drilling);
+        let p2 = make_packet(9980.0, 2000, RigState::Drilling); // -20 ft
+        assert!(tracker.check(&p1).is_none());
+        assert!(
+            tracker.check(&p2).is_none(),
+            "Small reversal should be allowed"
+        );
+    }
+
+    #[test]
+    fn depth_tracker_allows_tripping_reversal() {
+        let mut tracker = DepthContinuityTracker::new();
+        // Tripping out legitimately decreases depth
+        let p1 = make_packet(10000.0, 1000, RigState::Drilling);
+        let p2 = make_packet(9500.0, 4600, RigState::TrippingOut); // -500 ft in 1 hr
+        assert!(tracker.check(&p1).is_none());
+        assert!(
+            tracker.check(&p2).is_none(),
+            "Tripping out should allow depth decrease"
+        );
+    }
+
+    #[test]
+    fn depth_tracker_first_packet_always_accepted() {
+        let mut tracker = DepthContinuityTracker::new();
+        let p1 = make_packet(15000.0, 1000, RigState::Drilling);
+        assert!(tracker.check(&p1).is_none());
+        assert_eq!(tracker.rejected_count, 0);
+    }
+
+    #[test]
+    fn depth_tracker_rejected_packet_preserves_reference() {
+        let mut tracker = DepthContinuityTracker::new();
+        let p1 = make_packet(10000.0, 1000, RigState::Drilling);
+        let p2 = make_packet(5000.0, 1010, RigState::Drilling); // bad jump
+        let p3 = make_packet(10002.0, 1020, RigState::Drilling); // back to normal
+        assert!(tracker.check(&p1).is_none());
+        assert!(tracker.check(&p2).is_some()); // rejected
+                                               // p3 should be compared to p1 (10000), not p2 (5000)
+        assert!(
+            tracker.check(&p3).is_none(),
+            "Should compare against last good packet"
+        );
     }
 }

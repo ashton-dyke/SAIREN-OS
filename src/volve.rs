@@ -31,7 +31,6 @@ use crate::types::{RigState, WitsPacket};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::Path;
-use std::sync::Arc;
 
 // ============================================================================
 // Unit Conversion Constants
@@ -278,7 +277,9 @@ impl ColumnMap {
             }
 
             // RPM
-            if col_lower.starts_with("averaged rpm") || col_lower.starts_with("average rotary speed") {
+            if col_lower.starts_with("averaged rpm")
+                || col_lower.starts_with("average rotary speed")
+            {
                 if self.rpm.is_none() {
                     self.rpm = Some(idx);
                 }
@@ -333,7 +334,8 @@ impl ColumnMap {
             }
 
             // ECD
-            if col_lower.contains("equivalent circulating density") || col_lower.starts_with("ecd") {
+            if col_lower.contains("equivalent circulating density") || col_lower.starts_with("ecd")
+            {
                 if self.ecd.is_none() {
                     self.ecd = Some(idx);
                 }
@@ -415,7 +417,11 @@ impl ColumnMap {
 
         macro_rules! check_col {
             ($name:expr, $field:expr) => {
-                if $field.is_some() { found.push($name); } else { missing.push($name); }
+                if $field.is_some() {
+                    found.push($name);
+                } else {
+                    missing.push($name);
+                }
             };
         }
 
@@ -492,8 +498,7 @@ impl VolveReplay {
         let path = path.as_ref();
         let path_str = path.display().to_string();
 
-        let file = File::open(path)
-            .map_err(|e| format!("Failed to open {}: {}", path_str, e))?;
+        let file = File::open(path).map_err(|e| format!("Failed to open {}: {}", path_str, e))?;
 
         let reader = BufReader::new(file);
         let mut lines = reader.lines();
@@ -559,8 +564,14 @@ impl VolveReplay {
             ));
         }
 
-        let depth_min = packets.iter().map(|p| p.bit_depth).fold(f64::INFINITY, f64::min);
-        let depth_max = packets.iter().map(|p| p.bit_depth).fold(f64::NEG_INFINITY, f64::max);
+        let depth_min = packets
+            .iter()
+            .map(|p| p.bit_depth)
+            .fold(f64::INFINITY, f64::min);
+        let depth_max = packets
+            .iter()
+            .map(|p| p.bit_depth)
+            .fold(f64::NEG_INFINITY, f64::max);
         let time_first = packets.first().map(|p| p.timestamp).unwrap_or(0);
         let time_last = packets.last().map(|p| p.timestamp).unwrap_or(0);
 
@@ -629,8 +640,14 @@ impl VolveReplay {
         println!("=== Volve Well: {} ===", self.info.well_id);
         println!("  Source:     {}", self.info.source_path);
         println!("  Format:     {}", self.info.format);
-        println!("  Packets:    {} total, {} drilling", self.info.packet_count, drilling);
-        println!("  Skipped:    {} null rows, {} errors", self.info.skipped_rows, self.info.error_rows);
+        println!(
+            "  Packets:    {} total, {} drilling",
+            self.info.packet_count, drilling
+        );
+        println!(
+            "  Skipped:    {} null rows, {} errors",
+            self.info.skipped_rows, self.info.error_rows
+        );
         println!(
             "  Depth:      {:.0} - {:.0} ft ({:.0} - {:.0} m)",
             self.info.depth_range_ft.0,
@@ -638,7 +655,11 @@ impl VolveReplay {
             self.info.depth_range_ft.0 / M_TO_FT,
             self.info.depth_range_ft.1 / M_TO_FT,
         );
-        println!("  Duration:   {:.1} hours ({:.1} days)", duration_hrs, duration_hrs / 24.0);
+        println!(
+            "  Duration:   {:.1} hours ({:.1} days)",
+            duration_hrs,
+            duration_hrs / 24.0
+        );
         println!("  Columns:    {}", self.info.columns_found);
 
         if let Some(first) = self.packets.first() {
@@ -676,7 +697,8 @@ fn parse_row(
 
     // --- Read raw values ---
     let raw_depth = get_f64(&fields, col_map.depth, config.nan_to_zero).unwrap_or(0.0);
-    let raw_hole_depth = get_f64(&fields, col_map.hole_depth, config.nan_to_zero).unwrap_or(raw_depth);
+    let raw_hole_depth =
+        get_f64(&fields, col_map.hole_depth, config.nan_to_zero).unwrap_or(raw_depth);
     let raw_wob = get_f64(&fields, col_map.wob, config.nan_to_zero).unwrap_or(0.0);
     let raw_torque = get_f64(&fields, col_map.torque, config.nan_to_zero).unwrap_or(0.0);
     let raw_rpm = get_f64(&fields, col_map.rpm, config.nan_to_zero).unwrap_or(0.0);
@@ -696,15 +718,31 @@ fn parse_row(
     let raw_pit_vol = get_f64(&fields, col_map.pit_volume, config.nan_to_zero).unwrap_or(0.0);
 
     // --- Convert to oilfield units based on format ---
-    let (depth_ft, hole_depth_ft, wob_klbs, torque_kftlb, rpm, rop_fthr, hookload_klbs,
-         spp_psi, flow_in_gpm, flow_out_gpm, mw_in_ppg, mw_out_ppg, ecd_ppg,
-         temp_in_f, temp_out_f, pump_spm, pit_vol_bbl) = match format {
+    let (
+        depth_ft,
+        hole_depth_ft,
+        wob_klbs,
+        torque_kftlb,
+        rpm,
+        rop_fthr,
+        hookload_klbs,
+        spp_psi,
+        flow_in_gpm,
+        flow_out_gpm,
+        mw_in_ppg,
+        mw_out_ppg,
+        ecd_ppg,
+        temp_in_f,
+        temp_out_f,
+        pump_spm,
+        pit_vol_bbl,
+    ) = match format {
         CsvFormat::Kaggle => (
             raw_depth * M_TO_FT,
             raw_hole_depth * M_TO_FT,
             raw_wob * KKGF_TO_KLBF,
             raw_torque * KNM_TO_KFTLB,
-            raw_rpm,                        // Already RPM
+            raw_rpm, // Already RPM
             raw_rop * MH_TO_FTHR,
             raw_hookload * KKGF_TO_KLBF,
             raw_spp * KPA_TO_PSI,
@@ -713,10 +751,18 @@ fn parse_row(
             raw_mw_in * GCM3_TO_PPG,
             raw_mw_out * GCM3_TO_PPG,
             raw_ecd * GCM3_TO_PPG,
-            if raw_temp_in != 0.0 { celsius_to_fahrenheit(raw_temp_in) } else { 0.0 },
-            if raw_temp_out != 0.0 { celsius_to_fahrenheit(raw_temp_out) } else { 0.0 },
-            raw_pump_spm,                   // Already 1/min
-            raw_pit_vol * 6.28981,          // m³ to bbl
+            if raw_temp_in != 0.0 {
+                celsius_to_fahrenheit(raw_temp_in)
+            } else {
+                0.0
+            },
+            if raw_temp_out != 0.0 {
+                celsius_to_fahrenheit(raw_temp_out)
+            } else {
+                0.0
+            },
+            raw_pump_spm,          // Already 1/min
+            raw_pit_vol * 6.28981, // m³ to bbl
         ),
         CsvFormat::Tunkiel => (
             raw_depth * M_TO_FT,
@@ -734,8 +780,8 @@ fn parse_row(
             raw_ecd * KGM3_TO_PPG,
             kelvin_to_fahrenheit(raw_temp_in),
             kelvin_to_fahrenheit(raw_temp_out),
-            raw_pump_spm * 60.0,            // Hz to 1/min
-            raw_pit_vol,                    // Assume already bbl
+            raw_pump_spm * 60.0, // Hz to 1/min
+            raw_pit_vol,         // Assume already bbl
         ),
     };
 
@@ -776,7 +822,7 @@ fn parse_row(
         ecd: ecd_ppg,
         mud_temp_in: temp_in_f,
         mud_temp_out: temp_out_f,
-        gas_units: raw_gas,    // Pass through (units vary)
+        gas_units: raw_gas, // Pass through (units vary)
         background_gas: 0.0,
         connection_gas: 0.0,
         h2s: 0.0,
@@ -785,15 +831,16 @@ fn parse_row(
         annular_pressure: 0.0,
         pore_pressure: 0.0,
         fracture_gradient: 0.0,
-        mse: 0.0,              // Physics engine calculates
-        d_exponent: 0.0,       // Physics engine calculates
-        dxc: raw_dxc,          // Cross-validate against physics engine
+        mse: 0.0,        // Physics engine calculates
+        d_exponent: 0.0, // Physics engine calculates
+        dxc: raw_dxc,    // Cross-validate against physics engine
         rop_delta: 0.0,
         torque_delta_percent: 0.0,
         spp_delta: 0.0,
         rig_state,
         regime_id: 0,
-        seconds_since_param_change: 0,    }))
+        seconds_since_param_change: 0,
+    }))
 }
 
 // ============================================================================
@@ -833,7 +880,11 @@ fn parse_datetime_string(s: &str) -> Result<u64, String> {
 
     // Unix epoch (numeric)
     if let Ok(epoch) = s.parse::<u64>() {
-        return Ok(if epoch > 10_000_000_000 { epoch / 1000 } else { epoch });
+        return Ok(if epoch > 10_000_000_000 {
+            epoch / 1000
+        } else {
+            epoch
+        });
     }
 
     // Try float epoch
@@ -877,14 +928,26 @@ fn get_f64(fields: &[&str], idx: Option<usize>, nan_to_zero: bool) -> Option<f64
     idx.and_then(|i| {
         fields.get(i).and_then(|s| {
             let s = s.trim();
-            if s.is_empty() || s.eq_ignore_ascii_case("nan") || s.eq_ignore_ascii_case("null") || s == "-" {
-                if nan_to_zero { Some(0.0) } else { None }
+            if s.is_empty()
+                || s.eq_ignore_ascii_case("nan")
+                || s.eq_ignore_ascii_case("null")
+                || s == "-"
+            {
+                if nan_to_zero {
+                    Some(0.0)
+                } else {
+                    None
+                }
             } else {
-                s.parse::<f64>().ok().map(|v| {
+                s.parse::<f64>().ok().and_then(|v| {
                     if v.is_nan() || v.is_infinite() {
-                        if nan_to_zero { 0.0 } else { 0.0 }
+                        if nan_to_zero {
+                            Some(0.0)
+                        } else {
+                            None
+                        }
                     } else {
-                        v
+                        Some(v)
                     }
                 })
             }
@@ -893,7 +956,13 @@ fn get_f64(fields: &[&str], idx: Option<usize>, nan_to_zero: bool) -> Option<f64
 }
 
 /// Parse rig state from row
-fn parse_rig_state(fields: &[&str], col_map: &ColumnMap, rpm: f64, wob_klbs: f64, rop_fthr: f64) -> RigState {
+fn parse_rig_state(
+    fields: &[&str],
+    col_map: &ColumnMap,
+    rpm: f64,
+    wob_klbs: f64,
+    rop_fthr: f64,
+) -> RigState {
     // Try Kaggle "Rig Mode" text column
     if let Some(idx) = col_map.rig_mode {
         if let Some(s) = fields.get(idx).map(|s| s.trim().to_lowercase()) {
@@ -1080,27 +1149,46 @@ mod tests {
         eprintln!("Errors:     {}", info.error_rows);
         eprintln!("Format:     {}", info.format);
         eprintln!("Time range: {} - {}", info.time_range.0, info.time_range.1);
-        eprintln!("Depth:      {:.0} - {:.0} ft", info.depth_range_ft.0, info.depth_range_ft.1);
+        eprintln!(
+            "Depth:      {:.0} - {:.0} ft",
+            info.depth_range_ft.0, info.depth_range_ft.1
+        );
         eprintln!("Columns:    {}", info.columns_found);
 
         // We should have parsed a meaningful number of packets
-        assert!(info.packet_count > 1000,
-            "Expected >1000 packets, got {}", info.packet_count);
+        assert!(
+            info.packet_count > 1000,
+            "Expected >1000 packets, got {}",
+            info.packet_count
+        );
 
         // Should detect Kaggle format
         assert_eq!(info.format, "Kaggle");
 
         // Timestamps should be in 2008-2016 range (Volve field operations)
-        assert!(info.time_range.0 >= 1_199_145_600, "time_start too early: {}", info.time_range.0); // 2008-01-01
-        assert!(info.time_range.1 <= 1_483_228_800, "time_end too late: {}", info.time_range.1);     // 2017-01-01
+        assert!(
+            info.time_range.0 >= 1_199_145_600,
+            "time_start too early: {}",
+            info.time_range.0
+        ); // 2008-01-01
+        assert!(
+            info.time_range.1 <= 1_483_228_800,
+            "time_end too late: {}",
+            info.time_range.1
+        ); // 2017-01-01
 
         // Depth should be reasonable for Volve (up to ~3000m = ~10000ft)
         assert!(info.depth_range_ft.1 > 0.0, "No depth data parsed");
-        assert!(info.depth_range_ft.1 < 15_000.0, "Depth too deep: {}", info.depth_range_ft.1);
+        assert!(
+            info.depth_range_ft.1 < 15_000.0,
+            "Depth too deep: {}",
+            info.depth_range_ft.1
+        );
 
         // Spot-check a few packets for sane oilfield-unit values
         let packets = replay.packets();
-        let drilling: Vec<&WitsPacket> = packets.iter()
+        let drilling: Vec<&WitsPacket> = packets
+            .iter()
             .filter(|p| matches!(p.rig_state, RigState::Drilling))
             .take(100)
             .collect();
@@ -1129,20 +1217,29 @@ mod tests {
             assert!(p.spp < 10_000.0, "SPP too high: {} psi", p.spp);
             // Mud weight should be in 7-18 ppg range
             if p.mud_weight_in > 0.0 {
-                assert!(p.mud_weight_in > 5.0 && p.mud_weight_in < 20.0,
-                    "MW out of range: {} ppg", p.mud_weight_in);
+                assert!(
+                    p.mud_weight_in > 5.0 && p.mud_weight_in < 20.0,
+                    "MW out of range: {} ppg",
+                    p.mud_weight_in
+                );
             }
         }
 
         // Count rig states
         let mut state_counts = std::collections::HashMap::new();
         for p in packets {
-            *state_counts.entry(format!("{:?}", p.rig_state)).or_insert(0u64) += 1;
+            *state_counts
+                .entry(format!("{:?}", p.rig_state))
+                .or_insert(0u64) += 1;
         }
         eprintln!("Rig state distribution:");
         for (state, count) in &state_counts {
-            eprintln!("  {}: {} ({:.1}%)", state, count,
-                *count as f64 / info.packet_count as f64 * 100.0);
+            eprintln!(
+                "  {}: {} ({:.1}%)",
+                state,
+                count,
+                *count as f64 / info.packet_count as f64 * 100.0
+            );
         }
     }
 

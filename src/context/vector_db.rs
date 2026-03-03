@@ -429,7 +429,9 @@ mod tests {
         let results = search("vibration threshold critical");
         assert!(!results.is_empty(), "Should find threshold docs");
         assert!(
-            results.iter().any(|r| r.contains("0.5g") || r.contains("0.3g")),
+            results
+                .iter()
+                .any(|r| r.contains("0.5g") || r.contains("0.3g")),
             "Results should contain threshold values"
         );
     }

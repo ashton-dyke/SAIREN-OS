@@ -30,23 +30,38 @@ pub async fn get_metrics(State(state): State<DashboardState>) -> impl IntoRespon
 
     body.push_str("# HELP sairen_packets_total Total WITS packets processed\n");
     body.push_str("# TYPE sairen_packets_total counter\n");
-    body.push_str(&format!("sairen_packets_total {}\n", app_state.packets_processed));
+    body.push_str(&format!(
+        "sairen_packets_total {}\n",
+        app_state.packets_processed
+    ));
 
     body.push_str("# HELP sairen_tickets_created_total Advisory tickets generated\n");
     body.push_str("# TYPE sairen_tickets_created_total counter\n");
-    body.push_str(&format!("sairen_tickets_created_total {}\n", app_state.tickets_created));
+    body.push_str(&format!(
+        "sairen_tickets_created_total {}\n",
+        app_state.tickets_created
+    ));
 
     body.push_str("# HELP sairen_tickets_verified_total Tickets confirmed by strategic agent\n");
     body.push_str("# TYPE sairen_tickets_verified_total counter\n");
-    body.push_str(&format!("sairen_tickets_verified_total {}\n", app_state.tickets_verified));
+    body.push_str(&format!(
+        "sairen_tickets_verified_total {}\n",
+        app_state.tickets_verified
+    ));
 
     body.push_str("# HELP sairen_tickets_rejected_total Tickets rejected as transient\n");
     body.push_str("# TYPE sairen_tickets_rejected_total counter\n");
-    body.push_str(&format!("sairen_tickets_rejected_total {}\n", app_state.tickets_rejected));
+    body.push_str(&format!(
+        "sairen_tickets_rejected_total {}\n",
+        app_state.tickets_rejected
+    ));
 
     body.push_str("# HELP sairen_uptime_seconds Process uptime in seconds\n");
     body.push_str("# TYPE sairen_uptime_seconds gauge\n");
-    body.push_str(&format!("sairen_uptime_seconds {}\n", app_state.uptime_secs()));
+    body.push_str(&format!(
+        "sairen_uptime_seconds {}\n",
+        app_state.uptime_secs()
+    ));
 
     if let Some(eff) = app_state.avg_mse_efficiency {
         body.push_str("# HELP sairen_avg_mse_efficiency Rolling average MSE efficiency (0-100)\n");
@@ -56,7 +71,10 @@ pub async fn get_metrics(State(state): State<DashboardState>) -> impl IntoRespon
 
     (
         axum::http::StatusCode::OK,
-        [(axum::http::header::CONTENT_TYPE, "text/plain; version=0.0.4; charset=utf-8")],
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/plain; version=0.0.4; charset=utf-8",
+        )],
         body,
     )
 }
@@ -102,7 +120,6 @@ pub async fn get_fleet_intelligence(
 
     Json(filtered)
 }
-
 
 #[derive(serde::Deserialize)]
 pub struct FleetIntelligenceQuery {

@@ -44,6 +44,18 @@ pub struct CfcNetworkCheckpoint {
     pub packets_processed: u64,
     /// EMA of prediction error (anomaly scoring baseline).
     pub error_ema: f64,
+    /// EMA of squared prediction error (anomaly scoring variance).
+    #[serde(default)]
+    pub error_sq_ema: f64,
+    /// Number of training steps completed.
+    #[serde(default)]
+    pub train_steps: u64,
+    /// Cumulative training loss.
+    #[serde(default)]
+    pub total_loss: f64,
+    /// Per-feature error EMA (relative surprise scoring).
+    #[serde(default)]
+    pub feature_error_ema: [f64; 16],
 }
 
 /// Metadata attached to a checkpoint for provenance tracking.
@@ -74,6 +86,10 @@ impl CfcNetwork {
             optimizer: self.optimizer().clone(),
             packets_processed: self.packets_processed(),
             error_ema: self.error_ema(),
+            error_sq_ema: self.error_sq_ema(),
+            train_steps: self.train_steps(),
+            total_loss: self.total_loss(),
+            feature_error_ema: self.feature_error_ema(),
         }
     }
 
@@ -82,6 +98,9 @@ impl CfcNetwork {
     /// Validates that the checkpoint is compatible (same neuron count and
     /// weight dimensions). Resets hidden state after restoration.
     pub fn restore_from(&mut self, cp: &CfcNetworkCheckpoint) -> Result<(), String> {
+        // Validate checkpoint config has valid group boundaries
+        cp.config.ncp.validate()?;
+
         // Validate neuron topology matches
         if cp.config.ncp.num_neurons != self.config().ncp.num_neurons {
             return Err(format!(
@@ -104,16 +123,22 @@ impl CfcNetwork {
         self.set_normalizer(cp.normalizer.clone());
         self.set_optimizer(cp.optimizer.clone());
         self.set_packets_processed(cp.packets_processed);
-        self.set_error_ema(cp.error_ema);
+
+        // Reset hidden state first, then restore anomaly scoring fields
+        // (reset_state zeroes them all, so we must restore after)
         self.reset_state();
+        self.set_error_ema(cp.error_ema);
+        self.set_error_sq_ema(cp.error_sq_ema);
+        self.set_train_steps(cp.train_steps);
+        self.set_total_loss(cp.total_loss);
+        self.set_feature_error_ema(cp.feature_error_ema);
         Ok(())
     }
 }
 
 /// Save a checkpoint to disk atomically (write temp file, then rename).
 pub fn save_to_disk(cp: &DualCfcCheckpoint, path: &Path) -> io::Result<()> {
-    let json = serde_json::to_vec(cp)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let json = serde_json::to_vec(cp).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
     // Write to temp file alongside the target
     let tmp_path = path.with_extension("json.tmp");
@@ -128,15 +153,14 @@ pub fn save_to_disk(cp: &DualCfcCheckpoint, path: &Path) -> io::Result<()> {
 /// Load a checkpoint from disk.
 pub fn load_from_disk(path: &Path) -> io::Result<DualCfcCheckpoint> {
     let data = std::fs::read(path)?;
-    serde_json::from_slice(&data)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+    serde_json::from_slice(&data).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cfc::{CfcNetwork, CfcNetworkConfig, DualCfcNetwork};
     use crate::cfc::normalizer::NUM_FEATURES;
+    use crate::cfc::{CfcNetwork, CfcNetworkConfig, DualCfcNetwork};
 
     #[test]
     fn test_serde_round_trip() {
@@ -158,9 +182,10 @@ mod tests {
     #[test]
     fn test_restore_produces_same_output() {
         let mut net_a = CfcNetwork::with_config(42, CfcNetworkConfig::fast());
-        let features = [10.0, 50.0, 120.0, 15.0, 30000.0, 3000.0,
-                        1.5, 200.0, 10.5, 5.0, 0.1, 1.3,
-                        60.0, 10.5, 20.0, 800.0];
+        let features = [
+            10.0, 50.0, 120.0, 15.0, 30000.0, 3000.0, 1.5, 200.0, 10.5, 5.0, 0.1, 1.3, 60.0, 10.5,
+            20.0, 800.0,
+        ];
         for _ in 0..20 {
             net_a.process(&features, 1.0);
         }
@@ -179,7 +204,8 @@ mod tests {
             assert!(
                 (a - b).abs() < 1e-10,
                 "predictions diverged: {} vs {}",
-                a, b,
+                a,
+                b,
             );
         }
     }
@@ -198,7 +224,7 @@ mod tests {
     #[test]
     fn test_dual_checkpoint_round_trip() {
         let mut dual = DualCfcNetwork::new(42);
-        let features = [10.0; NUM_FEATURES];
+        let _features = [10.0; NUM_FEATURES];
         let metrics = crate::cfc::tests::make_test_metrics();
         let packet = crate::cfc::tests::make_test_packet();
         for _ in 0..10 {
@@ -229,6 +255,90 @@ mod tests {
 
         assert_eq!(loaded.version, cp.version);
         assert_eq!(loaded.metadata.rig_id, "rig-1");
-        assert_eq!(loaded.fast.config.ncp.num_neurons, cp.fast.config.ncp.num_neurons);
+        assert_eq!(
+            loaded.fast.config.ncp.num_neurons,
+            cp.fast.config.ncp.num_neurons
+        );
+    }
+
+    #[test]
+    fn test_anomaly_state_survives_restore() {
+        let mut net_a = CfcNetwork::with_config(42, CfcNetworkConfig::fast());
+
+        // Train with varying inputs to build up anomaly scoring state
+        for i in 0..50 {
+            let mut features = [0.0; NUM_FEATURES];
+            for (j, f) in features.iter_mut().enumerate() {
+                *f = (i as f64 * 0.5) + (j as f64 * 10.0);
+            }
+            net_a.process(&features, 1.0);
+        }
+
+        // After 50 packets with varying data, training should have occurred
+        assert!(
+            net_a.train_steps() > 0,
+            "train_steps should be positive after 50 packets"
+        );
+
+        let cp = net_a.snapshot();
+
+        // Verify checkpoint captured the state
+        assert_eq!(cp.error_ema, net_a.error_ema());
+        assert_eq!(cp.error_sq_ema, net_a.error_sq_ema());
+        assert_eq!(cp.train_steps, net_a.train_steps());
+        assert_eq!(cp.total_loss, net_a.total_loss());
+        assert_eq!(cp.feature_error_ema, net_a.feature_error_ema());
+
+        // Restore into a fresh network
+        let mut net_b = CfcNetwork::with_config(42, CfcNetworkConfig::fast());
+        net_b.restore_from(&cp).expect("restore should succeed");
+
+        // Verify anomaly state was restored (not zeroed by reset_state)
+        assert_eq!(
+            net_b.error_ema(),
+            net_a.error_ema(),
+            "error_ema lost during restore"
+        );
+        assert_eq!(
+            net_b.error_sq_ema(),
+            net_a.error_sq_ema(),
+            "error_sq_ema lost during restore"
+        );
+        assert_eq!(
+            net_b.train_steps(),
+            net_a.train_steps(),
+            "train_steps lost during restore"
+        );
+        assert_eq!(
+            net_b.total_loss(),
+            net_a.total_loss(),
+            "total_loss lost during restore"
+        );
+        assert_eq!(
+            net_b.feature_error_ema(),
+            net_a.feature_error_ema(),
+            "feature_error_ema lost during restore"
+        );
+    }
+
+    #[test]
+    fn test_backwards_compat_missing_fields() {
+        // Old-format checkpoint JSON without new fields should deserialize with defaults
+        let net = CfcNetwork::with_config(42, CfcNetworkConfig::fast());
+        let cp = net.snapshot();
+        let mut json: serde_json::Value = serde_json::to_value(&cp).expect("serialize");
+
+        // Remove new fields to simulate old-format checkpoint
+        json.as_object_mut().unwrap().remove("error_sq_ema");
+        json.as_object_mut().unwrap().remove("train_steps");
+        json.as_object_mut().unwrap().remove("total_loss");
+        json.as_object_mut().unwrap().remove("feature_error_ema");
+
+        let restored: CfcNetworkCheckpoint =
+            serde_json::from_value(json).expect("should deserialize with defaults");
+        assert_eq!(restored.error_sq_ema, 0.0);
+        assert_eq!(restored.train_steps, 0);
+        assert_eq!(restored.total_loss, 0.0);
+        assert_eq!(restored.feature_error_ema, [0.0; 16]);
     }
 }

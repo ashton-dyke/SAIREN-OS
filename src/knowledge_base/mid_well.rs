@@ -2,8 +2,8 @@
 
 use crate::knowledge_base::compressor;
 use crate::types::{
-    AnalysisResult, KnowledgeBaseConfig, MidWellSnapshot, MLInsightsReport,
-    SustainedStats, WitsPacket,
+    AnalysisResult, KnowledgeBaseConfig, MLInsightsReport, MidWellSnapshot, SustainedStats,
+    WitsPacket,
 };
 use std::io;
 use tracing::{debug, info, warn};
@@ -147,7 +147,11 @@ pub fn enforce_snapshot_cap(config: &KnowledgeBaseConfig) -> io::Result<()> {
     for entry in std::fs::read_dir(&dir)? {
         let entry = entry?;
         let path = entry.path();
-        let fname = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+        let fname = path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_string();
 
         if !fname.starts_with("snapshot_") {
             continue;
@@ -159,9 +163,10 @@ pub fn enforce_snapshot_cap(config: &KnowledgeBaseConfig) -> io::Result<()> {
         }
 
         // Extract timestamp from filename: snapshot_{timestamp}.toml[.zst]
-        let ts_str = fname
-            .strip_prefix("snapshot_")
-            .and_then(|s| s.strip_suffix(".toml.zst").or_else(|| s.strip_suffix(".toml")));
+        let ts_str = fname.strip_prefix("snapshot_").and_then(|s| {
+            s.strip_suffix(".toml.zst")
+                .or_else(|| s.strip_suffix(".toml"))
+        });
 
         if let Some(ts) = ts_str.and_then(|s| s.parse::<u64>().ok()) {
             files.push((ts, path, is_compressed));
@@ -208,7 +213,11 @@ pub fn enforce_snapshot_cap(config: &KnowledgeBaseConfig) -> io::Result<()> {
     }
 
     if compressed_count > 0 || deleted_count > 0 {
-        info!(compressed = compressed_count, deleted = deleted_count, "Snapshot cap enforced");
+        info!(
+            compressed = compressed_count,
+            deleted = deleted_count,
+            "Snapshot cap enforced"
+        );
     }
 
     Ok(())
@@ -290,7 +299,11 @@ mod tests {
         let mut plain = 0;
         let mut compressed = 0;
         for entry in std::fs::read_dir(&dir).expect("readdir") {
-            let name = entry.expect("entry").file_name().into_string().unwrap_or_default();
+            let name = entry
+                .expect("entry")
+                .file_name()
+                .into_string()
+                .unwrap_or_default();
             if name.ends_with(".toml.zst") {
                 compressed += 1;
             } else if name.ends_with(".toml") {

@@ -12,8 +12,8 @@
 use super::history::get_db;
 use super::history::StorageError;
 use serde::Serialize;
-use std::sync::OnceLock;
 use sled::Tree;
+use std::sync::OnceLock;
 
 static ACKS_TREE: OnceLock<Tree> = OnceLock::new();
 
@@ -46,8 +46,8 @@ fn get_tree() -> Result<&'static Tree, StorageError> {
 /// overwrites the earlier — acceptable for an audit trail.
 pub fn persist<T: Serialize>(key: u64, record: &T) -> Result<(), StorageError> {
     let tree = get_tree()?;
-    let bytes = serde_json::to_vec(record)
-        .map_err(|e| StorageError::SerializationError(e.to_string()))?;
+    let bytes =
+        serde_json::to_vec(record).map_err(|e| StorageError::SerializationError(e.to_string()))?;
     tree.insert(key.to_be_bytes(), bytes)?;
     Ok(())
 }

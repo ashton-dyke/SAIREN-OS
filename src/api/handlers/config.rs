@@ -48,9 +48,7 @@ pub struct UpdateConfigResponse {
 ///
 /// The config is validated but NOT applied to the running system (requires restart).
 /// Saves to `./well_config.toml` so it takes effect on next startup.
-pub async fn update_config(
-    Json(request): Json<UpdateConfigRequest>,
-) -> Json<UpdateConfigResponse> {
+pub async fn update_config(Json(request): Json<UpdateConfigRequest>) -> Json<UpdateConfigResponse> {
     // Validate the new config
     match request.config.validate() {
         Ok(()) => {}
@@ -75,7 +73,8 @@ pub async fn update_config(
     match request.config.save_to_file(&save_path) {
         Ok(()) => Json(UpdateConfigResponse {
             success: true,
-            message: "Config saved to well_config.toml. Restart SAIREN-OS to apply changes.".to_string(),
+            message: "Config saved to well_config.toml. Restart SAIREN-OS to apply changes."
+                .to_string(),
             errors: vec![],
         }),
         Err(e) => Json(UpdateConfigResponse {

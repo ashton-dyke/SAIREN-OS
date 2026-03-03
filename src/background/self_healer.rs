@@ -9,7 +9,7 @@
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock;
-use tracing::{debug, info, warn, error};
+use tracing::{debug, error, info, warn};
 
 /// Health check interval (30 seconds)
 const HEALTH_CHECK_INTERVAL: Duration = Duration::from_secs(30);
@@ -136,11 +136,9 @@ impl HealthCheck for WitsHealthCheck {
         // Use try_read to avoid blocking the health check
         match self.last_packet_time.try_read() {
             Ok(guard) => match *guard {
-                Some(last) if last.elapsed() > self.timeout => {
-                    HealthStatus::Unhealthy {
-                        reason: format!("No WITS packet for {:.0}s", last.elapsed().as_secs()),
-                    }
-                }
+                Some(last) if last.elapsed() > self.timeout => HealthStatus::Unhealthy {
+                    reason: format!("No WITS packet for {:.0}s", last.elapsed().as_secs()),
+                },
                 Some(_) => HealthStatus::Healthy,
                 None => HealthStatus::Degraded {
                     reason: "No WITS packets received yet".to_string(),
@@ -194,7 +192,10 @@ impl HealthCheck for DiskHealthCheck {
                 ),
             },
             Ok(free_bytes) if free_bytes < self.min_free_bytes * 2 => HealthStatus::Degraded {
-                reason: format!("{:.0} MB free — approaching minimum", free_bytes as f64 / 1_048_576.0),
+                reason: format!(
+                    "{:.0} MB free — approaching minimum",
+                    free_bytes as f64 / 1_048_576.0
+                ),
             },
             Ok(_) => HealthStatus::Healthy,
             Err(e) => HealthStatus::Degraded {

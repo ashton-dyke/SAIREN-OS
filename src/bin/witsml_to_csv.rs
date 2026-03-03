@@ -69,22 +69,38 @@ impl MnemonicMap {
         add(&["DMEA", "GS_DMEA", "DEPT"], "Total Depth m", 0);
 
         // WOB (kkgf)
-        add(&["SWOB", "GS_SWOB", "SWOB30s", "CWOB"], "Weight on Bit kkgf", 0);
+        add(
+            &["SWOB", "GS_SWOB", "SWOB30s", "CWOB"],
+            "Weight on Bit kkgf",
+            0,
+        );
 
         // Torque (kN.m)
-        add(&["TQA", "GS_TQA", "TQ30s"], "Average Surface Torque kN.m", 0);
+        add(
+            &["TQA", "GS_TQA", "TQ30s"],
+            "Average Surface Torque kN.m",
+            0,
+        );
 
         // RPM
         add(&["RPM", "GS_RPM", "RPM30s"], "Average Rotary Speed rpm", 0);
 
         // ROP (m/h)
-        add(&["ROP", "GS_ROP", "ROP5", "ROP30s", "ROP2M", "ROPH"], "Rate of Penetration m/h", 0);
+        add(
+            &["ROP", "GS_ROP", "ROP5", "ROP30s", "ROP2M", "ROPH"],
+            "Rate of Penetration m/h",
+            0,
+        );
 
         // SPP (kPa)
         add(&["SPPA", "GS_SPPA", "SPP5s"], "Stand Pipe Pressure kPa", 0);
 
         // Hookload (kkgf)
-        add(&["HKLD", "GS_HKLD", "HKLD30s", "HKLI", "HKLO"], "Total Hookload kkgf", 0);
+        add(
+            &["HKLD", "GS_HKLD", "HKLD30s", "HKLI", "HKLO"],
+            "Total Hookload kkgf",
+            0,
+        );
 
         // Flow in (L/min)
         add(&["TFLO", "GS_TFLO", "TFLO30s"], "Mud Flow In L/min", 0);
@@ -111,7 +127,11 @@ impl MnemonicMap {
         add(&["TSPM", "SPM1", "GS_SPM1"], "Total SPM 1/min", 0);
 
         // Tank volume (m3)
-        add(&["TVA", "GS_TVA", "TVCA", "GS_TVCA"], "Tank Volume (Active) m3", 0);
+        add(
+            &["TVA", "GS_TVA", "TVCA", "GS_TVCA"],
+            "Tank Volume (Active) m3",
+            0,
+        );
 
         // Activity code
         add(&["ACTC", "GS_ACTC"], "Rig Mode", 0);
@@ -157,10 +177,11 @@ fn parse_witsml_xml(
     col_index: &HashMap<String, usize>,
 ) -> Vec<(String, Vec<String>)> {
     // Extract mnemonicList
-    let mnemonic_list: Vec<&str> = match extract_between(xml_content, "<mnemonicList>", "</mnemonicList>") {
-        Some(s) => s.split(',').collect(),
-        None => return Vec::new(),
-    };
+    let mnemonic_list: Vec<&str> =
+        match extract_between(xml_content, "<mnemonicList>", "</mnemonicList>") {
+            Some(s) => s.split(',').collect(),
+            None => return Vec::new(),
+        };
 
     // Build column mapping: xml_col_index -> output_col_index
     let mut xml_to_output: Vec<Option<usize>> = vec![None; mnemonic_list.len()];
@@ -287,11 +308,17 @@ fn main() {
             // Separate time vs depth logs
             let time_files = files.iter().filter(|f| f.contains("log/1/1/")).count();
             let depth_files = files.iter().filter(|f| f.contains("log/1/2/")).count();
-            println!("{:<35} {:>3} time, {:>3} depth", name, time_files, depth_files);
+            println!(
+                "{:<35} {:>3} time, {:>3} depth",
+                name, time_files, depth_files
+            );
         }
         if args.well.is_none() {
             println!("\nUse --well <name> to convert a well. Example:");
-            println!("  cargo run --bin witsml-to-csv -- --zip '{}' --well 'F-9 A'", args.zip.display());
+            println!(
+                "  cargo run --bin witsml-to-csv -- --zip '{}' --well 'F-9 A'",
+                args.zip.display()
+            );
         }
         return;
     }
@@ -299,7 +326,8 @@ fn main() {
     let well_filter = args.well.as_deref().unwrap_or("");
 
     // Find matching well
-    let matching: Vec<_> = wells.iter()
+    let matching: Vec<_> = wells
+        .iter()
         .filter(|(name, _)| name.contains(well_filter))
         .collect();
 
@@ -309,7 +337,10 @@ fn main() {
         std::process::exit(1);
     }
     if matching.len() > 1 {
-        eprintln!("WARNING: Multiple wells match '{}', using first:", well_filter);
+        eprintln!(
+            "WARNING: Multiple wells match '{}', using first:",
+            well_filter
+        );
         for (name, files) in &matching {
             eprintln!("  {} ({} files)", name, files.len());
         }
@@ -353,9 +384,13 @@ fn main() {
         "Tank Volume (Active) m3",
         "Rig Mode",
         "Block Position m",
-    ].into_iter().map(String::from).collect();
+    ]
+    .into_iter()
+    .map(String::from)
+    .collect();
 
-    let col_index: HashMap<String, usize> = output_columns.iter()
+    let col_index: HashMap<String, usize> = output_columns
+        .iter()
         .enumerate()
         .map(|(i, name)| (name.clone(), i))
         .collect();
@@ -396,7 +431,12 @@ fn main() {
         if !rows.is_empty() {
             files_with_data += 1;
             all_rows.extend(rows);
-            eprint!("\r  Parsed {}/{} files, {} rows so far...", files_processed, xml_files.len(), all_rows.len());
+            eprint!(
+                "\r  Parsed {}/{} files, {} rows so far...",
+                files_processed,
+                xml_files.len(),
+                all_rows.len()
+            );
         }
     }
     eprintln!();
@@ -426,7 +466,11 @@ fn main() {
 
     // Write CSV
     let outfile = std::fs::File::create(&output_path).unwrap_or_else(|e| {
-        eprintln!("ERROR: Failed to create output file {}: {}", output_path.display(), e);
+        eprintln!(
+            "ERROR: Failed to create output file {}: {}",
+            output_path.display(),
+            e
+        );
         std::process::exit(1);
     });
     let mut writer = BufWriter::new(outfile);
@@ -457,6 +501,10 @@ fn main() {
         std::process::exit(1);
     });
 
-    println!("  Output: {} ({} rows with data)", output_path.display(), non_empty_rows);
+    println!(
+        "  Output: {} ({} rows with data)",
+        output_path.display(),
+        non_empty_rows
+    );
     println!("Done.");
 }

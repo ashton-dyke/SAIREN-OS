@@ -1,8 +1,8 @@
 //! Fleet data types for hub-and-spoke multi-rig learning
 
 use crate::types::{
-    AnomalyCategory, Campaign, DrillingMetrics, FinalSeverity, RiskLevel,
-    StrategicAdvisory, WitsPacket,
+    AnomalyCategory, Campaign, DrillingMetrics, FinalSeverity, RiskLevel, StrategicAdvisory,
+    WitsPacket,
 };
 use serde::{Deserialize, Serialize};
 
@@ -87,13 +87,9 @@ pub enum EventOutcome {
     /// Event is pending driller acknowledgment
     Pending,
     /// Issue was resolved by driller action
-    Resolved {
-        action_taken: String,
-    },
+    Resolved { action_taken: String },
     /// Event was escalated (e.g., well control event escalated to company man)
-    Escalated {
-        reason: String,
-    },
+    Escalated { reason: String },
     /// Event was determined to be a false positive
     FalsePositive,
 }
@@ -158,22 +154,7 @@ impl FleetEpisode {
         Self {
             id: format!("{}-episode", event.id),
             rig_id: event.rig_id.clone(),
-            category: event.advisory.votes.first()
-                .map(|v| {
-                    // Infer category from highest-weighted critical vote
-                    if v.specialist == "WellControl" {
-                        AnomalyCategory::WellControl
-                    } else if v.specialist == "MSE" {
-                        AnomalyCategory::DrillingEfficiency
-                    } else if v.specialist == "Hydraulic" {
-                        AnomalyCategory::Hydraulics
-                    } else if v.specialist == "Formation" {
-                        AnomalyCategory::Formation
-                    } else {
-                        AnomalyCategory::None
-                    }
-                })
-                .unwrap_or(AnomalyCategory::None),
+            category: event.advisory.category,
             campaign: event.campaign,
             depth_range: (event.depth, event.depth),
             risk_level: event.advisory.risk_level,
@@ -286,7 +267,12 @@ mod tests {
     #[test]
     fn test_event_outcome_display() {
         assert_eq!(
-            format!("{}", EventOutcome::Resolved { action_taken: "increased MW".to_string() }),
+            format!(
+                "{}",
+                EventOutcome::Resolved {
+                    action_taken: "increased MW".to_string()
+                }
+            ),
             "RESOLVED: increased MW"
         );
         assert_eq!(format!("{}", EventOutcome::Pending), "PENDING");
@@ -302,7 +288,9 @@ mod tests {
             campaign: Campaign::Production,
             advisory: make_advisory(RiskLevel::High),
             history_window: Vec::new(),
-            outcome: EventOutcome::Resolved { action_taken: "reduced WOB".to_string() },
+            outcome: EventOutcome::Resolved {
+                action_taken: "reduced WOB".to_string(),
+            },
             notes: None,
             depth: 10000.0,
             timestamp: 1000,
@@ -311,6 +299,11 @@ mod tests {
         let episode = FleetEpisode::from_event(&event);
         assert_eq!(episode.rig_id, "RIG1");
         assert_eq!(episode.resolution_summary, "reduced WOB");
-        assert_eq!(episode.outcome, EventOutcome::Resolved { action_taken: "reduced WOB".to_string() });
+        assert_eq!(
+            episode.outcome,
+            EventOutcome::Resolved {
+                action_taken: "reduced WOB".to_string()
+            }
+        );
     }
 }

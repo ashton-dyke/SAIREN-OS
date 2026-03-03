@@ -170,9 +170,15 @@ pub struct AnalysisInsights {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AnalysisFailure {
     /// Less than 360 valid samples
-    InsufficientData { valid_samples: usize, required: usize },
+    InsufficientData {
+        valid_samples: usize,
+        required: usize,
+    },
     /// Formation changed >15% mid-window, segments too small individually
-    UnstableFormation { segment_count: usize, max_segment_size: usize },
+    UnstableFormation {
+        segment_count: usize,
+        max_segment_size: usize,
+    },
     /// No correlations met p < 0.05 threshold
     NoSignificantCorrelation { best_p_value: f64 },
     /// All data rejected by quality filter
@@ -184,16 +190,31 @@ pub enum AnalysisFailure {
 impl std::fmt::Display for AnalysisFailure {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::InsufficientData { valid_samples, required } =>
-                write!(f, "Insufficient data: {} samples (need {})", valid_samples, required),
-            Self::UnstableFormation { segment_count, max_segment_size } =>
-                write!(f, "Unstable formation: {} segments, largest has {} samples", segment_count, max_segment_size),
-            Self::NoSignificantCorrelation { best_p_value } =>
-                write!(f, "No significant correlations (best p={:.3})", best_p_value),
-            Self::AllDataRejected { rejection_reason } =>
-                write!(f, "All data rejected: {}", rejection_reason),
-            Self::NotApplicable { reason } =>
-                write!(f, "Analysis not applicable: {}", reason),
+            Self::InsufficientData {
+                valid_samples,
+                required,
+            } => write!(
+                f,
+                "Insufficient data: {} samples (need {})",
+                valid_samples, required
+            ),
+            Self::UnstableFormation {
+                segment_count,
+                max_segment_size,
+            } => write!(
+                f,
+                "Unstable formation: {} segments, largest has {} samples",
+                segment_count, max_segment_size
+            ),
+            Self::NoSignificantCorrelation { best_p_value } => write!(
+                f,
+                "No significant correlations (best p={:.3})",
+                best_p_value
+            ),
+            Self::AllDataRejected { rejection_reason } => {
+                write!(f, "All data rejected: {}", rejection_reason)
+            }
+            Self::NotApplicable { reason } => write!(f, "Analysis not applicable: {}", reason),
         }
     }
 }

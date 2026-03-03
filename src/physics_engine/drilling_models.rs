@@ -208,7 +208,8 @@ pub fn calculate_ecd(mud_weight: f64, annular_pressure_loss: f64, tvd: f64) -> f
 pub fn estimate_annular_pressure_loss(flow_rate: f64, depth: f64) -> f64 {
     let cfg = crate::config::get();
 
-    let result = cfg.thresholds.hydraulics.annular_pressure_loss_coefficient * flow_rate * depth / 1000.0;
+    let result =
+        cfg.thresholds.hydraulics.annular_pressure_loss_coefficient * flow_rate * depth / 1000.0;
     if !result.is_finite() {
         return 0.0;
     }
@@ -371,7 +372,8 @@ pub fn detect_packoff(
     }
 
     // Pack-off detected if torque AND (SPP or ROP) indicate
-    let is_packoff = torque_increase_percent > torque_threshold && (spp_increase_percent > spp_threshold || rop_decrease_percent > rop_threshold);
+    let is_packoff = torque_increase_percent > torque_threshold
+        && (spp_increase_percent > spp_threshold || rop_decrease_percent > rop_threshold);
     let final_severity = if indicators > 0 {
         (severity / indicators as f64).min(1.0)
     } else {
@@ -426,7 +428,11 @@ pub fn detect_stick_slip(torque_values: &[f64]) -> (bool, f64) {
     let severity = if cv > cv_critical {
         1.0
     } else if cv > cv_warning {
-        if cv_critical > cv_warning { (cv - cv_warning) / (cv_critical - cv_warning) } else { 0.5 }
+        if cv_critical > cv_warning {
+            (cv - cv_warning) / (cv_critical - cv_warning)
+        } else {
+            0.5
+        }
     } else {
         0.0
     };
@@ -624,10 +630,7 @@ pub fn recommend_damping(
 /// Returns (is_founder, severity_factor, optimal_wob_estimate)
 /// - severity: 0.0 = no founder, 1.0 = severe founder
 /// - optimal_wob_estimate: Estimated WOB where ROP was maximized (0 if not calculable)
-pub fn detect_founder(
-    wob_values: &[f64],
-    rop_values: &[f64],
-) -> (bool, f64, f64) {
+pub fn detect_founder(wob_values: &[f64], rop_values: &[f64]) -> (bool, f64, f64) {
     let cfg = crate::config::get();
 
     let min_samples = cfg.thresholds.founder.min_samples;
@@ -730,7 +733,8 @@ pub fn detect_founder_quick(
     }
 
     // Potential founder: WOB up > quick_wob_delta_percent but ROP not responding or decreasing
-    let is_potential = wob_delta_percent > cfg.thresholds.founder.quick_wob_delta_percent && rop_delta_percent <= 0.0;
+    let is_potential = wob_delta_percent > cfg.thresholds.founder.quick_wob_delta_percent
+        && rop_delta_percent <= 0.0;
 
     (is_potential, wob_delta_percent, rop_delta_percent)
 }
@@ -748,8 +752,8 @@ pub fn detect_founder_quick(
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum FormationChange {
     None,
-    HardStringer,  // MSE increase, d-exp increase
-    SoftStringer,  // MSE decrease, d-exp decrease
+    HardStringer,     // MSE increase, d-exp increase
+    SoftStringer,     // MSE decrease, d-exp decrease
     PressureIncrease, // d-exp decrease trend (abnormal pore pressure)
 }
 
@@ -956,13 +960,21 @@ pub fn strategic_drilling_analysis(history: &[HistoryEntry]) -> DrillingPhysicsR
     let rop_values: Vec<f64> = history.iter().map(|h| h.packet.rop).collect();
 
     // Calculate averages (filter non-finite values to prevent NaN propagation from bad sensor data)
-    let finite_mse: Vec<f64> = mse_values.iter().copied().filter(|v| v.is_finite()).collect();
+    let finite_mse: Vec<f64> = mse_values
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .collect();
     let avg_mse = if !finite_mse.is_empty() {
         finite_mse.iter().sum::<f64>() / finite_mse.len() as f64
     } else {
         0.0
     };
-    let finite_pit: Vec<f64> = pit_rate_values.iter().copied().filter(|v| v.is_finite()).collect();
+    let finite_pit: Vec<f64> = pit_rate_values
+        .iter()
+        .copied()
+        .filter(|v| v.is_finite())
+        .collect();
     let avg_pit_rate = if !finite_pit.is_empty() {
         finite_pit.iter().sum::<f64>() / finite_pit.len() as f64
     } else {
@@ -1075,7 +1087,10 @@ mod tests {
 
     fn ensure_config() {
         if !crate::config::is_initialized() {
-            crate::config::init(crate::config::WellConfig::default(), crate::config::ConfigProvenance::default());
+            crate::config::init(
+                crate::config::WellConfig::default(),
+                crate::config::ConfigProvenance::default(),
+            );
         }
     }
 
@@ -1090,7 +1105,11 @@ mod tests {
         // Expected rotary: (480 * 15 * 120) / (72.25 * 60) = 199.3 psi
         // Expected axial: (4 * 25000) / (π * 72.25) = 440.3 psi
         // Total: ~640 psi (very efficient drilling)
-        assert!(mse > 500.0 && mse < 800.0, "MSE should be ~640 psi, got {}", mse);
+        assert!(
+            mse > 500.0 && mse < 800.0,
+            "MSE should be ~640 psi, got {}",
+            mse
+        );
     }
 
     #[test]
@@ -1106,7 +1125,11 @@ mod tests {
         //                 = -1.204 / 1.451 = -0.83
         // The formula can produce negative values when ROP/(60*RPM) < 1
         // This is mathematically correct - just verify it returns a finite number
-        assert!(d_exp.is_finite(), "D-exponent should be finite, got {}", d_exp);
+        assert!(
+            d_exp.is_finite(),
+            "D-exponent should be finite, got {}",
+            d_exp
+        );
     }
 
     #[test]
@@ -1116,7 +1139,10 @@ mod tests {
         // Test kick detection with flow imbalance and pit gain
         let (is_kick, severity) = detect_kick(500.0, 525.0, 8.0, 150.0, 50.0);
 
-        assert!(is_kick, "Should detect kick with flow imbalance and gas increase");
+        assert!(
+            is_kick,
+            "Should detect kick with flow imbalance and gas increase"
+        );
         assert!(severity > 0.0, "Severity should be positive");
     }
 
@@ -1127,7 +1153,10 @@ mod tests {
         // Test loss detection
         let (is_loss, severity) = detect_lost_circulation(500.0, 475.0, -8.0, 150.0);
 
-        assert!(is_loss, "Should detect loss with flow imbalance and pit loss");
+        assert!(
+            is_loss,
+            "Should detect loss with flow imbalance and pit loss"
+        );
         assert!(severity > 0.0, "Severity should be positive");
     }
 
@@ -1149,7 +1178,10 @@ mod tests {
         let values = vec![1.0, 2.0, 3.0, 4.0, 5.0];
         let trend = calculate_trend(&values);
 
-        assert!((trend - 1.0).abs() < 0.01, "Trend should be ~1.0 for linear increase");
+        assert!(
+            (trend - 1.0).abs() < 0.01,
+            "Trend should be ~1.0 for linear increase"
+        );
     }
 
     #[test]
@@ -1221,10 +1253,19 @@ mod tests {
             .collect();
 
         let analysis = characterize_oscillation(&torques, 10).expect("Should produce analysis");
-        assert_eq!(analysis.oscillation_type, crate::types::OscillationType::StickSlip);
-        assert!(analysis.estimated_frequency_hz > 0.1 && analysis.estimated_frequency_hz < 0.5,
-            "Frequency should be ~0.2 Hz, got {:.3}", analysis.estimated_frequency_hz);
-        assert!(analysis.torque_cv > 0.05, "CV should be above negligible threshold");
+        assert_eq!(
+            analysis.oscillation_type,
+            crate::types::OscillationType::StickSlip
+        );
+        assert!(
+            analysis.estimated_frequency_hz > 0.1 && analysis.estimated_frequency_hz < 0.5,
+            "Frequency should be ~0.2 Hz, got {:.3}",
+            analysis.estimated_frequency_hz
+        );
+        assert!(
+            analysis.torque_cv > 0.05,
+            "CV should be above negligible threshold"
+        );
         assert!(analysis.amplitude_ratio > 0.0);
         assert_eq!(analysis.sample_count, 60);
     }
@@ -1235,7 +1276,10 @@ mod tests {
 
         let torques = vec![15.0, 14.0, 16.0]; // Only 3 samples
         let result = characterize_oscillation(&torques, 10);
-        assert!(result.is_none(), "Should return None with fewer than min_samples");
+        assert!(
+            result.is_none(),
+            "Should return None with fewer than min_samples"
+        );
     }
 
     #[test]
@@ -1245,7 +1289,10 @@ mod tests {
         // Constant torque → CV below 0.05 threshold
         let torques = vec![15.0; 30];
         let result = characterize_oscillation(&torques, 10);
-        assert!(result.is_none(), "Should return None for stable (constant) torque");
+        assert!(
+            result.is_none(),
+            "Should return None for stable (constant) torque"
+        );
     }
 
     #[test]
@@ -1286,11 +1333,17 @@ mod tests {
 
         // severity_factor = 0.8 → WOB base = 10 + 5*0.8 = 14%, RPM base = 5 + 5*0.8 = 9%
         assert!(rec.wob_change_pct < 0.0, "WOB should decrease");
-        assert!(rec.wob_change_pct.abs() > 10.0 && rec.wob_change_pct.abs() < 16.0,
-            "WOB reduction should be ~14%, got {:.1}%", rec.wob_change_pct.abs());
+        assert!(
+            rec.wob_change_pct.abs() > 10.0 && rec.wob_change_pct.abs() < 16.0,
+            "WOB reduction should be ~14%, got {:.1}%",
+            rec.wob_change_pct.abs()
+        );
         assert!(rec.rpm_change_pct > 0.0, "RPM should increase");
-        assert!(rec.rpm_change_pct > 5.0 && rec.rpm_change_pct < 12.0,
-            "RPM increase should be ~9%, got {:.1}%", rec.rpm_change_pct);
+        assert!(
+            rec.rpm_change_pct > 5.0 && rec.rpm_change_pct < 12.0,
+            "RPM increase should be ~9%, got {:.1}%",
+            rec.rpm_change_pct
+        );
         assert!(rec.recommended_wob < 25.0);
         assert!(rec.recommended_rpm > 120.0);
     }
@@ -1312,10 +1365,16 @@ mod tests {
         let rec = recommend_damping(&analysis, 25.0, 120.0, 10.0, 5.0)
             .expect("Should produce recommendation");
 
-        assert!(rec.wob_change_pct.abs() <= 10.1,
-            "WOB reduction should be capped at 10%, got {:.1}%", rec.wob_change_pct.abs());
-        assert!(rec.rpm_change_pct <= 5.1,
-            "RPM increase should be capped at 5%, got {:.1}%", rec.rpm_change_pct);
+        assert!(
+            rec.wob_change_pct.abs() <= 10.1,
+            "WOB reduction should be capped at 10%, got {:.1}%",
+            rec.wob_change_pct.abs()
+        );
+        assert!(
+            rec.rpm_change_pct <= 5.1,
+            "RPM increase should be capped at 5%, got {:.1}%",
+            rec.rpm_change_pct
+        );
     }
 
     #[test]
@@ -1332,7 +1391,10 @@ mod tests {
         };
 
         let result = recommend_damping(&analysis, 2.0, 120.0, 20.0, 20.0);
-        assert!(result.is_none(), "Should return None when WOB < 3.0 klbs (off bottom)");
+        assert!(
+            result.is_none(),
+            "Should return None when WOB < 3.0 klbs (off bottom)"
+        );
     }
 
     #[test]
@@ -1351,8 +1413,11 @@ mod tests {
         let rec = recommend_damping(&analysis, 25.0, 120.0, 20.0, 20.0)
             .expect("Should produce recommendation");
 
-        assert!(rec.rpm_change_pct.abs() < 0.01,
-            "TorsionalGeneral should hold RPM, got {:.2}% change", rec.rpm_change_pct);
+        assert!(
+            rec.rpm_change_pct.abs() < 0.01,
+            "TorsionalGeneral should hold RPM, got {:.2}% change",
+            rec.rpm_change_pct
+        );
         assert!(rec.wob_change_pct < 0.0, "Should still reduce WOB");
     }
 }

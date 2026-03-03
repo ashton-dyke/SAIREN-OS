@@ -13,11 +13,23 @@ pub const NUM_FEATURES: usize = 16;
 /// Features 8-15 are "supplementary" (1 sensory neuron each).
 pub const FEATURE_NAMES: [&str; NUM_FEATURES] = [
     // Primary (8 features × 2 sensory neurons = 16 neurons)
-    "wob", "rop", "rpm", "torque", "mse", "spp",
-    "d_exponent", "hookload",
+    "wob",
+    "rop",
+    "rpm",
+    "torque",
+    "mse",
+    "spp",
+    "d_exponent",
+    "hookload",
     // Supplementary (8 features × 1 sensory neuron = 8 neurons)
-    "ecd", "flow_balance", "pit_rate", "dxc",
-    "pump_spm", "mud_weight_in", "gas_units", "pit_volume",
+    "ecd",
+    "flow_balance",
+    "pit_rate",
+    "dxc",
+    "pump_spm",
+    "mud_weight_in",
+    "gas_units",
+    "pit_volume",
 ];
 
 /// Online normalizer using Welford's algorithm for numerically stable
@@ -53,10 +65,10 @@ impl OnlineNormalizer {
             let delta2 = x - self.mean[i];
             self.m2[i] += delta * delta2;
 
-            // Normalize: (x - mean) / std, with a floor on std
+            // Normalize: (x - mean) / std, with a relative floor on std
             if self.count >= 2 {
                 let variance = self.m2[i] / (n - 1.0);
-                let std = variance.sqrt().max(1e-8);
+                let std = variance.sqrt().max(self.mean[i].abs() * 1e-4 + 1e-8);
                 normalized[i] = (x - self.mean[i]) / std;
             }
             // For count < 2, normalized stays 0.0 (no meaningful stats yet)
@@ -74,7 +86,7 @@ impl OnlineNormalizer {
         let n = self.count as f64;
         for i in 0..NUM_FEATURES {
             let variance = self.m2[i] / (n - 1.0);
-            let std = variance.sqrt().max(1e-8);
+            let std = variance.sqrt().max(self.mean[i].abs() * 1e-4 + 1e-8);
             normalized[i] = (raw[i] - self.mean[i]) / std;
         }
         normalized
