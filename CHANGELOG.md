@@ -4,6 +4,73 @@ All notable changes to SAIREN-OS are documented here.
 
 ---
 
+## v6.0 - Stuck Pipe Specialist, Physics Modules & MSE Fix
+
+Fifth specialist, three new physics modules, and a critical MSE calculation bugfix.
+
+### Stuck Pipe Specialist — NEW
+
+- **5-indicator scoring** (`src/agents/specialists/stuck_pipe.rs`) — overpull, torque increase, SPP increase, ROP collapse, drag; each weighted and scored independently
+- **Sensor validity checks** — prevents NaN/negative faults from triggering false critical alerts
+- **Ensemble integration** — 15% baseline weight; regime multipliers: x1.3 (hydraulic-stress), x1.4 (high-wob), x0.8 (unstable)
+- Ensemble weights rebalanced: MSE 20%, Hydraulic 20%, WellControl 30%, Formation 15%, StuckPipe 15%
+
+### Bit Wear Tracking — NEW
+
+- **Depth-bucketed MSE normalization** (`src/optimization/bit_wear.rs`) — accumulates drilling footage in 100ft intervals
+- **Cumulative wear index** — tracks MSE trend relative to formation baseline; doubling MSE = high wear signal
+- Integrated into pipeline coordinator's advanced physics pass
+
+### Connection Gas Trending — NEW
+
+- **Drilling/connection state machine** (`src/physics_engine/connection_gas.rs`) — tracks gas deltas across drilling-connection-drilling cycles
+- **Trend slope via linear regression** — 5-event minimum threshold to avoid noise; positive trend may indicate rising pore pressure
+- Integrated into tactical agent analysis
+
+### Swab/Surge Pressure Estimation — NEW
+
+- **Burkhardt model** (`src/physics_engine/swab_surge.rs`) — annular velocity, friction pressure, clinging factor (0.45), EMW conversion
+- **Risk classification** — Safe/Warning/Critical based on margins to pore pressure and fracture gradient
+- API endpoint: `GET /api/v2/trip/swab-surge`
+
+### MSE Unit Conversion Bugfix
+
+- **Root cause**: Rotary MSE component missing x1000 conversion for torque (kft-lbs to ft-lbs) — values were ~1000x too low
+- **Effect**: MSE efficiency always clamped to 100%, MSE specialist voted Low on every packet, zero efficiency tickets generated
+- **Fix**: Added `torque * 1000.0` in `calculate_mse()`, matching the axial component's `wob * 1000.0` pattern
+- **Benchmark results after fix** (3 Volve wells):
+  - F-9A: avg_mse 323 → 19,363 psi, efficiency_events 0 → 8
+  - F-5: avg_mse 224 → 19,802 psi, efficiency_events 0 → 28
+  - F-12: avg_mse 550 → 218,572 psi, efficiency_events 0 → 20
+
+### Dashboard & API
+
+- **Formation context card** — bit wear indicator, proactive damping recipes, connection gas trends, upcoming formations
+- **5th specialist vote** (stuck_pipe) rendered in SpecialistVotes component
+- API endpoints: `GET /api/v2/formation/context`, `GET /api/v2/trip/swab-surge`
+
+### Configuration
+
+- Removed dead TOML fields (`operator`, `efficiency_optimal_percent`)
+- Added `ensemble_weights.stuck_pipe` to known config keys validation
+- Formation prognosis data file (`well_prognosis.toml`) with Volve formation tops, casing program, offset performance
+
+### Verification
+
+- `cargo test` — 945 tests pass, 0 failures
+- `cargo check` — clean (pre-existing warnings only)
+- Benchmark: all 3 Volve wells replayed with realistic MSE values and efficiency events firing
+
+---
+
+## v5.1 - Formation Context Card
+
+- **FormationCard component** (`dashboard/src/components/live/FormationCard.tsx`) — always-visible formation context replacing the twin projector view
+- Displays current formation, next boundary, bit wear status, proactive damping recipes, connection gas trends
+- Polls `GET /api/v2/formation/context` endpoint
+
+---
+
 ## v5.0 - P2P Mesh Architecture & Codebase Cleanup
 
 Replaces the hub-and-spoke fleet topology with a fully decentralized P2P mesh gossip protocol. Removes the LLM system, fleet hub, and federation infrastructure. Every Pi node is identical — no central server, no special roles, no single point of failure.

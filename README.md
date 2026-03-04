@@ -57,9 +57,10 @@ Or connect to a real WITS source:
 
 1. **Optimize drilling efficiency** - Detect MSE inefficiency and recommend WOB/RPM adjustments
 2. **Prevent well control events** - Early detection of kicks, losses, and gas influx
-3. **Predict mechanical issues** - Detect pack-offs, stick-slip, founder conditions, and tool failures before they occur
-4. **Track formation changes** - D-exponent trends for pore pressure monitoring
+3. **Predict mechanical issues** - Detect pack-offs, stick-slip, stuck pipe, founder conditions, and tool failures before they occur
+4. **Track formation changes** - D-exponent trends, connection gas trending for pore pressure monitoring
 5. **Detect founder conditions** - Identify when WOB exceeds optimal and ROP stops responding
+6. **Monitor trip safety** - Swab/surge pressure estimation during tripping operations
 
 **Think of it like**: An AI drilling engineer that never sleeps, continuously analyzing every parameter and providing actionable recommendations.
 
@@ -161,7 +162,7 @@ curl -X POST http://localhost:8080/api/v2/config \
 # Validate without applying
 curl -X POST http://localhost:8080/api/v2/config/validate \
   -H "Content-Type: application/json" \
-  -d '{"config": {"ensemble_weights": {"mse": 0.5, "hydraulic": 0.5, "well_control": 0.0, "formation": 0.0}}}'
+  -d '{"config": {"ensemble_weights": {"mse": 0.3, "hydraulic": 0.2, "well_control": 0.3, "formation": 0.1, "stuck_pipe": 0.1}}}'
 ```
 
 ### Environment Variables
@@ -324,10 +325,11 @@ ADVISORY #12: ELEVATED | Efficiency: 68%
 
    Expected Benefit: Potential 10-20% ROP improvement, reduced bit wear
 
-   MSE Specialist (25%): MEDIUM - MSE 52,000 psi exceeds optimal by 48%
-   Hydraulic (25%): LOW - Flow balance normal
+   MSE Specialist (20%): MEDIUM - MSE 52,000 psi exceeds optimal by 48%
+   Hydraulic (20%): LOW - Flow balance normal
    WellControl (30%): LOW - No kick/loss indicators
-   Formation (20%): LOW - D-exponent stable
+   Formation (15%): LOW - D-exponent stable
+   StuckPipe (15%): LOW - No stuck pipe indicators
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ```
 
@@ -439,6 +441,8 @@ The v2 API uses a consistent JSON envelope (`ApiResponse<T>`) for all responses.
 | `/api/v2/lookahead/status` | GET | Formation lookahead advisory status |
 | `/api/v2/damping/status` | GET | Stick-slip damping analysis + recommendation |
 | `/api/v2/damping/recipes` | GET | Per-formation damping recipe library |
+| `/api/v2/formation/context` | GET | Formation context with bit wear, connection gas trends |
+| `/api/v2/trip/swab-surge` | GET | Swab/surge pressure estimation for trip operations |
 | `/api/v2/debug/baseline` | GET | Baseline learning status |
 | `/api/v2/debug/ml/history` | GET | ML analysis history |
 | `/api/v2/metrics` | GET | Prometheus metrics |
@@ -635,7 +639,7 @@ fuser -k 8080/tcp
 
 SAIREN-OS uses a two-stage multi-agent architecture where a fast **Tactical Agent** handles real-time anomaly detection via deterministic pattern-matched routing, and a deeper **Strategic Agent** performs comprehensive drilling physics analysis only when anomalies are detected.
 
-The **Orchestrator** uses 4 trait-based specialists for domain-specific evaluation, returning a `VotingResult`. The **AdvisoryComposer** assembles the final advisory with a CRITICAL cooldown (30s) to prevent alert spam.
+The **Orchestrator** uses 5 trait-based specialists for domain-specific evaluation, returning a `VotingResult`. The **AdvisoryComposer** assembles the final advisory with a CRITICAL cooldown (30s) to prevent alert spam.
 
 ```
                               SAIREN-OS Multi-Agent Pipeline
@@ -661,7 +665,7 @@ The **Orchestrator** uses 4 trait-based specialists for domain-specific evaluati
                                                                 |            v
                                                                 |   +------------------+
                                                                 |   |   Orchestrator   |
-                                                                |   | 4 Specialists    |
+                                                                |   | 5 Specialists    |
                                                                 |   | (trait-based)    |
                                                                 |   +------------------+
                                                                 |            |
@@ -692,17 +696,18 @@ The **Orchestrator** uses 4 trait-based specialists for domain-specific evaluati
 | 5 | Advanced Physics | Strategic verification of tickets |
 | 6 | Context Lookup | Query knowledge store for precedents |
 | 7 | Template Advisory | Campaign-aware template recommendations with causal leads |
-| 8 | Orchestrator Voting | 4 specialists vote with regime-adjusted weights |
+| 8 | Orchestrator Voting | 5 specialists vote with regime-adjusted weights |
 | 9 | Advisory Composition | Assemble final advisory (CRITICAL cooldown) |
 
 ### Specialist Weights
 
 | Specialist | Baseline Weight | Evaluates |
 |------------|-----------------|-----------|
-| **MSE** | 25% | Drilling efficiency, ROP optimization |
-| **Hydraulic** | 25% | SPP, ECD margin, flow rates |
+| **MSE** | 20% | Drilling efficiency, ROP optimization |
+| **Hydraulic** | 20% | SPP, ECD margin, flow rates |
 | **WellControl** | 30% | Kick/loss indicators, gas, pit volume |
-| **Formation** | 20% | D-exponent trends, formation changes |
+| **Formation** | 15% | D-exponent trends, formation changes |
+| **StuckPipe** | 15% | Overpull, torque, SPP, ROP collapse, drag |
 
 > **Regime adjustment**: The CfC k-means clusterer stamps a regime (0-3) on each packet. The orchestrator applies regime-specific multipliers to these weights and re-normalizes before voting. See the regime multiplier table in [ARCHITECTURE.md](ARCHITECTURE.md#regime-aware-orchestrator-weighting).
 
@@ -726,6 +731,9 @@ For full CfC architecture, training details, and validation results, see [ARCHIT
 - **ML Engine (V2.2)** — hourly analysis finds optimal drilling conditions using dysfunction-aware optimization
 - **Structured Knowledge Base** — per-well directory-based KB with geology, engineering, and offset well performance data
 - **Causal Inference** — detects which parameters causally precede MSE spikes using cross-correlation at lags 1-20s
+- **Connection Gas Trending** — state machine tracking gas deltas across drilling/connection cycles for pore pressure monitoring
+- **Swab/Surge Estimation** — Burkhardt model pressure estimation during trip operations with safety margin classification
+- **Bit Wear Tracking** — depth-bucketed MSE normalization for cumulative bit wear monitoring
 - **P2P Mesh Gossip** — decentralized event sharing between Pi nodes via gossip protocol with SQLite event store
 
 For implementation details on all systems, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -748,6 +756,9 @@ For implementation details on all systems, see [ARCHITECTURE.md](ARCHITECTURE.md
 | **Lost Circulation** | Mud loss into formation |
 | **Pack-off** | Restriction from cuttings buildup; signs: rising torque + SPP |
 | **Stick-slip** | Torsional oscillation; torque fluctuates cyclically |
+| **Stuck Pipe** | Drill string unable to move freely; detected via overpull, torque, SPP, ROP collapse |
+| **Swab/Surge** | Pressure fluctuation from tripping pipe; swab reduces, surge increases bottomhole pressure |
+| **Connection Gas** | Gas influx during connections; trending increase may indicate rising pore pressure |
 | **Founder** | Condition where WOB exceeds optimal and ROP stops responding |
 | **Flow Balance** | flow_out - flow_in (gpm); positive = potential kick |
 | **Pit Volume** | Mud volume in surface pits (bbl) |
@@ -765,7 +776,7 @@ For developer/ML terms (CfC, NCP, BPTT, ACI, RegimeProfile, etc.), see [ARCHITEC
 
 See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 
-Current version: v5.0
+Current version: v6.0
 
 ---
 

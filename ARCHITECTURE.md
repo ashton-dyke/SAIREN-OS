@@ -77,7 +77,7 @@ The **Orchestrator** uses trait-based `Specialist` implementations for domain-sp
                                                                 |            v
                                                                 |   +------------------+
                                                                 |   |   Orchestrator   |
-                                                                |   | 4 Specialists    |
+                                                                |   | 5 Specialists    |
                                                                 |   | (trait-based)    |
                                                                 |   +------------------+
                                                                 |            |
@@ -109,7 +109,7 @@ The **Orchestrator** uses trait-based `Specialist` implementations for domain-sp
 | 5 | Advanced Physics | Strategic verification of tickets (CfC tiebreaker on Uncertain) |
 | 6 | Context Lookup | Query KnowledgeStore (StaticKnowledgeBase, RAMRecall, or NoOp) |
 | 7 | Template Advisory | Campaign-aware template recommendations with causal leads appended |
-| 8 | Orchestrator Voting | 4 trait-based specialists vote with regime-adjusted weights -> VotingResult |
+| 8 | Orchestrator Voting | 5 trait-based specialists vote with regime-adjusted weights -> VotingResult |
 | 9 | Advisory Composition | AdvisoryComposer assembles StrategicAdvisory (CRITICAL cooldown) |
 
 ### Phase 3 Ticket Gate (6 Rules)
@@ -294,12 +294,12 @@ Specialist voting weights are dynamically adjusted based on the current drilling
 
 ### Regime Multiplier Table
 
-| Regime | Label | MSE mult | Hydraulic mult | WellControl mult | Formation mult |
-|--------|-------|----------|----------------|------------------|----------------|
-| 0 | baseline | x1.0 | x1.0 | x1.0 | x1.0 |
-| 1 | hydraulic-stress | x0.8 | x1.4 | x1.0 | x0.8 |
-| 2 | high-wob | x1.4 | x0.8 | x0.9 | x1.1 |
-| 3 | unstable | x0.7 | x1.0 | x1.5 | x0.8 |
+| Regime | Label | MSE mult | Hydraulic mult | WellControl mult | Formation mult | StuckPipe mult |
+|--------|-------|----------|----------------|------------------|----------------|----------------|
+| 0 | baseline | x1.0 | x1.0 | x1.0 | x1.0 | x1.0 |
+| 1 | hydraulic-stress | x0.8 | x1.4 | x1.0 | x0.8 | x1.3 |
+| 2 | high-wob | x1.4 | x0.8 | x0.9 | x1.1 | x1.4 |
+| 3 | unstable | x0.7 | x1.0 | x1.5 | x0.8 | x0.8 |
 
 Multipliers are applied on top of `[ensemble_weights]` from `well_config.toml`, then re-normalised so the total always sums to 1.0. Advisory reasoning includes the active regime label (e.g., `[regime 1:hydraulic-stress]`). The WellControl CRITICAL severity override is applied after re-normalisation and is unaffected by regime weighting.
 
@@ -437,7 +437,7 @@ Core system boundaries are abstracted behind traits for swappable backends, test
 | Trait | Module | Implementations | Purpose |
 |-------|--------|-----------------|---------|
 | **KnowledgeStore** | `context/knowledge_store.rs` | `StaticKnowledgeBase`, `NoOpStore`, `RAMRecall` | Precedent lookup for fleet memory |
-| **Specialist** | `agents/specialists/mod.rs` | `MseSpecialist`, `HydraulicSpecialist`, `WellControlSpecialist`, `FormationSpecialist` | Domain-specific risk evaluation |
+| **Specialist** | `agents/specialists/mod.rs` | `MseSpecialist`, `HydraulicSpecialist`, `WellControlSpecialist`, `FormationSpecialist`, `StuckPipeSpecialist` | Domain-specific risk evaluation |
 | **HealthCheck** | `background/self_healer.rs` | `WitsHealthCheck`, `DiskHealthCheck` | Background health monitoring |
 | **PersistenceLayer** | `storage/persistence.rs` | `InMemoryDAL` | Advisory and ML report storage |
 
@@ -566,6 +566,7 @@ src/
       hydraulic.rs     # ECD margin, SPP deviation evaluation
       well_control.rs  # Flow imbalance, pit rate, CRITICAL override
       formation.rs     # D-exponent trends, formation hardness
+      stuck_pipe.rs    # 5-indicator stuck pipe scoring (overpull, torque, SPP, ROP collapse, drag)
 
   strategic/
     mod.rs             # Strategic analysis module
@@ -614,6 +615,8 @@ src/
     drilling_models.rs # MSE, d-exponent, kick/loss/founder detection
     metrics.rs         # Metric calculations
     models.rs          # Physics models
+    connection_gas.rs  # Connection gas trending: drilling/connection state machine, trend slope via linear regression
+    swab_surge.rs      # Swab/surge pressure estimation (Burkhardt model), EMW conversion, risk classification
 
   context/
     mod.rs             # Knowledge base module
@@ -628,6 +631,7 @@ src/
     look_ahead.rs      # LookAheadAdvisory: pre-emptive advice for upcoming formations
     rate_limiter.rs    # Advisory rate limiting (cooldown between optimization advisories)
     templates.rs       # Human-readable recommendation text generation
+    bit_wear.rs        # Bit wear tracker: depth-bucketed MSE normalization, cumulative wear index
 
   knowledge_base/        # Structured per-well knowledge base
     mod.rs             # KnowledgeBase struct, init, hot-reload prognosis
@@ -743,6 +747,7 @@ scripts/
   witsml_to_csv.py       # WITSML 1.4.1 XML -> Kaggle CSV converter (extracts from Volve zip)
 
 well_config.default.toml  # Reference configuration with all thresholds documented
+well_prognosis.toml       # Formation prognosis data (formation tops, casing program, offset performance)
 ```
 
 ---
